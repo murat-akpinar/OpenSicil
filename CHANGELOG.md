@@ -41,4 +41,5 @@
 - Bağlantı hatası deneme tüketmez, erişilemeyen hedefin işleri bekletilir (ADR-052)
 - Connector yazmaları tek noktadan geçer, kuru çalıştırma modu (ADR-054)
 - AD connector okuma yolu ve katalog (LDAPS, yasaklı gruplar, lab seed)
+- AD açılış kontrolleri: kapsam DN çözümü ve msDS-LogonTimeSyncInterval (ADR-060)
 

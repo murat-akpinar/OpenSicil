@@ -428,9 +428,56 @@ async fn nested_members_of(
 
 const GROUP_ATTRS: [&str; 4] = ["cn", "objectGUID", "objectSid", "adminCount"];
 
-pub async fn read_catalog(ldap: &mut Ldap, scope: &ManagedScope) -> Result<Snapshot, WriteError> {
+// ADR-060: domain kokundeki msDS-LogonTimeSyncInterval 0 ise lastLogonTimestamp
+// hic yazilmaz; "hic giris yapilmamis hesap" kontrolu (ilk parola, kayit iptali)
+// kor kalir. Bos ya da 1 ve ustu: acik.
+pub fn logon_timestamp_enabled(value: Option<&str>) -> bool {
+    value.is_none_or(|v| v.trim() != "0")
+}
+
+#[derive(Debug, Clone)]
+pub struct StartupChecks {
+    pub base_dn: String,
+    /// Kapsam OU'lari GUID'e cozulmus halde (docs/05: yeniden adlandirma kapsami bozmaz)
+    pub ous: Vec<DirectoryOu>,
+}
+
+// docs/05 acilis kontrolleri: kapsam DN'leri GUID'e cozulur (cozulemezse
+// connector baslamaz), msDS-LogonTimeSyncInterval okunur (ADR-060). DC'ye
+// ulasilamiyorsa Unreachable doner; cagiran bekler, surec cikmaz (ADR-061).
+pub async fn startup_checks(
+    ldap: &mut Ldap,
+    scope: &ManagedScope,
+) -> Result<StartupChecks, WriteError> {
     let base = base_dn(ldap).await?;
+    let root = search(
+        ldap,
+        &base,
+        Scope::Base,
+        "(objectClass=*)",
+        &["msDS-LogonTimeSyncInterval"],
+    )
+    .await?;
+    let interval = root
+        .first()
+        .and_then(|e| text_attr(e, "msDS-LogonTimeSyncInterval"));
+    if !logon_timestamp_enabled(interval.as_deref()) {
+        return Err(WriteError::Failed(
+            "msDS-LogonTimeSyncInterval = 0: lastLogonTimestamp kapalı, AD connector'ı başlamıyor (ADR-060)"
+                .to_string(),
+        ));
+    }
     let ous = resolve_ous(ldap, scope).await?;
+    Ok(StartupChecks { base_dn: base, ous })
+}
+
+pub async fn read_catalog(
+    ldap: &mut Ldap,
+    scope: &ManagedScope,
+    checks: &StartupChecks,
+) -> Result<Snapshot, WriteError> {
+    let base = checks.base_dn.clone();
+    let ous = checks.ous.clone();
     let all_groups: Vec<DirectoryGroup> = search(
         ldap,
         &base,
@@ -499,6 +546,17 @@ mod tests {
         assert!(!is_well_known_forbidden("S-1-5-21-1-2-3-1105"));
         assert!(!is_well_known_forbidden("S-1-5-21-1-2-3-51200"));
         assert_eq!(sid_to_string(&raw[..10]), None);
+    }
+
+    #[test]
+    fn logon_timestamp_is_enabled_unless_interval_is_zero() {
+        assert!(
+            logon_timestamp_enabled(None),
+            "öznitelik yoksa varsayılan 14 gün"
+        );
+        assert!(logon_timestamp_enabled(Some("14")));
+        assert!(!logon_timestamp_enabled(Some("0")));
+        assert!(!logon_timestamp_enabled(Some(" 0 ")));
     }
 
     #[test]
@@ -572,7 +630,22 @@ mod tests {
             group_ous: vec!["OU=Gruplar,DC=opensicil,DC=lab".to_string()],
         };
         let mut ldap = connect(&cfg).await.expect("lab AD'ye bağlanılamadı");
-        let snapshot = read_catalog(&mut ldap, &scope)
+        let checks = startup_checks(&mut ldap, &scope)
+            .await
+            .expect("açılış kontrolleri geçmeli");
+        assert_eq!(checks.base_dn, "DC=opensicil,DC=lab");
+        let missing_ou = ManagedScope {
+            group_ous: vec!["OU=Yok,DC=opensicil,DC=lab".to_string()],
+            ..scope.clone()
+        };
+        assert!(
+            matches!(
+                startup_checks(&mut ldap, &missing_ou).await,
+                Err(WriteError::Failed(_))
+            ),
+            "çözülemeyen kapsam DN'i connector'ı başlatmaz"
+        );
+        let snapshot = read_catalog(&mut ldap, &scope, &checks)
             .await
             .expect("katalog okunamadı");
         let names = |v: &[DirectoryGroup]| v.iter().map(|g| g.name.clone()).collect::<Vec<_>>();

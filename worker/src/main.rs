@@ -122,7 +122,11 @@ async fn refresh_catalog_at_startup(pool: &PgPool, env: &Env) {
     let outcome = async {
         let target = target.map_err(|e| format!("hedef sistem okunamadı: {e}"))?;
         let mut ldap = ad::connect(&cfg).await.map_err(|e| e.to_string())?;
-        let snapshot = ad::read_catalog(&mut ldap, &scope)
+        // docs/05 acilis kontrolleri (kapsam DN → GUID, ADR-060); gecmezse AD connector'i baslamaz
+        let checks = ad::startup_checks(&mut ldap, &scope)
+            .await
+            .map_err(|e| e.to_string())?;
+        let snapshot = ad::read_catalog(&mut ldap, &scope, &checks)
             .await
             .map_err(|e| e.to_string())?;
         ldap.unbind().await.ok();
