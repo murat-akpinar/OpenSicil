@@ -1,5 +1,8 @@
 mod common_settings;
 mod db;
+// 3a motoru tuketene kadar yalnizca testler cagirir (ADR-038); backend kopyasiyla birebir ayni.
+#[allow(dead_code)]
+mod desired_state;
 mod heartbeat;
 
 use std::process::ExitCode;

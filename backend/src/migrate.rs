@@ -88,8 +88,8 @@ GRANT INSERT ({identity_operator_cols}), UPDATE ({identity_operator_cols}) ON id
 GRANT UPDATE (username, email, upn, given_name, surname, employee_number, mobile_phone, \
 national_id_enc, national_id_bidx, national_id_country, deleted_at) ON identities TO {worker};
 GRANT SELECT ON target_systems, catalog_items TO {backend}, {worker};
-GRANT UPDATE (account_enabled_default, default_container_item_id, retention_days, \
-delete_requires_approval) ON target_systems TO {backend};
+GRANT UPDATE (provision_account_default, default_container_item_id, retention_days, \
+delete_requires_approval, password_reset_delay_days) ON target_systems TO {backend};
 GRANT INSERT, UPDATE ON catalog_items TO {worker};
 GRANT SELECT, INSERT, UPDATE, DELETE ON role_entitlements, department_entitlements, \
 role_target_settings, department_target_settings TO {backend};
@@ -100,7 +100,7 @@ department_target_settings TO {worker};
 const IDENTITY_OPERATOR_COLUMNS: &str = "given_name, surname, employee_number, mobile_phone, \
 existing_ad_account_hint, existing_zimbra_account_hint, department_id, primary_role_id, \
 manager_id, handover_manager_id, employment_type, start_date, end_at, suspension_start, \
-suspension_end, cancelled, national_id_enc, national_id_bidx, national_id_country";
+suspension_end, cancelled, emergency_departure, national_id_enc, national_id_bidx, national_id_country";
 
 async fn grant_service_privileges(
     pool: &PgPool,

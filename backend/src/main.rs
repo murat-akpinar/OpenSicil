@@ -5,6 +5,9 @@ mod common_settings;
 mod cookie;
 mod crypto;
 mod db;
+// 3a motoru ve 3f onizlemesi tuketene kadar yalnizca durum turetme kullanilir (ADR-038).
+#[allow(dead_code)]
+mod desired_state;
 mod health;
 mod logging;
 mod migrate;
@@ -68,6 +71,20 @@ mod tests {
         match parse_command(Some("bogus")) {
             Command::Unknown(name) => assert_eq!(name, "bogus"),
             _ => panic!("beklenmeyen komut türü"),
+        }
+    }
+
+    // ADR-070: paylasilan crate yok, iki crate'te birebir ayni dosyalar var.
+    // Docker build context'inde worker dizini yoktur; orada test atlanir.
+    #[test]
+    fn twin_modules_match_worker_copies() {
+        for name in ["common_settings.rs", "desired_state.rs"] {
+            let mine =
+                std::fs::read_to_string(format!("src/{name}")).expect("kendi kopyası okunamadı");
+            let Ok(theirs) = std::fs::read_to_string(format!("../worker/src/{name}")) else {
+                return;
+            };
+            assert_eq!(mine, theirs, "{name}: backend ve worker kopyaları ayrıştı");
         }
     }
 }

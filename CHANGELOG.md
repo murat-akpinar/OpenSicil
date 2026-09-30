@@ -34,4 +34,5 @@
 - Denetim kaydı alanları ve worker işlem türleri
 - Kimlik numarası AEAD ve blind index ile şifrelenir
 - Ortak ayarlar iki serviste de .env'den okunur (ADR-039)
+- Olması gereken durum fonksiyonu saf modül olarak (ADR-038)
 

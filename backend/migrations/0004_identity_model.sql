@@ -54,6 +54,8 @@ CREATE TABLE identities (
     suspension_start DATE,
     suspension_end DATE,
     cancelled BOOLEAN NOT NULL DEFAULT FALSE,
+    -- Acil ayrilis: parola hemen sifirlanir, is oncelikli ve kotali (ADR-016, 033)
+    emergency_departure BOOLEAN NOT NULL DEFAULT FALSE,
     deleted_at TIMESTAMPTZ,
     username TEXT UNIQUE,
     email TEXT UNIQUE,
@@ -65,8 +67,9 @@ CREATE TABLE identities (
     CHECK (employment_type = 'permanent' OR end_at IS NOT NULL),
     CHECK (suspension_end IS NULL OR suspension_start IS NOT NULL),
     CHECK (suspension_end IS NULL OR suspension_end >= suspension_start),
-    -- Kayit iptali = iptal isareti + bitis ani simdi (ADR-038)
-    CHECK (NOT cancelled OR end_at IS NOT NULL)
+    -- Kayit iptali = iptal isareti + bitis ani simdi (ADR-038); acil ayrilis da bitis ister
+    CHECK (NOT cancelled OR end_at IS NOT NULL),
+    CHECK (NOT emergency_departure OR end_at IS NOT NULL)
 );
 
 CREATE INDEX identities_department_id_idx ON identities (department_id);

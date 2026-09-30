@@ -8,9 +8,11 @@ CREATE TABLE target_systems (
     kind TEXT NOT NULL CHECK (kind IN ('ad', 'zimbra')),
     name TEXT NOT NULL UNIQUE,
     -- "hesap acilsin mi" varsayilani; yalnizca hesap yokken okunur (ADR-040)
-    account_enabled_default BOOLEAN NOT NULL DEFAULT TRUE,
+    provision_account_default BOOLEAN NOT NULL DEFAULT TRUE,
     retention_days INTEGER NOT NULL DEFAULT 90 CHECK (retention_days >= 0),
-    delete_requires_approval BOOLEAN NOT NULL
+    delete_requires_approval BOOLEAN NOT NULL,
+    -- Ayrilista parola G gun sonra rastgelelestirilir; 0 = hemen (ADR-033)
+    password_reset_delay_days INTEGER NOT NULL DEFAULT 7 CHECK (password_reset_delay_days >= 0)
 );
 
 INSERT INTO target_systems (kind, name, delete_requires_approval)
@@ -76,7 +78,7 @@ CREATE TABLE role_target_settings (
     role_id BIGINT NOT NULL,
     role_kind TEXT NOT NULL GENERATED ALWAYS AS ('primary') STORED,
     target_system_id BIGINT NOT NULL REFERENCES target_systems (id),
-    account_enabled BOOLEAN,
+    provision_account BOOLEAN,
     container_item_id BIGINT,
     container_is_container BOOLEAN NOT NULL GENERATED ALWAYS AS (TRUE) STORED,
     email_domain TEXT,
@@ -90,7 +92,7 @@ CREATE TABLE role_target_settings (
 CREATE TABLE department_target_settings (
     department_id BIGINT NOT NULL REFERENCES departments (id),
     target_system_id BIGINT NOT NULL REFERENCES target_systems (id),
-    account_enabled BOOLEAN,
+    provision_account BOOLEAN,
     container_item_id BIGINT,
     container_is_container BOOLEAN NOT NULL GENERATED ALWAYS AS (TRUE) STORED,
     email_domain TEXT,

@@ -1,8 +1,8 @@
 // Ortak ayarlar (ADR-039): backend ve worker ayni .env degiskenlerini okur;
 // etkin ayar tablosu yoktur, yetkili worker'dir, backend yalnizca ayni degeri
-// onceden gosterir. Bu dosya backend/src/common_settings.rs ile birebir aynidir
-// (ADR-070: bagimsiz crate'ler, paylasilan crate yok) — birini degistiren
-// digerini de degistirir.
+// onceden gosterir. backend/src/common_settings.rs ve worker/src/common_settings.rs
+// birebir aynidir (ADR-070: bagimsiz crate'ler, paylasilan crate yok) — birini
+// degistiren digerini de degistirir; backend main.rs testi ikisini karsilastirir.
 
 use std::fmt;
 
