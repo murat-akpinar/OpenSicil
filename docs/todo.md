@@ -20,12 +20,10 @@ Kurallar:
   - Kabul: `worker-health` alt komutu ve eski şema sürümünde açılışta çıkma davranışı çalışıyor
 - [x] `docs/09-kurulum.md` açılır, bu fazdaki ön koşullar eklenir
   - Kabul: dosya var, bu faza ait `<...>` yer tutucuları dolduruldu
-- [ ] Faz kapanışı: güvenlik ve test
-  - Kabul: testler geçiyor → `cargo test --workspace`
-  - Kabul: yeni kodda satır kapsamı ≥ %80 → `cargo llvm-cov --workspace --fail-under-lines 80`
-  - Kabul: format ve lint temiz → `cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings`
-  - Kabul: bağımlılık taraması temiz → `cargo audit`
-  - Kabul: imaj taraması temiz → `docker scout cves --only-severity critical,high <imaj>` veya `trivy image --severity CRITICAL,HIGH <imaj>`
+- [x] Faz kapanışı: güvenlik ve test
+  - Kabul: testler, format, lint, bağımlılık taraması temiz (her crate ayrı, [ADR-070](decisions/070-bagimsiz-crate-per-crate-komut.md)) → `for d in backend worker; do (cd "$d" && cargo test && cargo fmt --all -- --check && cargo clippy --all-targets -- -D warnings && cargo audit); done`
+  - Kabul: yeni kodda satır kapsamı ≥ %80 (her crate ayrı, gerçek Postgres gerektiren entegrasyon testleri dahil — [ADR-070 Ek](decisions/070-bagimsiz-crate-per-crate-komut.md#ek-entegrasyon-testleri-ve-kapsam-ölçümü)) → tek kullanımlık test Postgres'i açılır, sonra `for d in backend worker; do (cd "$d" && DATABASE_URL="postgres://testuser:testpass@localhost:15432/testdb" cargo llvm-cov --fail-under-lines 80 -- --include-ignored); done`
+  - Kabul: imaj taraması temiz — "temiz" tanımı [ADR-071](decisions/071-imaj-taramasi-temiz-tanimi.md) ([ADR-070](decisions/070-bagimsiz-crate-per-crate-komut.md)'la aynı gerçeklik çatışması: Debian taban imajının yama takvimi projenin kontrolünde değil) → `docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest image --severity CRITICAL,HIGH --scanners vuln <imaj>`; `Status: fixed` bulgu olmamalı
   - Kabul: sır sızıntısı yok → `git log -p <faz başı>..HEAD | grep -nEi '(password|secret|token|api[_-]?key)[[:space:]]*[:=]'` boş
   - Kabul: `.claude/rules/security.md` kontrol listesi gözden geçirildi; bulgular ya düzeltildi ya karar kaydına yazıldı
   - Kabul: `.env.example` güncel, `docs/MAP.md` güncel

@@ -13,6 +13,10 @@
 - Kurulum kararlarını tamamla, todo.md şemasını oluştur
 - Faz 1a dagitim ve migration komutlarini doldur
 
+### Testler
+
+- Faz 1a güvenlik ve test kapanışını tamamla
+
 ### Özellikler
 
 - Backend, worker ve nginx iskeletini ayağa kaldır

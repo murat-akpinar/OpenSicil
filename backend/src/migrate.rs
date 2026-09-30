@@ -3,13 +3,16 @@ use std::process::ExitCode;
 
 use sqlx::PgPool;
 
+// Eksik ortam degiskeninde None doner, hicbir sey yazmaz; cagiran kendi
+// baglamiyla mesaji kendi basar (run()'un uzunlugunu duz tutar, security.md ≤50 satir).
+fn require_env(name: &str) -> Option<String> {
+    std::env::var(name).ok()
+}
+
 pub async fn run() -> ExitCode {
-    let database_url = match std::env::var("DATABASE_URL") {
-        Ok(v) => v,
-        Err(_) => {
-            eprintln!("migrate: DATABASE_URL ortam değişkeni eksik");
-            return ExitCode::FAILURE;
-        }
+    let Some(database_url) = require_env("DATABASE_URL") else {
+        eprintln!("migrate: ortam değişkeni eksik: DATABASE_URL");
+        return ExitCode::FAILURE;
     };
 
     let pool = match crate::db::connect_pool(&database_url).await {
@@ -20,14 +23,9 @@ pub async fn run() -> ExitCode {
         }
     };
 
-    for (user_var, pass_var) in [
-        ("POSTGRES_BACKEND_USER", "POSTGRES_BACKEND_PASSWORD"),
-        ("POSTGRES_WORKER_USER", "POSTGRES_WORKER_PASSWORD"),
-    ] {
-        if let Err(e) = ensure_role(&pool, user_var, pass_var).await {
-            eprintln!("migrate: rol hazırlanamadı ({user_var}): {e}");
-            return ExitCode::FAILURE;
-        }
+    if let Err(e) = prepare_roles(&pool).await {
+        eprintln!("{e}");
+        return ExitCode::FAILURE;
     }
 
     let migrator = match sqlx::migrate::Migrator::new(Path::new("./migrations")).await {
@@ -45,7 +43,13 @@ pub async fn run() -> ExitCode {
     // backend ve worker acilista _sqlx_migrations'a bakarak semanin hazir
     // olup olmadigini kontrol eder (ADR-061 madde 3, crate::db::check_schema_ready)
     for user_var in ["POSTGRES_BACKEND_USER", "POSTGRES_WORKER_USER"] {
-        if let Err(e) = grant_migrations_read(&pool, user_var).await {
+        let Some(user) = require_env(user_var) else {
+            eprintln!(
+                "migrate: migration tablosu izni verilemedi: ortam değişkeni eksik: {user_var}"
+            );
+            return ExitCode::FAILURE;
+        };
+        if let Err(e) = grant_migrations_read(&pool, &user).await {
             eprintln!("migrate: migration tablosu izni verilemedi ({user_var}): {e}");
             return ExitCode::FAILURE;
         }
@@ -55,9 +59,30 @@ pub async fn run() -> ExitCode {
     ExitCode::SUCCESS
 }
 
+async fn prepare_roles(pool: &PgPool) -> Result<(), String> {
+    for (user_var, pass_var) in [
+        ("POSTGRES_BACKEND_USER", "POSTGRES_BACKEND_PASSWORD"),
+        ("POSTGRES_WORKER_USER", "POSTGRES_WORKER_PASSWORD"),
+    ] {
+        let Some(user) = require_env(user_var) else {
+            return Err(format!(
+                "migrate: rol hazırlanamadı: ortam değişkeni eksik: {user_var}"
+            ));
+        };
+        let Some(pass) = require_env(pass_var) else {
+            return Err(format!(
+                "migrate: rol hazırlanamadı: ortam değişkeni eksik: {pass_var}"
+            ));
+        };
+        ensure_role(pool, &user, &pass)
+            .await
+            .map_err(|e| format!("migrate: rol hazırlanamadı ({user_var}): {e}"))?;
+    }
+    Ok(())
+}
+
 #[derive(Debug)]
 enum RoleError {
-    MissingEnv(String),
     InvalidUsername(String),
     Db(sqlx::Error),
 }
@@ -65,7 +90,6 @@ enum RoleError {
 impl std::fmt::Display for RoleError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RoleError::MissingEnv(name) => write!(f, "ortam değişkeni eksik: {name}"),
             RoleError::InvalidUsername(name) => write!(f, "geçersiz kullanıcı adı: {name}"),
             RoleError::Db(e) => write!(f, "veritabanı hatası: {e}"),
         }
@@ -88,10 +112,8 @@ fn validate_role_name(name: &str) -> Result<(), RoleError> {
     }
 }
 
-async fn ensure_role(pool: &PgPool, user_var: &str, pass_var: &str) -> Result<(), RoleError> {
-    let user = std::env::var(user_var).map_err(|_| RoleError::MissingEnv(user_var.to_string()))?;
-    let pass = std::env::var(pass_var).map_err(|_| RoleError::MissingEnv(pass_var.to_string()))?;
-    validate_role_name(&user)?;
+async fn ensure_role(pool: &PgPool, user: &str, pass: &str) -> Result<(), RoleError> {
+    validate_role_name(user)?;
     let escaped_pass = pass.replace('\'', "''");
 
     let stmt = format!(
@@ -119,9 +141,8 @@ async fn ensure_role(pool: &PgPool, user_var: &str, pass_var: &str) -> Result<()
     Ok(())
 }
 
-async fn grant_migrations_read(pool: &PgPool, user_var: &str) -> Result<(), RoleError> {
-    let user = std::env::var(user_var).map_err(|_| RoleError::MissingEnv(user_var.to_string()))?;
-    validate_role_name(&user)?;
+async fn grant_migrations_read(pool: &PgPool, user: &str) -> Result<(), RoleError> {
+    validate_role_name(user)?;
 
     // Denetlendi: kullanici adi validate_role_name ile sinirlandi, bind parametresi
     // GRANT'te desteklenmez (ensure_role'daki gibi).
@@ -155,5 +176,133 @@ mod tests {
     #[test]
     fn rejects_empty_name() {
         assert!(validate_role_name("").is_err());
+    }
+
+    fn lazy_unreachable_pool() -> PgPool {
+        sqlx::postgres::PgPoolOptions::new()
+            .max_connections(1)
+            .connect_lazy("postgres://x:x@127.0.0.1:1/x")
+            .expect("lazy pool kurulamadı")
+    }
+
+    #[tokio::test]
+    async fn ensure_role_rejects_invalid_username_before_querying() {
+        let pool = lazy_unreachable_pool();
+        let result = ensure_role(&pool, "1invalid", "pw").await;
+        assert!(matches!(result, Err(RoleError::InvalidUsername(_))));
+    }
+
+    #[tokio::test]
+    async fn grant_migrations_read_rejects_invalid_username_before_querying() {
+        let pool = lazy_unreachable_pool();
+        let result = grant_migrations_read(&pool, "1invalid").await;
+        assert!(matches!(result, Err(RoleError::InvalidUsername(_))));
+    }
+
+    // testdb'yi paylasan diger entegrasyon testleriyle (run_succeeds_end_to_end)
+    // _sqlx_migrations semasi cakismasin diye kendi gecici veritabanini kurar.
+    async fn fresh_test_db(admin_pool: &PgPool, admin_url: &str) -> (PgPool, String) {
+        let db_name = format!(
+            "opensicil_test_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        sqlx::query(sqlx::AssertSqlSafe(format!("CREATE DATABASE {db_name}")))
+            .execute(admin_pool)
+            .await
+            .expect("test veritabanı oluşturulamadı");
+        let base = admin_url
+            .rsplit_once('/')
+            .map(|(head, _)| head)
+            .unwrap_or(admin_url);
+        let pool = crate::db::connect_pool(&format!("{base}/{db_name}"))
+            .await
+            .expect("test pool kurulamadı");
+        (pool, db_name)
+    }
+
+    // Gercek Postgres gerektirir (ADR-070): DATABASE_URL, testler icin
+    // ayrilmis bir veritabanina isaret etmeli (proje .env'i degil).
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn ensure_role_creates_then_alters_and_grants_migrations_read() {
+        let database_url =
+            std::env::var("DATABASE_URL").expect("DATABASE_URL testler için ayarlanmalı");
+        let admin_pool = crate::db::connect_pool(&database_url)
+            .await
+            .expect("admin pool kurulamadı");
+        let (pool, db_name) = fresh_test_db(&admin_pool, &database_url).await;
+
+        let role = format!("opensicil_test_role_{}", std::process::id());
+        let cleanup = || async {
+            let _ = sqlx::query(sqlx::AssertSqlSafe(format!("DROP ROLE IF EXISTS {role}")))
+                .execute(&pool)
+                .await;
+        };
+        cleanup().await;
+
+        ensure_role(&pool, &role, "ilk-parola")
+            .await
+            .expect("rol ilk kez oluşturulamadı");
+        ensure_role(&pool, &role, "ikinci-parola")
+            .await
+            .expect("rol ikinci kez (ALTER) güncellenemedi");
+
+        sqlx::query("CREATE TABLE IF NOT EXISTS _sqlx_migrations (version BIGINT)")
+            .execute(&pool)
+            .await
+            .expect("migrations tablosu oluşturulamadı");
+
+        grant_migrations_read(&pool, &role)
+            .await
+            .expect("migration okuma izni verilemedi");
+
+        cleanup().await;
+        drop(pool);
+        sqlx::query(sqlx::AssertSqlSafe(format!("DROP DATABASE {db_name}")))
+            .execute(&admin_pool)
+            .await
+            .expect("test veritabanı silinemedi");
+    }
+
+    // Gercek Postgres gerektirir (ADR-070): run()'un tum akisini (rol olustur,
+    // migrator calistir, izin ver) tek uctan uca testte dogrular.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn run_succeeds_end_to_end() {
+        let database_url =
+            std::env::var("DATABASE_URL").expect("DATABASE_URL testler için ayarlanmalı");
+        let backend_user = format!("opensicil_test_backend_{}", std::process::id());
+        let worker_user = format!("opensicil_test_worker_{}", std::process::id());
+
+        // SAFETY: bu test dizisi --include-ignored ile ayrı, tek iş parçacıklı
+        // bir çalıştırmada kullanılmak üzere tasarlandı; aynı değişkenleri
+        // eşzamanlı değiştiren başka bir test yok.
+        unsafe {
+            std::env::set_var("DATABASE_URL", &database_url);
+            std::env::set_var("POSTGRES_BACKEND_USER", &backend_user);
+            std::env::set_var("POSTGRES_BACKEND_PASSWORD", "pw1");
+            std::env::set_var("POSTGRES_WORKER_USER", &worker_user);
+            std::env::set_var("POSTGRES_WORKER_PASSWORD", "pw2");
+        }
+
+        let exit_code = run().await;
+        assert_eq!(format!("{exit_code:?}"), format!("{:?}", ExitCode::SUCCESS));
+
+        let pool = crate::db::connect_pool(&database_url)
+            .await
+            .expect("doğrulama pool'u kurulamadı");
+        crate::db::check_schema_ready(&pool)
+            .await
+            .expect("migrate sonrası şema hazır olmalı");
+
+        for user in [&backend_user, &worker_user] {
+            sqlx::query(sqlx::AssertSqlSafe(format!("DROP ROLE IF EXISTS {user}")))
+                .execute(&pool)
+                .await
+                .ok();
+        }
     }
 }

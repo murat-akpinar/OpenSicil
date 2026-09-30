@@ -9,7 +9,7 @@ Yer imleri. Bir dosya eklendiğinde, taşındığında, silindiğinde veya yeni 
 - `docs/09-kurulum.md` → kurulum ön koşulları, boyutlandırma, ayarlar; env veya ön koşul ekleyen her kutucuk günceller
 - `docs/10-saha-notlari.md` → gerçek kurumda bugün işlerin nasıl yürüdüğü (olgu → tasarımdaki karşılığı → sonuç) henüz bilinmeyenler, son taramanın ve dağıtım gözden geçirmesinin sahne sonuçları ve bilerek yazılmayanlar; sahne yürütmeli gözden geçirmenin girdisi ve kaydı
 - `docs/11-dogrulama-notlari.md` → teknik iddiaların birincil kaynakla sınanmış hali (Zimbra, AD, Samba, `ldap3`, Keycloak, dağıtım): sonuç, alıntı, kaynak; yeni iddia önce buraya soru olarak girer
-- `docs/decisions/` → karar kayıtları (001–069; 025'in yerine 041, 001'in adlandırma kısmının yerine 063 geçti)
+- `docs/decisions/` → karar kayıtları (001–071; 025'in yerine 041, 001'in adlandırma kısmının yerine 063, 069'un test komutları kısmının yerine 070 geçti; 071 imaj taraması "temiz" tanımını verir)
 - `compose.yaml` / `compose.override.yaml` → servisler (nginx, backend, worker, migrate, db); prod-benzeri `-f compose.yaml` ile override'sız çalışır
 - `.env.example` → gereken tüm ortam değişkeni adları (değer değil)
 - `nginx/` → `Dockerfile` (nginxinc/nginx-unprivileged), `nginx.conf` (TLS sonlanması, HTTP→HTTPS yönlendirme, `/healthz` — yönlendirmesiz iç healthcheck, `access_log off` — güvenlik header'ları — ADR-066)

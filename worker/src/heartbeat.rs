@@ -39,6 +39,12 @@ mod tests {
     }
 
     #[test]
+    fn touch_creates_fresh_heartbeat_file() {
+        touch().expect("nabız dosyasına yazılamadı");
+        assert_eq!(check(), ExitCode::SUCCESS);
+    }
+
+    #[test]
     fn missing_file_is_unhealthy() {
         let path = test_path("missing");
         std::fs::remove_file(&path).ok();

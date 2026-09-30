@@ -88,6 +88,7 @@ dependencies = [
  "axum",
  "sqlx",
  "tokio",
+ "tower",
 ]
 
 [[package]]
