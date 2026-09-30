@@ -39,4 +39,5 @@
 - Ayrılmış ve askıdaki operatör her istekte reddedilir (ADR-059)
 - Iş kuyruğu, kira, niyet satırı ve tek sıralı motor döngüsü
 - Bağlantı hatası deneme tüketmez, erişilemeyen hedefin işleri bekletilir (ADR-052)
+- Connector yazmaları tek noktadan geçer, kuru çalıştırma modu (ADR-054)
 

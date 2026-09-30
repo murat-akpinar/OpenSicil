@@ -28,7 +28,12 @@ impl std::fmt::Display for JobError {
     }
 }
 
-pub async fn run_job(pool: &PgPool, job: &ClaimedJob, time_zone: &str) -> Result<String, JobError> {
+pub async fn run_job(
+    pool: &PgPool,
+    job: &ClaimedJob,
+    time_zone: &str,
+    mode: crate::writes::Mode,
+) -> Result<String, JobError> {
     let input = crate::model::load(pool, job.identity_id, job.target_system_id, time_zone)
         .await
         .map_err(JobError::Failed)?;
@@ -38,9 +43,14 @@ pub async fn run_job(pool: &PgPool, job: &ClaimedJob, time_zone: &str) -> Result
         input.link.as_ref(),
         &input.clock,
     );
-    Ok(format!(
-        "olması gereken durum hesaplandı, hedefe yazılmadı (connector yok): {desired:?}"
-    ))
+    // ADR-054: kuru modda is farki "uygulanacakti" diye yazar; hedef yazmalari
+    // writes::apply'dan gecer ve orada kesilir.
+    let prefix = if mode.dry_run {
+        "kuru çalıştırma, uygulanacaktı"
+    } else {
+        "hedefe yazılmadı (connector yok)"
+    };
+    Ok(format!("{prefix}: {desired:?}"))
 }
 // --- END FEATURE: engine ---
 
@@ -61,8 +71,12 @@ mod tests {
             priority: 1,
             attempts: 0,
         };
-        let result = run_job(&pool, &job, "Europe/Istanbul").await.unwrap();
+        let live = crate::writes::Mode { dry_run: false };
+        let result = run_job(&pool, &job, "Europe/Istanbul", live).await.unwrap();
         assert!(result.contains("state: Active"), "{result}");
+        let dry = crate::writes::Mode { dry_run: true };
+        let dry_result = run_job(&pool, &job, "Europe/Istanbul", dry).await.unwrap();
+        assert!(dry_result.starts_with("kuru çalıştırma"), "{dry_result}");
         assert!(
             result.contains(&format!("Item({})", seed.sistem_uzmanlari_ou)),
             "{result}"
@@ -79,16 +93,13 @@ mod tests {
                 "üyelik eksik: {item}: {result}"
             );
         }
-        assert!(run_job(
-            &pool,
-            &ClaimedJob {
-                identity_id: 999_999,
-                ..job
-            },
-            "Europe/Istanbul"
-        )
-        .await
-        .is_err());
+        let missing = ClaimedJob {
+            identity_id: 999_999,
+            ..job
+        };
+        assert!(run_job(&pool, &missing, "Europe/Istanbul", live)
+            .await
+            .is_err());
 
         drop(pool);
         test_support::drop_temp_db(&admin_pool, &db_name).await;

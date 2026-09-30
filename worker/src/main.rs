@@ -9,6 +9,9 @@ mod model;
 mod queue;
 #[cfg(test)]
 mod test_support;
+// Motor farki islemlere cevirince (3a) her hedef yazmasi buradan gecer; su an testler.
+#[allow(dead_code)]
+mod writes;
 
 use std::collections::HashMap;
 use std::process::ExitCode;
@@ -45,18 +48,34 @@ async fn prepare_pool(database_url: &str) -> Result<PgPool, String> {
 struct Env {
     database_url: String,
     time_zone: String,
+    write_mode: writes::Mode,
 }
 
 // Ortak ayarlar acilista dogrulanir ve loglanir; backend'in satiriyla yan
-// yana konunca iki servisin sapmasi gorulur (ADR-039).
+// yana konunca iki servisin sapmasi gorulur (ADR-039). DRY_RUN (ADR-054):
+// acikken hedefe hicbir sey yazilmaz; unutulmasin diye her acilista loglanir.
 fn load_env() -> Result<Env, String> {
     let database_url = std::env::var("DATABASE_URL")
         .map_err(|_| "worker: ortam değişkeni eksik: DATABASE_URL".to_string())?;
     let common = common_settings::CommonSettings::from_env().map_err(|e| format!("worker: {e}"))?;
+    let dry_run = match std::env::var("DRY_RUN").as_deref().map(str::trim) {
+        Ok("true") | Ok("1") => true,
+        Ok("false") | Ok("0") => false,
+        Ok(other) => {
+            return Err(format!(
+                "worker: DRY_RUN true ya da false olmalı, '{other}' geldi"
+            ))
+        }
+        Err(_) => return Err("worker: ortam değişkeni eksik: DRY_RUN".to_string()),
+    };
     println!("worker: ortak ayarlar: {common}");
+    if dry_run {
+        println!("worker: KURU ÇALIŞTIRMA açık — hedefe hiçbir şey yazılmaz (ADR-054)");
+    }
     Ok(Env {
         database_url,
         time_zone: common.time_zone,
+        write_mode: writes::Mode { dry_run },
     })
 }
 
@@ -119,7 +138,7 @@ async fn run() -> ExitCode {
         let skip = unreachable_targets(&unreachable, Instant::now());
         match queue::claim(&pool, &worker_id, &skip).await {
             Ok(Some(job)) => {
-                if process_job(&pool, &job, &worker_id, &env.time_zone).await {
+                if process_job(&pool, &job, &worker_id, &env).await {
                     unreachable.insert(job.target_system_id, Instant::now() + POLL_INTERVAL);
                 }
                 continue;
@@ -141,13 +160,9 @@ fn unreachable_targets(marks: &HashMap<i64, Instant>, now: Instant) -> Vec<i64> 
 }
 
 // Doner: hedef erisilemez isaretlenmeli mi.
-async fn process_job(
-    pool: &PgPool,
-    job: &queue::ClaimedJob,
-    worker_id: &str,
-    time_zone: &str,
-) -> bool {
-    let (outcome, unreachable) = match engine::run_job(pool, job, time_zone).await {
+async fn process_job(pool: &PgPool, job: &queue::ClaimedJob, worker_id: &str, env: &Env) -> bool {
+    let run = engine::run_job(pool, job, &env.time_zone, env.write_mode).await;
+    let (outcome, unreachable) = match run {
         Ok(result) => (
             queue::complete(pool, job, worker_id, &result)
                 .await
@@ -214,6 +229,7 @@ mod tests {
         // baska test yok (backend migrate testindeki desenle ayni).
         unsafe {
             std::env::set_var("DATABASE_URL", &test_url);
+            std::env::set_var("DRY_RUN", "true");
             for (name, value) in common_settings::tests::ENV_EXAMPLE_DEFAULTS {
                 std::env::set_var(name, value);
             }
@@ -240,7 +256,12 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(status, "succeeded", "kuyruktaki iş tek sırada işlenmeli");
-        assert!(result.unwrap_or_default().contains("state: Active"));
+        let result = result.unwrap_or_default();
+        assert!(result.contains("state: Active"), "{result}");
+        assert!(
+            result.starts_with("kuru çalıştırma"),
+            "DRY_RUN=true: {result}"
+        );
 
         drop(pool);
         test_support::drop_temp_db(&admin_pool, &db_name).await;
