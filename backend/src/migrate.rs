@@ -63,13 +63,29 @@ pub async fn run() -> ExitCode {
 // - _sqlx_migrations: acilis sema kontrolu (ADR-061 madde 3, db::check_schema_ready)
 // - audit_log: yalnizca ekleme, performed_by ve id kolonlarina deger verilemez,
 //   UPDATE/DELETE yok (ADR-016 sayaclar worker satirlarini sayar)
+// - identities: backend operator alanlarini yazar; username/email/upn ve
+//   silindi temizligi (kisisel veri kolonlari + deleted_at) yalnizca worker
+//   (ADR-015, ADR-038, ADR-077). Kimlik satiri hic silinmez, ic ID kalir.
+// - identity_additional_roles: suresi dolan atamayi worker siler (ADR-020)
 const SERVICE_GRANTS: &str = "\
 GRANT SELECT ON _sqlx_migrations TO {backend}, {worker};
 GRANT SELECT, INSERT, UPDATE, DELETE ON bootstrap_account, bootstrap_sessions, app_settings, \
 oidc_auth_requests, operator_sessions TO {backend};
 GRANT SELECT ON audit_log TO {backend}, {worker};
 GRANT INSERT (event_type, detail) ON audit_log TO {backend}, {worker};
+GRANT SELECT, INSERT, UPDATE, DELETE ON departments, roles, identity_additional_roles TO {backend};
+GRANT SELECT ON departments, roles TO {worker};
+GRANT SELECT, DELETE ON identity_additional_roles TO {worker};
+GRANT SELECT ON identities TO {backend}, {worker};
+GRANT INSERT ({identity_operator_cols}), UPDATE ({identity_operator_cols}) ON identities TO {backend};
+GRANT UPDATE (username, email, upn, given_name, surname, employee_number, mobile_phone, deleted_at) \
+ON identities TO {worker};
 ";
+
+const IDENTITY_OPERATOR_COLUMNS: &str = "given_name, surname, employee_number, mobile_phone, \
+existing_ad_account_hint, existing_zimbra_account_hint, department_id, primary_role_id, \
+manager_id, handover_manager_id, employment_type, start_date, end_at, suspension_start, \
+suspension_end, cancelled";
 
 async fn grant_service_privileges(
     pool: &PgPool,
@@ -83,6 +99,7 @@ async fn grant_service_privileges(
     // parametresi desteklemez (ensure_role'daki gibi). raw_sql: birden fazla
     // ifade tek gidiste, biri hata verirse tumu geri alinir.
     let stmt = SERVICE_GRANTS
+        .replace("{identity_operator_cols}", IDENTITY_OPERATOR_COLUMNS)
         .replace("{backend}", backend)
         .replace("{worker}", worker);
     sqlx::raw_sql(sqlx::AssertSqlSafe(stmt))
@@ -329,52 +346,223 @@ mod tests {
     #[tokio::test]
     #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
     async fn service_roles_can_only_do_what_is_granted() {
-        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
-        let admin_url = std::env::var("DATABASE_URL").expect("DATABASE_URL ayarlanmalı");
-        let pid = std::process::id();
-        let backend = format!("opensicil_test_grant_backend_{pid}");
-        let worker = format!("opensicil_test_grant_worker_{pid}");
-        ensure_role(&pool, &backend, "pw-b")
-            .await
-            .expect("backend rolü");
-        ensure_role(&pool, &worker, "pw-w")
-            .await
-            .expect("worker rolü");
-        grant_service_privileges(&pool, &backend, &worker)
-            .await
-            .expect("GRANT başarısız");
-        grant_service_privileges(&pool, &backend, &worker)
+        let f = ServiceRoles::setup("grant").await;
+        grant_service_privileges(&f.pool, &f.backend, &f.worker)
             .await
             .expect("ikinci migrate: GRANT idempotent olmalı");
 
-        let backend_pool =
-            crate::test_support::connect_as(&admin_url, &db_name, &backend, "pw-b").await;
-        let worker_pool =
-            crate::test_support::connect_as(&admin_url, &db_name, &worker, "pw-w").await;
-
         sqlx::query("UPDATE app_settings SET ad_host = 'dc1' WHERE id = TRUE")
-            .execute(&backend_pool)
+            .execute(&f.backend_pool)
             .await
             .expect("backend kendi ayar tablosuna yazabilmeli");
         assert!(
             sqlx::query("SELECT username FROM bootstrap_account")
-                .execute(&worker_pool)
+                .execute(&f.worker_pool)
                 .await
                 .is_err(),
             "worker backend tablolarını okuyamamalı"
         );
 
-        for (service_pool, role) in [(&backend_pool, &backend), (&worker_pool, &worker)] {
+        for (service_pool, role) in [(&f.backend_pool, &f.backend), (&f.worker_pool, &f.worker)] {
             assert_audit_is_append_only(service_pool, role).await;
         }
+        f.teardown().await;
+    }
 
-        backend_pool.close().await;
-        worker_pool.close().await;
-        for role in [&backend, &worker] {
-            crate::test_support::drop_role(&pool, role).await;
+    // ADR-077: rol turu kisiti veritabaninda, kimlik kolonlari rol bazli.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn identity_model_enforces_role_kinds_and_column_grants() {
+        let f = ServiceRoles::setup("model").await;
+        let seed = seed_department_and_roles(&f.backend_pool).await;
+        let identity_id = assert_backend_writes_operator_fields(&f.backend_pool, &seed).await;
+        assert_worker_writes_only_its_columns(&f.worker_pool, identity_id).await;
+        f.teardown().await;
+    }
+
+    struct Seed {
+        department: i64,
+        primary: i64,
+        additional: i64,
+    }
+
+    async fn seed_department_and_roles(pool: &PgPool) -> Seed {
+        let department: i64 = sqlx::query_scalar(
+            "INSERT INTO departments (name, code) VALUES ('BT', 'BT') RETURNING id",
+        )
+        .fetch_one(pool)
+        .await
+        .expect("departman açılamadı");
+        let primary: i64 = sqlx::query_scalar(
+            "INSERT INTO roles (kind, name, title) VALUES ('primary', 'Uzman', 'Uzman') RETURNING id",
+        )
+        .fetch_one(pool)
+        .await
+        .expect("birincil rol açılamadı");
+        let additional: i64 = sqlx::query_scalar(
+            "INSERT INTO roles (kind, name) VALUES ('additional', 'Nöbet') RETURNING id",
+        )
+        .fetch_one(pool)
+        .await
+        .expect("ek rol açılamadı");
+        sqlx::query("INSERT INTO roles (kind, name) VALUES ('base', 'Temel')")
+            .execute(pool)
+            .await
+            .expect("temel rol açılamadı");
+
+        let forbidden = [
+            "INSERT INTO roles (kind, name) VALUES ('base', 'İkinci Temel')",
+            "INSERT INTO roles (kind, name, title) VALUES ('additional', 'X', 'unvan')",
+        ];
+        for sql in forbidden {
+            assert!(
+                sqlx::query(sql).execute(pool).await.is_err(),
+                "reddedilmeliydi: {sql}"
+            );
         }
-        drop(pool);
-        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+        Seed {
+            department,
+            primary,
+            additional,
+        }
+    }
+
+    const INSERT_IDENTITY: &str = "INSERT INTO identities \
+        (given_name, surname, department_id, primary_role_id, employment_type, start_date) \
+        VALUES ('Ayşe', 'Yılmaz', $1, $2, $3, current_date) RETURNING id";
+
+    async fn assert_backend_writes_operator_fields(pool: &PgPool, seed: &Seed) -> i64 {
+        let id: i64 = sqlx::query_scalar(INSERT_IDENTITY)
+            .bind(seed.department)
+            .bind(seed.primary)
+            .bind("permanent")
+            .fetch_one(pool)
+            .await
+            .expect("backend kimlik açabilmeli");
+        for (role, employment_type, why) in [
+            (
+                seed.additional,
+                "permanent",
+                "ek rol birincil rol olarak bağlanamamalı",
+            ),
+            (seed.primary, "intern", "stajyerde bitiş tarihi zorunlu"),
+        ] {
+            let result = sqlx::query_scalar::<_, i64>(INSERT_IDENTITY)
+                .bind(seed.department)
+                .bind(role)
+                .bind(employment_type)
+                .fetch_one(pool)
+                .await;
+            assert!(result.is_err(), "{why}");
+        }
+
+        sqlx::query(
+            "INSERT INTO identity_additional_roles (identity_id, role_id, ends_on) \
+             VALUES ($1, $2, current_date + 14)",
+        )
+        .bind(id)
+        .bind(seed.additional)
+        .execute(pool)
+        .await
+        .expect("ek rol atanabilmeli");
+        sqlx::query("UPDATE identities SET mobile_phone = '+905321234567' WHERE id = $1")
+            .bind(id)
+            .execute(pool)
+            .await
+            .expect("backend operatör alanını güncelleyebilmeli");
+
+        let forbidden = [
+            "INSERT INTO identity_additional_roles (identity_id, role_id) VALUES ($1, $2)",
+            "UPDATE identities SET username = 'ayse.yilmaz' WHERE id = $1 AND $2 = $2",
+            "DELETE FROM departments WHERE id = (SELECT department_id FROM identities WHERE id = $1) AND $2 = $2",
+        ];
+        for sql in forbidden {
+            let result = sqlx::query(sql)
+                .bind(id)
+                .bind(seed.primary)
+                .execute(pool)
+                .await;
+            assert!(result.is_err(), "backend için reddedilmeliydi: {sql}");
+        }
+        id
+    }
+
+    async fn assert_worker_writes_only_its_columns(pool: &PgPool, id: i64) {
+        sqlx::query("UPDATE identities SET username = 'ayse.yilmaz', email = 'ayse@example.com' WHERE id = $1")
+            .bind(id)
+            .execute(pool)
+            .await
+            .expect("worker üretilen adı yazabilmeli");
+        sqlx::query("DELETE FROM identity_additional_roles WHERE identity_id = $1")
+            .bind(id)
+            .execute(pool)
+            .await
+            .expect("worker süresi dolan ek rolü silebilmeli");
+
+        let forbidden = [
+            "UPDATE identities SET start_date = current_date WHERE id = $1",
+            "INSERT INTO identities (given_name, surname, department_id, primary_role_id, employment_type, start_date) \
+             SELECT 'x', 'y', department_id, primary_role_id, 'permanent', current_date FROM identities WHERE id = $1",
+            "DELETE FROM identities WHERE id = $1",
+            "INSERT INTO roles (kind, name) SELECT 'additional', 'worker-yazamaz' WHERE $1 IS NOT NULL",
+        ];
+        for sql in forbidden {
+            let result = sqlx::query(sql).bind(id).execute(pool).await;
+            assert!(result.is_err(), "worker için reddedilmeliydi: {sql}");
+        }
+    }
+
+    // Gecici DB + iki servis rolu + GRANT; izin testleri paylasir.
+    struct ServiceRoles {
+        admin_pool: PgPool,
+        pool: PgPool,
+        db_name: String,
+        backend: String,
+        worker: String,
+        backend_pool: PgPool,
+        worker_pool: PgPool,
+    }
+
+    impl ServiceRoles {
+        async fn setup(tag: &str) -> Self {
+            let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+            let admin_url = std::env::var("DATABASE_URL").expect("DATABASE_URL ayarlanmalı");
+            let pid = std::process::id();
+            let backend = format!("opensicil_test_{tag}_backend_{pid}");
+            let worker = format!("opensicil_test_{tag}_worker_{pid}");
+            ensure_role(&pool, &backend, "pw-b")
+                .await
+                .expect("backend rolü");
+            ensure_role(&pool, &worker, "pw-w")
+                .await
+                .expect("worker rolü");
+            grant_service_privileges(&pool, &backend, &worker)
+                .await
+                .expect("GRANT başarısız");
+            let backend_pool =
+                crate::test_support::connect_as(&admin_url, &db_name, &backend, "pw-b").await;
+            let worker_pool =
+                crate::test_support::connect_as(&admin_url, &db_name, &worker, "pw-w").await;
+            Self {
+                admin_pool,
+                pool,
+                db_name,
+                backend,
+                worker,
+                backend_pool,
+                worker_pool,
+            }
+        }
+
+        async fn teardown(self) {
+            self.backend_pool.close().await;
+            self.worker_pool.close().await;
+            for role in [&self.backend, &self.worker] {
+                crate::test_support::drop_role(&self.pool, role).await;
+            }
+            drop(self.pool);
+            crate::test_support::drop_temp_db(&self.admin_pool, &self.db_name).await;
+        }
     }
 
     async fn assert_audit_is_append_only(pool: &PgPool, role: &str) {

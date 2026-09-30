@@ -62,7 +62,7 @@ Kurallar:
 ## Faz 2: Kayıt ve model
 
 - [x] Veritabanı rolleri ve denetim tablosunun `current_user` kolonu ([ADR-015](decisions/015-veritabani-rolleri.md), [ADR-016](decisions/016-hedef-olcek-ve-olcekte-calisma.md))
-- [ ] Kimlik, departman ağacı, rol, yönetilen kapsam, yasaklı grup listesi tabloları
+- [x] Kimlik, departman ağacı, rol, yönetilen kapsam, yasaklı grup listesi tabloları ([ADR-077](decisions/077-yonetilen-kapsam-ve-yasakli-gruplar-tablo-degil.md): kapsam worker env'i, yasaklı grup kod sabiti; tablo yalnızca kimlik modeli)
 - [ ] Katalog tabloları (test verisiyle dolu; AD'den gerçek dolum 3a'da)
 - [ ] Denetim kaydı + worker işlem türleri sabitlenir (yıkıcı, verme, ilk parola, öznitelik — [ADR-050](decisions/050-verme-sayaci-ve-is-butunlugu.md))
 - [ ] Kimlik numarası AEAD + blind index ile şifrelenir ([ADR-010](decisions/010-kisisel-veri-kimlik-no-telefon.md))
