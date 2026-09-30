@@ -200,7 +200,7 @@ Karar listesi tek yerde tutulur: [PROJECT.md → Kararlar](PROJECT.md#kararlar).
 ### 🟠 İlk commit'ten önce
 
 - [ ] Kalıcı ürün adı ve grup önekleri — ADR-001 "kod yazılmadan kesinleşir" der; grup önekleri, imaj, env, crate ve veritabanı adları bunu taşır ve "OpenIAM" başka bir ürünün adıdır
-- [ ] Lisans — ilk public push'tan önce
+- [x] Lisans — AGPL-3.0
 
 ### ⚪ Sonra
 

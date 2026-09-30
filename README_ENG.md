@@ -1,8 +1,13 @@
 # OpenSicil
 
-![Claude Code](https://img.shields.io/badge/claude_code-2.1%2B-D97757?logo=anthropic&logoColor=ffffff)
-![Docker](https://img.shields.io/badge/docker-compose-2496ED?logo=docker&logoColor=ffffff)
-![git-cliff](https://img.shields.io/badge/changelog-git--cliff-000000)
+[![License: AGPL v3](https://img.shields.io/badge/license-AGPLv3-1a1a1a?style=flat-square&labelColor=1a1a1a&color=8a6f3a)](LICENSE)
+[![Built with Claude Code](https://img.shields.io/badge/built%20with-Claude%20Code-1a1a1a?style=flat-square&labelColor=1a1a1a&color=d8b66b)](https://claude.ai/claude-code)
+[![Status](https://img.shields.io/badge/status-design-1a1a1a?style=flat-square&labelColor=1a1a1a&color=d97706)](#status)
+[![Rust](https://img.shields.io/badge/Rust-axum%20%2B%20sqlx-1a1a1a?style=flat-square&labelColor=1a1a1a&color=CE422B&logo=rust&logoColor=fff)](https://www.rust-lang.org)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-database-1a1a1a?style=flat-square&labelColor=1a1a1a&color=4169E1&logo=postgresql&logoColor=fff)](https://www.postgresql.org)
+[![Docker](https://img.shields.io/badge/Docker-compose-1a1a1a?style=flat-square&labelColor=1a1a1a&color=2496ED&logo=docker&logoColor=fff)](https://www.docker.com)
+[![nginx](https://img.shields.io/badge/nginx-reverse%20proxy-1a1a1a?style=flat-square&labelColor=1a1a1a&color=009639&logo=nginx&logoColor=fff)](https://nginx.org)
+[![git-cliff](https://img.shields.io/badge/changelog-git--cliff-1a1a1a?style=flat-square&labelColor=1a1a1a&color=444444)](https://git-cliff.org)
 
 *Türkçe: [README.md](README.md)*
 
