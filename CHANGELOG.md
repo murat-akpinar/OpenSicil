@@ -12,3 +12,7 @@
 - Readme rozetlerini yenile, lisans kaydını sadeleştir
 - Kurulum kararlarını tamamla, todo.md şemasını oluştur
 
+### Özellikler
+
+- Backend, worker ve nginx iskeletini ayağa kaldır
+

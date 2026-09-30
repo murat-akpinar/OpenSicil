@@ -10,7 +10,7 @@ Kurallar:
 ## Faz 1: Altyapı
 
 ### 1a. İskelet
-- [ ] Compose + nginx + backend + worker + PostgreSQL ayağa kalkar
+- [x] Compose + nginx + backend + worker + PostgreSQL ayağa kalkar
   - Kabul: `docker compose up -d` sonrası tüm servisler `healthy`
   - Kabul: `curl -s -o /dev/null -w "%{http_code}" localhost/api/health` → `200`
   - Kabul: nginx dışında hiçbir serviste `ports:` yok

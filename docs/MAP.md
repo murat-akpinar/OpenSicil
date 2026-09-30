@@ -12,9 +12,9 @@ Yer imleri. Bir dosya eklendiğinde, taşındığında, silindiğinde veya yeni 
 - `docs/decisions/` → karar kayıtları (001–069; 025'in yerine 041, 001'in adlandırma kısmının yerine 063 geçti)
 - `compose.yaml` / `compose.override.yaml` → servisler (nginx, backend, worker, migrate, db); prod-benzeri `-f compose.yaml` ile override'sız çalışır
 - `.env.example` → gereken tüm ortam değişkeni adları (değer değil)
-- `nginx/` → `Dockerfile` (nginxinc/nginx-unprivileged), `nginx.conf` (TLS sonlanması, yönlendirme, güvenlik header'ları — ADR-066)
-- `backend/` → `Dockerfile` (Rust multi-stage); kaynak kod henüz yok
-- `worker/` → `Dockerfile` (Rust multi-stage); kaynak kod henüz yok
+- `nginx/` → `Dockerfile` (nginxinc/nginx-unprivileged), `nginx.conf` (TLS sonlanması, HTTP→HTTPS yönlendirme, `/healthz` — yönlendirmesiz iç healthcheck, `access_log off` — güvenlik header'ları — ADR-066)
+- `backend/` → axum + sqlx; `src/main.rs` (komut yönlendirme: `migrate` / sunucu), `src/server.rs` (HTTP sunucu), `src/health.rs` (`/api/health`), `src/migrate.rs` (rol oluşturma + şema migration), `src/logging.rs` (istek log'u, gerçek istemci IP'si `X-Forwarded-For`'dan), `src/db.rs`; `migrations/` (sqlx migration dosyaları), `.sqlx/` (offline önbellek, şu an boş — macro kullanılmıyor)
+- `worker/` → sqlx; `src/main.rs` (nabız döngüsü / `worker-health`), `src/heartbeat.rs` (`/tmp/worker-heartbeat`), `src/db.rs`
 
 ## Feature indeksi
 Koddaki `--- START FEATURE: <ad> ---` markerlarının karşılığı. Aramak için:

@@ -24,5 +24,8 @@ COPY --from=builder /app/target/release/backend /usr/local/bin/backend
 
 USER app
 WORKDIR /app
+# migrate alt komutu migrations/*.sql dosyalarını çalışma zamanında okur
+# (sqlx::migrate::Migrator), derleme zamanı makrosu kullanılmaz
+COPY --chown=app:app migrations ./migrations
 EXPOSE 8000
 ENTRYPOINT ["/usr/local/bin/backend"]

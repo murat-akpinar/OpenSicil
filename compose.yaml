@@ -12,7 +12,7 @@ services:
       backend:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
       interval: 10s
       timeout: 3s
       retries: 3
@@ -106,7 +106,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_OWNER_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
-      - db-data:/var/lib/postgresql/data
+      # 18+ imaji surum alt dizini (pg_ctlcluster duzeni) bekler; dogrudan
+      # .../data'ya mount etmek "eski duzen" hatasiyla acilmaz (ADR yok, imaj davranisi)
+      - db-data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_OWNER_USER} -d ${POSTGRES_DB}"]
       interval: 5s
