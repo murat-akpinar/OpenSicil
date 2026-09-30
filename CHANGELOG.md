@@ -9,4 +9,5 @@
 ### Dokümantasyon
 
 - Readme rozetlerini yenile, lisans kaydını sadeleştir
+- Kurulum kararlarını tamamla, todo.md şemasını oluştur
 

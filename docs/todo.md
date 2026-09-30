@@ -3,29 +3,178 @@
 Kurallar:
 - Her kutucuk tek oturumda ve tek commit'te biter. Büyükse böl.
 - Her kutucukta en az bir ölçülebilir kabul kriteri vardır.
-- **Her fazın son kutucuğu güvenlik ve test kapanışıdır.** Atlanamaz, geçmeden sonraki faza geçilmez.
+- **Her fazın (ve alt fazın, ek hedef sistemin) son kutucuğu güvenlik ve test kapanışıdır.** Atlanamaz, geçmeden sonraki faza geçilmez.
+- Kapanış kutucuğundaki `<...>` yer tutucuları, `docs/08-gereksinimler.md` → 🟡 Kurulumda kararlaştırılacak listesindeki test/format/lint/kapsam kararları verilince doldurulur.
+- **Ek Hedef Sistem** bölümleri (Zimbra ve ileride Carbonio) "Faz" olarak numaralanmaz: AD (Faz 3) çekirdektir, hedef sistemler onun üstüne eklenir. Ama Faz 4 (İşletme) ve Faz 5 (Mevcut kurum), ilgili hedef sistem bitmeden o sistemi kapsamaz — bkz. her ikisinin başındaki not.
 
 ## Faz 1: Altyapı
 
-- [ ] Tüm servisler nginx arkasında ayağa kalkar
+### 1a. İskelet
+- [ ] Compose + nginx + backend + worker + PostgreSQL ayağa kalkar
   - Kabul: `docker compose up -d` sonrası tüm servisler `healthy`
   - Kabul: `curl -s -o /dev/null -w "%{http_code}" localhost/api/health` → `200`
   - Kabul: nginx dışında hiçbir serviste `ports:` yok
-
+- [ ] Süreç sözleşmesi ([ADR-061](decisions/061-dagitim-sozlesmesi-compose-ve-kubernetes.md))
+  - Kabul: backend/worker SIGTERM alınca `stop_grace_period` içinde düzgün kapanıyor
+  - Kabul: aynı imajın `migrate` alt komutu şema sahibi rolüyle tek seferlik container olarak çalışıyor
+  - Kabul: `worker-health` alt komutu ve eski şema sürümünde açılışta çıkma davranışı çalışıyor
+- [ ] `docs/09-kurulum.md` açılır, bu fazdaki ön koşullar eklenir
+  - Kabul: dosya var, bu faza ait `<...>` yer tutucuları dolduruldu
 - [ ] Faz kapanışı: güvenlik ve test
-  - Kabul: testler geçiyor → `<test komutu>`
-  - Kabul: yeni kodda satır kapsamı ≥ %80 → `<kapsam komutu>`
-  - Kabul: format ve lint temiz → `<lint komutu>`
-  - Kabul: bağımlılık taraması temiz → `<npm audit --audit-level=high | pip-audit | govulncheck>`
+  - Kabul: testler geçiyor → `cargo test --workspace`
+  - Kabul: yeni kodda satır kapsamı ≥ %80 → `cargo llvm-cov --workspace --fail-under-lines 80`
+  - Kabul: format ve lint temiz → `cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings`
+  - Kabul: bağımlılık taraması temiz → `cargo audit`
   - Kabul: imaj taraması temiz → `docker scout cves --only-severity critical,high <imaj>` veya `trivy image --severity CRITICAL,HIGH <imaj>`
   - Kabul: sır sızıntısı yok → `git log -p <faz başı>..HEAD | grep -nEi '(password|secret|token|api[_-]?key)[[:space:]]*[:=]'` boş
   - Kabul: `.claude/rules/security.md` kontrol listesi gözden geçirildi; bulgular ya düzeltildi ya karar kaydına yazıldı
   - Kabul: `.env.example` güncel, `docs/MAP.md` güncel
 
-## Faz 2: <ad>
-
-- [ ] <iş>
-  - Kabul: <ölçülebilir kriter>
-
+### 1b. Giriş
+- [ ] Yerel bootstrap hesabı ve Yapılandırma sayfası ([ADR-068](decisions/068-yapilandirma-sayfasi-ve-bootstrap-hesabi.md))
+  - Kabul: migration ile `admin`/`admin` seed ediliyor; ilk girişte eski parola sorulmadan yeni parola zorunlu
+  - Kabul: bu hesapla yalnızca Yapılandırma sayfasına (AD, Zimbra, OIDC bağlantı ayarları) erişilebiliyor, başka hiçbir ekrana değil
+  - Kabul: AD servis hesabı parolası, Zimbra admin parolası, OIDC client secret DB'de AEAD ile şifreli saklanıyor, `.env`'de değil
+- [ ] OIDC girişi ve altı yönetim yetkisi ([ADR-005](decisions/005-yonetim-girisi-oidc.md), [ADR-065](decisions/065-oidc-akisi-backend.md))
+  - Kabul: Keycloak lab'ına karşı giriş yapılıyor, yetkiler `groups` claim'inden okunuyor
+  - Kabul: oturum PostgreSQL'de saklanıyor
+  - Kabul: en az bir `OpenSicil-Admins` girişi doğrulanınca yerel bootstrap giriş formu gizleniyor/pasifleşiyor
+- [ ] Ayrılmış/askıdaki operatör reddi ([ADR-055](decisions/055-netlestirmeler-onay-csv-operator-parola.md), [ADR-059](decisions/059-netlestirmeler-operator-geri-alma-aski-bitisi-accountexpires.md))
+  - Kabul: oturum açılışında ve her istekte kontrol edilen bir test var; ayrılmış/askıdaki operatörün isteği 403 dönüyor
 - [ ] Faz kapanışı: güvenlik ve test
-  - <Faz 1'deki kapanış kutucuğunun aynısı>
+  - (1a'daki kapanış şablonunun aynısı)
+
+### 1c. Lab kod olarak + midPoint denemesi
+- [ ] `compose.lab.yaml` ile Samba AD ve Keycloak ayağa kalkar ([ADR-027](decisions/027-test-stratejisi-ve-lab.md))
+  - Kabul: `docker compose -f compose.yaml -f compose.lab.yaml up -d` sonrası ikisi de `healthy`
+- [ ] midPoint denemesi ([ADR-002](decisions/002-hazir-urun-yerine-gelistirme.md))
+  - Kabul: lab AD'ye karşı en fazla 1 gün denenir; sonuç ADR-002'nin altına yeni bir karar dosyası olarak yazılır
+- [ ] Faz kapanışı: güvenlik ve test
+  - (1a'daki kapanış şablonunun aynısı)
+
+### 1d. Zimbra keşfi
+- [ ] Lab Zimbra'sı ayağa kalkar (sürüm kurulumda kararlaştırılan)
+  - Kabul: JSON Admin API'ye oturum açılıyor
+- [ ] `curl` ile `CreateAccount`, `ModifyAccount`, `DeleteAccount`, liste üyeliği denenir
+  - Kabul: dördü de başarıyla çalışıyor; OpenSicil admin hesabı yönetilen alan adının dışında duruyor ([ADR-057](decisions/057-birincil-kaynak-dogrulamasi.md))
+- [ ] `docs/08`'deki Faz 1d lab sorularının sekizi cevaplanır
+  - Kabul: cevaplar `docs/11-dogrulama-notlari.md`'ye yazıldı; ADR-045/049 ve `docs/06` gerekirse güncellendi
+- [ ] Faz kapanışı: güvenlik ve test
+  - (1a'daki kapanış şablonunun aynısı)
+
+## Faz 2: Kayıt ve model
+
+- [ ] Veritabanı rolleri ve denetim tablosunun `current_user` kolonu ([ADR-015](decisions/015-veritabani-rolleri.md), [ADR-016](decisions/016-hedef-olcek-ve-olcekte-calisma.md))
+- [ ] Kimlik, departman ağacı, rol, yönetilen kapsam, yasaklı grup listesi tabloları
+- [ ] Katalog tabloları (test verisiyle dolu; AD'den gerçek dolum 3a'da)
+- [ ] Denetim kaydı + worker işlem türleri sabitlenir (yıkıcı, verme, ilk parola, öznitelik — [ADR-050](decisions/050-verme-sayaci-ve-is-butunlugu.md))
+- [ ] Kimlik numarası AEAD + blind index ile şifrelenir ([ADR-010](decisions/010-kisisel-veri-kimlik-no-telefon.md))
+- [ ] Ortak ayarlar iki serviste de `.env`'den okunur ([ADR-039](decisions/039-ortak-ayarlar-env.md))
+- [ ] Olması gereken durum fonksiyonu saf modül olarak yazılır, tablo testleriyle gelir ([ADR-038](decisions/038-kimlik-durumu-turetilir.md))
+  - Kabul: 3a, 3f ve Faz 5 aynı fonksiyonu çağırır; ikinci bir fark hesabı yok
+  - Not: bu fazın sonunda ekranda çalışan bir şey yoktur, demo yapılmaz
+- [ ] Faz kapanışı: güvenlik ve test
+  - (1a'daki kapanış şablonunun aynısı)
+
+## Faz 3: AD provisioning
+
+### 3a. İlk dilim
+- [ ] Motor ve kuyruk: tekilleştirme, öncelik, 5 sn yoklama, iş kirası ve niyet satırı ([ADR-062](decisions/062-is-kirasi-ve-yarida-kalan-is.md), [ADR-028](decisions/028-worker-zamanlamasi.md)); worker tek sırada ([ADR-047](decisions/047-worker-tek-sirada.md))
+- [ ] Müdahaledeki iş açık sayılır, bağlantı hatası deneme tüketmez ([ADR-052](decisions/052-uygulanamayan-fark.md))
+- [ ] Connector yazma çağrıları tek noktadan geçer + kuru çalıştırma modu ([ADR-054](decisions/054-kuru-calistirma-ve-yedekten-donus.md))
+- [ ] AD connector okuma yolu + katalog (OU, grup, SID, yasaklı grup, iç içe üyelik)
+- [ ] Açılış kontrolleri: kapsam DN'leri, `msDS-LogonTimeSyncInterval` ([ADR-060](decisions/060-lastlogontimestamp-on-kosulu-acilista-dogrulanir.md))
+- [ ] Şablonla kullanıcı adı üretimi; yalnızca veritabanı ve AD çakışması kontrol edilir
+- [ ] Varsayılan eşleme + tek `add` ile hesap aç/etkinleştir/pasifleştir ([ADR-057](decisions/057-birincil-kaynak-dogrulamasi.md))
+- [ ] Kimlik kayıt formu + kişi sayfası + operatör dilinde hata + hedefteki fark görünümü (F-12)
+- [ ] Uçtan uca: kayıt → AD'de pasif hesap → ekranda "açıldı"
+  - Kabul: elle bir kayıt girilir, AD'de pasif hesap görünür, ekranda durum "açıldı" olur
+- [ ] Faz kapanışı: güvenlik ve test
+  - (1a'daki kapanış şablonunun aynısı)
+
+### 3b. Roller ve adlar
+- [ ] Rol ve departman ekranları, katalogdan seçim, grup ve OU yönetimi
+- [ ] Elle kullanıcı adı; bağlı olmayan hesapla ve kullanılmış adla çakışmada müdahale; serbest bırakma ([ADR-022](decisions/022-kullanici-adi-elle-giris-ve-cakisma.md), [ADR-035](decisions/035-kullanilmis-ad-duz-metin-serbest-birakma.md), [ADR-042](decisions/042-ayni-kisi-farkli-anahtar.md))
+- [ ] Eşleme izinli listesi + "sadece boşsa yaz" ([ADR-029](decisions/029-esleme-hedef-oznitelikleri-izinli-liste.md), [ADR-034](decisions/034-sam-upn-esleme-disi-ve-bossa-yaz.md))
+- [ ] Belirsiz bileşen kuralı: "hesap açılsın=hayır" mevcut hesabı silmez ([ADR-040](decisions/040-motor-belirsiz-degere-dokunmaz.md))
+  - Not: etki önizlemesi burada yoktur; model farkı 3f'te tek fonksiyonla yazılır
+- [ ] Faz kapanışı: güvenlik ve test
+  - (1a'daki kapanış şablonunun aynısı)
+
+### 3c. Yaşam döngüsü
+- [ ] İşe giriş, görev değişikliği (önce ekleme, sonra çıkarma — [ADR-050](decisions/050-verme-sayaci-ve-is-butunlugu.md))
+- [ ] Planlı ve acil ayrılış, geri alma (yıkıcı — [ADR-030](decisions/030-ayrilisi-geri-alma-yikici.md)), hedefte doğrulanan kayıt iptali ([ADR-048](decisions/048-kayit-iptali-hedefte-dogrulanir.md)), tarihli askı ([ADR-053](decisions/053-tarihli-aski.md))
+- [ ] `ayrıldı`dan her çıkış geri alma sayılır, askı bitişi iznin son günüdür, `accountExpires` temizlenir ([ADR-059](decisions/059-netlestirmeler-operator-geri-alma-aski-bitisi-accountexpires.md))
+- [ ] Yönetici ayrılışında astların etkin yöneticisi türetilir (F-38, [ADR-041](decisions/041-astlarin-yoneticisi-turetilir.md))
+- [ ] Süreli ek rol, tarih dolunca kendiliğinden kalkar (F-37, [ADR-020](decisions/020-sureli-ek-rol.md))
+- [ ] Ayrılışta gecikmeli parola sıfırlama ([ADR-033](decisions/033-ayrilista-parola-gecikmesi.md))
+- [ ] Yaklaşan bitişler listesi (F-36)
+- [ ] Faz kapanışı: güvenlik ve test
+  - (1a'daki kapanış şablonunun aynısı)
+
+### 3d. İlk parola
+- [ ] AEAD ile şifreli teslim ([ADR-036](decisions/036-ilk-parola-aead.md)), yardım masası yetkisi, ilk girişte değiştirme ayarı (F-11, [ADR-019](decisions/019-ilk-parola-teslimi.md))
+- [ ] Kullanılmamış hesap kontrolü ([ADR-046](decisions/046-kullanilmamis-hesap-lastlogontimestamp.md))
+- [ ] "Kaydet ve ilk parolayı ver" tek adım, teslim ekranı, okunabilir parola biçimi ([ADR-056](decisions/056-ise-baslama-gunu-akisi.md))
+  - Kabul: N-13 ölçümü ≤ 60 sn (kayıttan parolanın ekranda görünmesine)
+  - Not: ürünün hedef sahnesi ilk kez burada uçtan uca gösterilir
+- [ ] Faz kapanışı: güvenlik ve test
+  - (1a'daki kapanış şablonunun aynısı)
+
+### 3e. Tekil sahiplenme ve gözlem modu
+- [ ] Formdaki mevcut hesap ipucuyla gözlem modunda bağlama ([ADR-018](decisions/018-ice-aktarma-ve-sahiplenme.md))
+- [ ] Fark görünümü ve tek kimlik için yönetime alma ([ADR-048](decisions/048-kayit-iptali-hedefte-dogrulanir.md))
+  - Kabul: motor gerçek bir lab hesabına karşı sınandı
+  - Not: CSV ve toplu yönetime alma Faz 5'te (Mevcut kurum)
+- [ ] Faz kapanışı: güvenlik ve test
+  - (1a'daki kapanış şablonunun aynısı)
+
+### 3f. Fren ve onay
+- [ ] Saatlik sayaçlar ve acil kota worker'da (yıkıcı, verme, ilk parola; iş sayaçlara karşı bütün — [ADR-050](decisions/050-verme-sayaci-ve-is-butunlugu.md))
+- [ ] Onay anında yeniden önizleme ([ADR-055](decisions/055-netlestirmeler-onay-csv-operator-parola.md))
+- [ ] Model farkı fonksiyonundan hem etki önizlemesi hem değişiklik seti eşiği (ekleme dahil, gözlemdekiler hariç — [ADR-037](decisions/037-esik-ekleme-islemlerini-sayar.md), [ADR-043](decisions/043-esik-uygulanacak-farki-sayar.md))
+- [ ] Taslak, ikinci yönetici onayı, zaman kilidi backend'de ([ADR-031](decisions/031-degisiklik-seti-sahneleme.md), [ADR-026](decisions/026-degisiklik-seti-onayinda-zaman-kilidi.md))
+- [ ] Bekleme sebebi (eşik/sayaç/onay), kalan süre ve onaylayacak grup ekranda gösterilir (F-12)
+- [ ] Faz kapanışı: güvenlik ve test
+  - (1a'daki kapanış şablonunun aynısı)
+
+## Ek Hedef Sistem: Zimbra
+
+> AD (Faz 3) çekirdektir; bu bölüm onun üstüne eklenir, "Faz" olarak numaralanmaz. Ama Faz 4 (İşletme) ve Faz 5 (Mevcut kurum) bu bölüm bitmeden Zimbra'yı kapsamaz — mutabakat raporu ve sahiplenme yalnızca AD üstünde çalışır.
+
+- [ ] Kayıtlı yanıt stub'ı ile connector testleri ([ADR-027](decisions/027-test-stratejisi-ve-lab.md))
+- [ ] Gerçek Zimbra connector'ı: parolasız hesap açma ([ADR-057](decisions/057-birincil-kaynak-dogrulamasi.md))
+- [ ] COS ve dağıtım listesi kataloğu, liste üyeliği yönetimi
+- [ ] Yaşam döngüsü karşılıkları: hesap aç/girişe kapat/sil
+- [ ] Ayrılışta kullanıcının kendi yönlendirme/filtresi temizlenir, gecikmeli otomatik yanıt, devir yöneticisine yönlendirme ([ADR-045](decisions/045-ayrilan-postasi-yonlendirme.md), [ADR-049](decisions/049-ayrilan-postasi-kullanici-yonlendirmesi-ve-gecikme.md))
+- [ ] Ad üretimine Zimbra çakışma kontrolü eklenir; erişilemezken atlanır ([ADR-058](decisions/058-zimbra-erisilemezken-ad-uretimi.md))
+- [ ] Kapanış: güvenlik ve test
+  - (1a'daki kapanış şablonunun aynısı)
+
+<!-- İleride: Ek Hedef Sistem: Carbonio CE (F-41, v1.x adayı) — lab doğrulaması sonrası buraya aynı yapıda eklenir. -->
+
+## Faz 4: İşletme
+
+> Zimbra bölümü bitmemişse mutabakat raporu ve metrik ucu yalnızca AD'yi kapsar; eksik kapsam ekranda/raporda belirtilir.
+
+- [ ] Okuma şeridi: mutabakat, katalog yenileme, toplu yönetime alma fark hesabı ayrı görevde, sayaca dokunmaz ([ADR-051](decisions/051-okuma-seridi.md))
+- [ ] Mutabakat raporu: gece ve istendiğinde, "yeniden uygula" ile (F-13)
+- [ ] Hedef sistem başına saklama + "silinmeyi bekleyenler" listesi ([ADR-024](decisions/024-hedef-sistem-basina-saklama-suresi.md))
+- [ ] Metrik ucu: hedef sistem başına son başarılı bağlantı dahil (F-19)
+- [ ] N-03 yük testi (20.000 kimlik) ve ölçüme göre worker eşzamanlılığı
+- [ ] `docs/09` eşlemesinin tek node'lu bir Kubernetes kümesinde (k3s/kind) doğrulanması (N-14)
+  - Kabul: backend iki kopya, worker tek kopya ayağa kalkıyor; migration Job'ı bitmeden servisler hazır olmuyor; worker pod'u silinince yenisi kuyruğu sürdürüyor
+- [ ] Faz kapanışı: güvenlik ve test
+  - (1a'daki kapanış şablonunun aynısı)
+
+## Faz 5: Mevcut kurum
+
+> Sahiplenme ve mutabakat Zimbra hesaplarını da kapsaması için Zimbra bölümünün bitmiş olması gerekir.
+
+- [ ] CSV ile toplu kimlik içe aktarma (kolon ve ipucu kuralları — [ADR-023](decisions/023-ice-aktarma-ipucu-ve-kolon-kurallari.md), [ADR-030](decisions/030-ayrilisi-geri-alma-yikici.md))
+- [ ] Sicil no değişimi önerisi, tarihli ek role dokunmama kuralı ([ADR-055](decisions/055-netlestirmeler-onay-csv-operator-parola.md))
+- [ ] Toplu sahiplenme ve toplu yönetime alma ([ADR-018](decisions/018-ice-aktarma-ve-sahiplenme.md))
+  - Not: tekil sahiplenme 3e'de zaten var
+- [ ] Faz kapanışı: güvenlik ve test
+  - (1a'daki kapanış şablonunun aynısı)
+  - Kabul ek: "v1 hazır" — ilk beş faz + Zimbra bölümü sıfırdan kurulan ve mevcut personeli olan kurum için tek başına kullanılabilir
