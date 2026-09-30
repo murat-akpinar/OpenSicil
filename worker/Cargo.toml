@@ -15,6 +15,8 @@ sqlx = { version = "0.9", default-features = false, features = [
 ldap3 = { version = "0.12", default-features = false, features = ["tls-rustls-ring"] }
 chacha20poly1305 = "0.10"
 base64 = "0.22"
+# NFD ile aksan atma (ADR-011); zaten agacta (idna uzerinden), yeni paket degil
+unicode-normalization = "0.1"
 
 # rustls zaten agacta (sqlx ve ldap3 uzerinden, ring); ClientConfig kurmak icin dogrudan
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }

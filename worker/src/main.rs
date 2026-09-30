@@ -14,6 +14,9 @@ mod model;
 mod queue;
 #[cfg(test)]
 mod test_support;
+// Hesap acma (3a "tek add") cagirir; su an testler.
+#[allow(dead_code)]
+mod username;
 // Motor farki islemlere cevirince (3a) her hedef yazmasi buradan gecer; su an testler.
 #[allow(dead_code)]
 mod writes;

@@ -86,7 +86,7 @@ Kurallar:
 - [x] AD connector okuma yolu + katalog (OU, grup, SID, yasaklı grup, iç içe üyelik)
   - Not: lab için `sh samba-lab/gen-tls.sh` (SAN'lı LDAPS sertifikası) ve `sh samba-lab/seed.sh` (OU/grup/yasaklı grup seed'i); lab testi `AD_LAB_URL`, `AD_LAB_BIND_DN`, `AD_LAB_PASSWORD`, `AD_CA_FILE` ile çalışır (docs/09 lab)
 - [x] Açılış kontrolleri: kapsam DN'leri, `msDS-LogonTimeSyncInterval` ([ADR-060](decisions/060-lastlogontimestamp-on-kosulu-acilista-dogrulanir.md))
-- [ ] Şablonla kullanıcı adı üretimi; yalnızca veritabanı ve AD çakışması kontrol edilir
+- [x] Şablonla kullanıcı adı üretimi; yalnızca veritabanı ve AD çakışması kontrol edilir
 - [ ] Varsayılan eşleme + tek `add` ile hesap aç/etkinleştir/pasifleştir ([ADR-057](decisions/057-birincil-kaynak-dogrulamasi.md))
 - [ ] Kimlik kayıt formu + kişi sayfası + operatör dilinde hata + hedefteki fark görünümü (F-12)
 - [ ] Uçtan uca: kayıt → AD'de pasif hesap → ekranda "açıldı"

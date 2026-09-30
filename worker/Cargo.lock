@@ -1894,6 +1894,7 @@ dependencies = [
  "rustls",
  "sqlx",
  "tokio",
+ "unicode-normalization",
 ]
 
 [[package]]

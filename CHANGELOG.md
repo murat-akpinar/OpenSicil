@@ -42,4 +42,5 @@
 - Connector yazmaları tek noktadan geçer, kuru çalıştırma modu (ADR-054)
 - AD connector okuma yolu ve katalog (LDAPS, yasaklı gruplar, lab seed)
 - AD açılış kontrolleri: kapsam DN çözümü ve msDS-LogonTimeSyncInterval (ADR-060)
+- Şablonla kullanıcı adı üretimi ve DB/AD çakışma çözümü (ADR-011/022/035)
 
