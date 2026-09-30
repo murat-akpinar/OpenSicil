@@ -21,7 +21,7 @@ Kurallar:
 - [x] `docs/09-kurulum.md` açılır, bu fazdaki ön koşullar eklenir
   - Kabul: dosya var, bu faza ait `<...>` yer tutucuları dolduruldu
 - [x] Faz kapanışı: güvenlik ve test
-  - Kabul: testler, format, lint, bağımlılık taraması temiz (her crate ayrı, [ADR-070](decisions/070-bagimsiz-crate-per-crate-komut.md)) → `for d in backend worker; do (cd "$d" && cargo test && cargo fmt --all -- --check && cargo clippy --all-targets -- -D warnings && cargo audit); done`
+  - Kabul: testler, format, lint, bağımlılık taraması temiz (her crate ayrı, [ADR-070](decisions/070-bagimsiz-crate-per-crate-komut.md); `cargo audit`'te üst akımda düzeltmesi olmayan ve kullanım şeklimizde geçersiz saldırı önkoşullu bulgular kabul edilen risktir — [ADR-073](decisions/073-cargo-audit-rsa-bulgusu-kabul-edilen-risk.md)) → `for d in backend worker; do (cd "$d" && cargo test && cargo fmt --all -- --check && cargo clippy --all-targets -- -D warnings && cargo audit); done`
   - Kabul: yeni kodda satır kapsamı ≥ %80 (her crate ayrı, gerçek Postgres gerektiren entegrasyon testleri dahil — [ADR-070 Ek](decisions/070-bagimsiz-crate-per-crate-komut.md#ek-entegrasyon-testleri-ve-kapsam-ölçümü)) → tek kullanımlık test Postgres'i açılır, sonra `for d in backend worker; do (cd "$d" && DATABASE_URL="postgres://testuser:testpass@localhost:15432/testdb" cargo llvm-cov --fail-under-lines 80 -- --include-ignored); done`
   - Kabul: imaj taraması temiz — "temiz" tanımı [ADR-071](decisions/071-imaj-taramasi-temiz-tanimi.md) ([ADR-070](decisions/070-bagimsiz-crate-per-crate-komut.md)'la aynı gerçeklik çatışması: Debian taban imajının yama takvimi projenin kontrolünde değil) → `docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest image --severity CRITICAL,HIGH --scanners vuln <imaj>`; `Status: fixed` bulgu olmamalı
   - Kabul: sır sızıntısı yok → `git log -p <faz başı>..HEAD | grep -nEi '(password|secret|token|api[_-]?key)[[:space:]]*[:=]'` boş
@@ -37,10 +37,9 @@ Kurallar:
   - Kabul: Keycloak lab'ına karşı giriş yapılıyor, yetkiler `groups` claim'inden okunuyor
   - Kabul: oturum PostgreSQL'de saklanıyor
   - Kabul: en az bir `OpenSicil-Admins` girişi doğrulanınca yerel bootstrap giriş formu gizleniyor/pasifleşiyor
-- [ ] Ayrılmış/askıdaki operatör reddi ([ADR-055](decisions/055-netlestirmeler-onay-csv-operator-parola.md), [ADR-059](decisions/059-netlestirmeler-operator-geri-alma-aski-bitisi-accountexpires.md))
-  - Kabul: oturum açılışında ve her istekte kontrol edilen bir test var; ayrılmış/askıdaki operatörün isteği 403 dönüyor
-- [ ] Faz kapanışı: güvenlik ve test
+- [x] Faz kapanışı: güvenlik ve test
   - (1a'daki kapanış şablonunun aynısı)
+  - Not: "Ayrılmış/askıdaki operatör reddi" ([ADR-055](decisions/055-netlestirmeler-onay-csv-operator-parola.md), [ADR-059](decisions/059-netlestirmeler-operator-geri-alma-aski-bitisi-accountexpires.md)) buradan Faz 2'nin sonuna taşındı: eşleşme, kimlik tablosu ve durum türetme fonksiyonu (ADR-038) olmadan kurulamıyor. Bu kapanış o kutucuğu beklemez.
 
 ### 1c. Lab kod olarak + midPoint denemesi
 - [ ] `compose.lab.yaml` ile Samba AD ve Keycloak ayağa kalkar ([ADR-027](decisions/027-test-stratejisi-ve-lab.md))
@@ -71,6 +70,8 @@ Kurallar:
 - [ ] Olması gereken durum fonksiyonu saf modül olarak yazılır, tablo testleriyle gelir ([ADR-038](decisions/038-kimlik-durumu-turetilir.md))
   - Kabul: 3a, 3f ve Faz 5 aynı fonksiyonu çağırır; ikinci bir fark hesabı yok
   - Not: bu fazın sonunda ekranda çalışan bir şey yoktur, demo yapılmaz
+- [ ] Ayrılmış/askıdaki operatör reddi ([ADR-055](decisions/055-netlestirmeler-onay-csv-operator-parola.md), [ADR-059](decisions/059-netlestirmeler-operator-geri-alma-aski-bitisi-accountexpires.md)) — Faz 1b'den taşındı, bağımlılık burada çözülüyor
+  - Kabul: oturum açılışında ve her istekte kontrol edilen bir test var; ayrılmış/askıdaki operatörün isteği 403 dönüyor
 - [ ] Faz kapanışı: güvenlik ve test
   - (1a'daki kapanış şablonunun aynısı)
 
