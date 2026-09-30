@@ -1,0 +1,9 @@
+tmp/
+.env
+.env.local
+.git/
+.claude/
+docs/
+**/node_modules/
+**/__pycache__/
+**/*.log

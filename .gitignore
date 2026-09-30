@@ -1,0 +1,12 @@
+tmp/
+.env
+.env.local
+*.log
+
+# kişisel, paylaşılmaz
+CLAUDE.md
+CLAUDE.local.md
+.claude/
+
+# geliştirme sürecinin karar kayıtları; dışarıdaki kullanıcıya hitap etmez, localde kalır
+docs/decisions/

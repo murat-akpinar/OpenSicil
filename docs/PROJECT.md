@@ -1,0 +1,126 @@
+# Proje
+
+> **Durum:** Keşif ve mimari kararlar yazıldı (2026-09-17). Orta ve büyük ölçek gözden geçirmesi yapıldı (ADR 016–018). İK operatörü ve son kullanıcı gözüyle gözden geçirildi (2026-09-18: ADR 019–020, F-12/F-36/F-37, Faz 3 üçe bölündü). Plan gözden geçirmesi yapıldı (2026-09-18: ADR 021–028, `docs/09-kurulum.md` açıldı, faz sırası güncellendi). IGA mimarı ve işletmeci gözüyle ikinci gözden geçirme yapıldı (2026-09-18: ADR 029–036; değişiklik seti sahneleme, elle pasifleştirmenin korunması, ayrılışta parola gecikmesi, eşleme izinli listesi; faz sırası yeniden düzenlendi). Gözden geçirme önerileri uygulandı (2026-09-18: ADR 037–039; eşik ekleme işlemlerini sayar, durum tarihlerden türetilir, etkin ayar tablosu kalktı). IGA mimarı ve işletmeci gözüyle üçüncü gözden geçirme (2026-09-19: ADR 040–047; motor belirsiz değere dokunmaz, astların yöneticisi türetilir, aynı kişi farklı anahtar, eşik gözlemdekileri saymaz, yetki ekleme sayacı, ayrılan postası yönlendirme, `lastLogonTimestamp`, worker tek sırada; Faz 3 beşe bölündü). Dördüncü gözden geçirme (2026-09-19: ADR 048–056; kayıt iptali hedefte doğrulanır, ayrılanın kendi posta yönlendirmesi temizlenir ve yanıt gecikmeli, dört sayaç üçe indi ve iş sayaçlara karşı bütün, okuma şeridi, uygulanamayan fark ve "ayrılmış ama kapatılamamış" metriği, tarihli askı, kuru çalıştırma ve yedekten dönüş, Zimbra yerel parola ön koşulu; Faz 1'e Zimbra keşfi eklendi, tekil sahiplenme kendi alt fazına ayrıldı; hedef sahne "kaydet ve ilk parolayı ver" olarak yazıldı, N-13). Birincil kaynak doğrulaması (2026-09-19: ADR-057, [docs/11](11-dogrulama-notlari.md); 56 teknik iddia Zimbra ve Samba kaynak koduna, Microsoft protokol belgelerine, `ldap3` ve Keycloak dokümanına karşı sınandı, dördü yanlış çıktı ve düzeltildi; lab listesi yalnızca canlı sistemde ölçülebilenlere indi). Son tarama yapıldı (2026-09-19: ADR 058–060; on sahne tasarımın içinden yürütüldü, varsayımlar "sessiz mi bozulur" diye denetlendi: Zimbra erişilemezken ad üretimi beklemez, ayrılmış operatör okuyamaz da, `ayrıldı`dan her çıkış geri almadır, askı bitişi iznin son günüdür, `accountExpires` temizlenir, `lastLogonTimestamp` ön koşulu açılışta doğrulanır; docs/02–09 ile ADR'ler arasındaki sürüklenme düzeltildi). Dağıtım gözden geçirmesi (2026-09-19: ADR 061–062; altı dağıtım sahnesi yürütüldü: tek sunucu referans, iki sunuculu düzenler ve Kubernetes aynı imajlarla ve ortak süreç sözleşmesiyle desteklenir, chart yayımlanmaz; uzak PostgreSQL'e TLS zorunlu; iş kirayla alınır, denetim niyet satırı işlemden önce yazılır; migration ve metrik ucu soruları kapandı, N-14 eklendi). Saha notları açıldı ([docs/10](10-saha-notlari.md)). Kurulum kararları devam ediyor (2026-09-30: ADR 064–066; frontend htmx + Tailwind + backend şablonları — ayrı frontend container'ı yok, OIDC akışı backend'de, TLS `compose.yaml` referansında nginx'te sonlanır). İskelet, `docs/todo.md` ve ilk commit henüz yapılmadı. `kurulum` skill'i kalan kararlarla (ekran dili, TLS crate seçimleri, test/format/lint komutları; bkz. [docs/08](08-gereksinimler.md#-kurulumda-kararlaştırılacak)) ve iskeletle devam eder. Uygulama kodu bundan önce yazılmaz.
+
+## Amaç
+OpenIAM (çalışma adı), kurum içi kimliklerin yaşam döngüsünü yöneten açık kaynak bir **IGA** ürünüdür. Personel kaydedildiğinde, seçilen departman ve rollere göre Active Directory'de hesap açar, OU'ya yerleştirir, gruplara ekler ve Zimbra'da mailbox oluşturur. Görev değişikliğinde yetkileri günceller, ayrılışta hesapları kapatır ve saklama süresi dolunca siler.
+
+**Kimler kullanır:** Kendi AD'sini işleten kurumlarda BT/sistem yöneticileri, yardım masası ve İK operatörleri.
+
+**Hedef ölçek:** Asıl hedef 500–5.000 kimlikli orta ölçekli kurumlardır. Küçük kurum varsayılanlarla, 50.000 kimliğe kadar büyük kurum eşikleri yükselterek çalışır. Onay akışı, yetki gözden geçirme ve SoD isteyen büyük kurum için doğru ürün midPoint'tir ([ADR-016](decisions/016-hedef-olcek-ve-olcekte-calisma.md)).
+
+**Hedef sahne:** Kişi işe gelir; İK adını, soyadını, kimlik numarasını, telefonunu ve birimini girer, "parolanız bu" der; kişi o dakikadan itibaren AD hesabı, grupları, mailbox'ı ve bunlardan yetki okuyan her şeyle çalışır ([ADR-056](decisions/056-ise-baslama-gunu-akisi.md), N-13).
+
+**Hangi sorunu çözer:** Hesap ve yetkilerin elle, kişiden kişiye farklı açılması; ayrılanların hesaplarının açık kalması; görev değiştirenlerde yetkilerin birikmesi.
+
+Uygulamalara erişim AD grupları üzerinden verilir. OpenBerat gibi grup okuyan uygulamalar ek bir entegrasyon gerektirmez. Kavramlar: [docs/00](00-kavramlar.md) · Mimari: [docs/02](02-mimari.md).
+
+## v1 kapsamı
+- OIDC ile yönetim ekranı girişi ve altı yönetim yetkisi; ayrılmış ya da askıdaki operatörün her isteği reddedilir
+- Kimlik, departman ve rol kaydı (temel + departman + birincil + ek rol); departman ağacı ve miras
+- CSV ile toplu kimlik içe aktarma; mevcut hesapların gözlem moduyla sahiplenilmesi
+- AD ve Zimbra'dan katalog içe alma
+- Kullanıcı adı ve e-posta üretimi (isteğe bağlı elle giriş); kullanılmış adların serbest bırakılması; öznitelik eşleme (kodda sabit izinli liste, "sadece boşsa yaz")
+- AD provisioning: hesap, öznitelik, OU, grup, etkinleştirme/pasifleştirme, silme
+- Zimbra provisioning: hesap, COS, dağıtım listesi, girişe kapatma, silme
+- Yaşam döngüsü: işe giriş, görev değişikliği, tarihli askıya alma, planlı ve acil ayrılış, ayrılışı geri alma, hedefte doğrulanan kayıt iptali (sahiplenilen hesap iptal edilemez), saklama sonrası silme; süreli ek rol; yönetici ayrılışında astların etkin yöneticisi devir yöneticisinden türetilir; ayrılışta kullanıcının kendi posta yönlendirmesi ve filtresi temizlenir, otomatik yanıt 24 saat sonra yazılır, devir yöneticisine yönlendirme ayarla açılır; hedef sistem başına saklama, mailbox onayla silinir; ayrılışta parola 7 gün sonra sıfırlanır; hedefte elle pasifleştirilen ya da silinen hesap korunur; rol ayarı mevcut hesabı silmez
+- İlk parolanın bir kez gösterilmesi (İK veya yardım masası), yalnızca hiç giriş yapılmamış hesaba; ilk girişte değiştirme işareti kurulum ayarı
+- Kimlik numarasının şifreli saklanması
+- Kişi sayfası, yaklaşan bitişler listesi, mutabakat raporu, denetim kaydı, izleme için metrik ucu ("ayrılmış ama kapatılamamış" dahil); worker kuru çalıştırma modu ve yedekten dönüş adımları
+- Yönetilen kapsam ve toplu değişiklik freni (eşik yetki farkı üreten kimliği sayar, ekleme dahil, gözlemdekiler hariç; eşiği aşan düzenleme taslak olarak bekler); saatlik yıkıcı, verme ve ilk parola sayaçları, iş sayaçlara karşı bütün; ayrılışı geri alma yıkıcı sayılır; tek yöneticili kurum için onay zaman kilidi
+
+Ayrıntı: [docs/08](08-gereksinimler.md). Kurulum ön koşulları ve ayarlar: [docs/09](09-kurulum.md).
+
+## v1 dışı (bilerek yapılmayanlar)
+- **Rol çıkarma yardımı (role mining), İK sisteminden otomatik besleme** — Sahiplenme ve CSV içe aktarma v1'dedir ([ADR-018](decisions/018-ice-aktarma-ve-sahiplenme.md)); bunlar onların üstüne gelir. v2.
+- **Operatör yetkisinin departman alt ağacıyla sınırlanması (yetki devri)** — v1'de altı yönetim yetkisi kurum genelinde geçerlidir. v2.
+- **E-posta yeniden adlandırma (soyad değişimi)** — Kullanıcı adı ve e-posta v1'de değişmez, görünen ad güncellenir. İK'ya gelen en sık talep olduğu için v2'nin ilk maddesidir (F-25).
+- **İleri tarihli rol değişikliği, devir süresi, süreli istisna** — Bekleyen değişiklik kayıtları ve çakışma kuralları gerektirir; geçici ihtiyaç bitiş tarihli ek rolle karşılanır ([ADR-020](decisions/020-sureli-ek-rol.md)). v2.
+- **SMS/aktivasyon ile parola teslimi, parola değiştirme sayfası** — Dış servis ve kimlik doğrulayan kendi kendine hizmet sayfası gerektirir. v2.
+- **Mailbox devri (paylaşım, dışa aktarma, arşiv)** — Yönlendirme ve otomatik yanıt v1'dedir ([ADR-045](decisions/045-ayrilan-postasi-yonlendirme.md)); kalan F-29 v2.
+- **Bildirimler, SIEM gönderimi, otomatik mutabakat düzeltmesi** — v1'de ekran ve log yeterli. v2.
+- **SCIM, uygulamaya özel veya manuel connector'lar** — Somut bir uygulama ihtiyacı yok; AD grupları v1'i karşılıyor. v2+.
+- **Kişi olmayan hesaplar** (servis hesabı, ortak posta kutusu, test hesabı) — Kimlik gerçek bir kişidir. Bunlar yönetilen OU'ların dışında durur; içindeyse mutabakat raporunda "bilinen istisna" olarak işaretlenir ([docs/09](09-kurulum.md)). v2+.
+- **Carbonio CE** — Zimbra'nın Admin SOAP API'sini korur (`urn:zimbraAdmin`, 7071); aynı connector'la desteklenmesi lab doğrulaması ister. v1.x adayı (F-41, [ADR-057](decisions/057-birincil-kaynak-dogrulamasi.md)).
+- **SSO, erişim kararı, PAM, yetki gözden geçirme kampanyaları, Entra ID lisansları** — Başka ürünlerin işi. Kalıcı olarak kapsam dışı.
+
+## Bileşenler
+| Bileşen | Görev | Stack |
+|---|---|---|
+| nginx | Tek giriş kapısı; TLS `compose.yaml` referansında burada sonlanır, önündeki proxy/Ingress'te de sonlanabilir ([ADR-066](decisions/066-tls-nginxte-sonlanir.md)) | nginxinc/nginx-unprivileged |
+| backend | Yönetim API'si + HTML arayüzü (htmx + Tailwind şablonları, [ADR-064](decisions/064-frontend-htmx-tailwind.md)), OIDC oturumu ([ADR-065](decisions/065-oidc-akisi-backend.md)), kayıt ve iş oluşturma. AD ve Zimbra'ya bağlanmaz | Rust (axum + sqlx) |
+| worker | Olması gereken durum motoru, AD ve Zimbra connector'ları, zamanlayıcı, mutabakat; v1'de yazma tek sırada, okuma işleri ayrı şeritte | Rust (sqlx, ldap3) |
+| db | Kimlikler, roller, katalog, iş kuyruğu, denetim kaydı | PostgreSQL |
+
+Dağıtım: tek host `docker compose` referanstır; birden fazla host ve Kubernetes aynı imajlarla desteklenir, worker her zaman tek kopyadır ([ADR-061](decisions/061-dagitim-sozlesmesi-compose-ve-kubernetes.md)).
+
+Lab'da ayrıca Samba AD ve Keycloak (`compose.lab.yaml`, [ADR-027](decisions/027-test-stratejisi-ve-lab.md)) ve bir Zimbra VM'i çalışır. Bunlar sürüme girmez.
+
+## Kararlar
+`docs/decisions/` altındadır. Güncel liste:
+- 001-kapsam-ve-konumlandirma.md — Bağımsız IGA ürünü; v1 AD + Zimbra; "OpenIAM" çalışma adı
+- 002-hazir-urun-yerine-gelistirme.md — midPoint/Syncope yerine yazmak; farklılaştırıcılar ve vazgeçme tetikleyicisi
+- 003-stack-rust-postgresql.md — Rust (axum + sqlx), PostgreSQL, kuyruk PostgreSQL'de
+- 004-mimari-web-ve-worker.md — backend ve worker ayrı; sırlar worker'da; olması gereken durum motoru
+- 005-yonetim-girisi-oidc.md — OIDC girişi; beş yönetim yetkisi (019 altıncıyı ekler); görev ayrılığı
+- 006-sirlar-env.md — Sırlar `.env`'de, servis bazında dağıtılır
+- 007-rol-modeli.md — Temel + departman + birincil + ek rol; tek değerli ayarlarda öncelik sırası
+- 008-uygulama-yetkileri-ad-gruplari.md — Uygulama erişimi AD grubuyla; v1'de uygulama connector'ı yok
+- 009-parola-yonetimi.md — Formda parola yok; ilk parola bir kez ve sadece kullanılmamış hesaba; Zimbra parolayı AD'de doğrular (ayrılış parolası 033, teslim şifrelemesi 036 ile değişti)
+- 010-kisisel-veri-kimlik-no-telefon.md — Kimlik no şifreli + blind index; hedefe yazmak eşleme ayarı; telefon E.164
+- 011-kullanici-adi-ve-eposta.md — Şablon + sabit normalleştirme; değişmez; tekrar kullanılmaz (kullanılmış ad kaydı 035 ile değişti)
+- 012-oznitelik-esleme.md — Sabit dönüşümlerle eşleme; betik dili yok (hedef listesi 029, sAM/UPN ve "sadece boşsa yaz" 034 ile değişti)
+- 013-yasam-dongusu.md — Durum tabanlı yaşam döngüsü; pasifleştir, 90 gün sonra sil; geri alma ve kayıt iptali (etkinleştirme 032, parola 033, iptalde ad 035, saklanan durum 038 ile değişti)
+- 014-yonetim-kapsami-ve-toplu-degisiklik-freni.md — Kapsam worker'da; yasaklı gruplar (iç içe dahil); 10 kimlik / saatte 50 kimlik freni (sayaçları 016, sahiplenmeyi 018, geri almayı 030, eşiğin yerini 031 günceller)
+- 015-veritabani-rolleri.md — Sahip, backend, worker rolleri; hesap bağlantısı ve kataloğa sadece worker yazar
+- 016-hedef-olcek-ve-olcekte-calisma.md — Hedef orta ölçek; kuyrukta tekilleştirme, öncelik, eşzamanlılık; tek DC'ye yapışma; ayrı fren sayaçları ve acil kota; metrik ucu
+- 017-departman-hiyerarsisi.md — Departman ağacı ve miras; e-posta alan adı ve UPN soneki tek değerli ayar
+- 018-ice-aktarma-ve-sahiplenme.md — Sicil no ile CSV içe aktarma; sahiplenme worker'da doğrulanır, gözlem moduyla başlar, varsayılan kapalı
+- 019-ilk-parola-teslimi.md — Yardım masası yetkisi (altıncı yetki); ilk girişte değiştirme işareti kurulum ayarı
+- 020-sureli-ek-rol.md — Ek role isteğe bağlı bitiş tarihi; tarih dolunca kendiliğinden kaldırılır
+- 021-yeni-hesap-saatlik-siniri.md — Üçüncü saatlik sayaç: yeni hesap; ekleme işlemi sınırsız kalmaz (bilinen sınır 037 ile kapandı; sayaç 050'de "verme" sayacına birleşti)
+- 022-kullanici-adi-elle-giris-ve-cakisma.md — İsteğe bağlı elle kullanıcı adı; bağlı olmayan hesapla çakışmada `n+1` değil müdahale
+- 023-ice-aktarma-ipucu-ve-kolon-kurallari.md — Sahiplenme açıkken ipucu zorunlu; eksik kolon dokunmaz, boş hücre temizler; worker etkin ayarlarını yayımlar (ayar tablosu 039 ile kalktı)
+- 024-hedef-sistem-basina-saklama-suresi.md — Saklama hedef sistem başına; Zimbra onaysız silinmez; kimlik tüm hesaplar silinince `silindi`
+- 025-yonetici-ayrilisi-ve-astlar.md — Ayrılışta astların yöneticisi yeniden atanır (yerine 041 geçti)
+- 026-degisiklik-seti-onayinda-zaman-kilidi.md — Tek yöneticili kurum için onay zaman kilidi (varsayılan kapalı; kontrol 031 ile backend'e alındı)
+- 027-test-stratejisi-ve-lab.md — Samba lab kod olarak, entegrasyon testleri; Zimbra kayıtlı yanıt stub'ı
+- 028-worker-zamanlamasi.md — Kuyruk 5 sn yoklama; zamanlayıcı sorguya dayalı, kaçırılan geçişler yakalanır (sorgu listesi 038 ile tek biçime indi)
+- 029-esleme-hedef-oznitelikleri-izinli-liste.md — Eşlenebilir hedef öznitelikler kodda sabit; hassas kaynak eşlemesi worker ayarı
+- 030-ayrilisi-geri-alma-yikici.md — `ayrıldı → aktif` yıkıcı işlem; CSV geri alma yapamaz
+- 031-degisiklik-seti-sahneleme.md — Eşiği aşan düzenleme taslak; eşik model farkından backend'de; saldırgana karşı fren saatlik sayaçlar
+- 032-elle-pasiflestirme-korunur.md — Etkinleştirme yalnızca durum geçişinde; elle kapatılan hesap korunur ve raporlanır
+- 033-ayrilista-parola-gecikmesi.md — Parola ayrılıştan 7 gün sonra rastgele; acil ayrılışta hemen
+- 034-sam-upn-esleme-disi-ve-bossa-yaz.md — sAMAccountName ve UPN eşlenemez; eşleme satırında "sadece boşsa yaz"
+- 035-kullanilmis-ad-duz-metin-serbest-birakma.md — Kullanılmış ad kaydı düz metin ve serbest bırakılabilir; kayıt iptali adı yakmaz
+- 036-ilk-parola-aead.md — İlk parola mevcut AEAD anahtarıyla; geçici anahtar çifti yok
+- 037-esik-ekleme-islemlerini-sayar.md — Eşik yetki veya hesap durumu farkı üreten kimliği sayar; ekleme dahil, yalnızca öznitelik hariç
+- 038-kimlik-durumu-turetilir.md — Durum kolonu yok; tarihler ve işaretlerden türetilir; zamanlayıcı türetileni uygulananla karşılaştırır; kayıt iptali = saklamasız acil ayrılış
+- 039-ortak-ayarlar-env.md — Etkin ayar tablosu yok; ortak ayarlar iki servise de `.env`'den
+- 040-motor-belirsiz-degere-dokunmaz.md — "Hesap açılsın=hayır" mevcut hesabı silmez; kayıp hesap yeniden açılmaz; çözümlenemeyen `manager` temizlenmez
+- 041-astlarin-yoneticisi-turetilir.md — 025'in yerine geçer: devir yöneticisi ayrılanın kaydında, astların etkin yöneticisi bitiş anında türetilir
+- 042-ayni-kisi-farkli-anahtar.md — Kullanılmış adla çakışma müdahale; CSV'de olası mükerrer onayı; sicil no değişebilir; sahiplenmede ad uyarısı
+- 043-esik-uygulanacak-farki-sayar.md — Eşik gözlem modundaki kimlikleri saymaz; onayın kendisi eşiğe girmez
+- 044-saatlik-yetki-ekleme-sayaci.md — Dördüncü saatlik sayaç: mevcut hesaba yetki ekleme (050'de "verme" sayacına birleşti)
+- 045-ayrilan-postasi-yonlendirme.md — Ayrılan postası devir yöneticisine yönlendirilir, otomatik yanıt; hedef yalnızca bağlı hesap (varsayılanlar ve zamanlama 049 ile değişti)
+- 046-kullanilmamis-hesap-lastlogontimestamp.md — İlk parola yalnızca `lastLogonTimestamp` boş hesaba ya da ayrılışta sıfırlanmış hesaba
+- 047-worker-tek-sirada.md — v1 worker tek sırada; sayaç yarışı yok; eşzamanlılık Faz 5 ölçümüyle (okuma şeridi 051)
+- 048-kayit-iptali-hedefte-dogrulanir.md — Kayıt iptali worker'da hedefe karşı doğrulanır; sahiplenilen ya da kullanılmış hesap silinmez, planlı ayrılış gibi uygulanır
+- 049-ayrilan-postasi-kullanici-yonlendirmesi-ve-gecikme.md — Ayrılışta kullanıcının kendi yönlendirmesi ve filtresi temizlenir; yanıt 24 saat gecikmeli; yönlendirme varsayılan kapalı (045'in varsayılanlarını değiştirir)
+- 050-verme-sayaci-ve-is-butunlugu.md — Yeni hesap ve yetki ekleme tek "verme" sayacı (021 ve 044 birleşir); iş sayaçlara karşı bütün; önce ekleme, sonra çıkarma
+- 051-okuma-seridi.md — Mutabakat ve katalog ayrı okuma şeridinde; v1'de eşzamanlılık ayarı yok
+- 052-uygulanamayan-fark.md — Müdahaledeki iş açık sayılır; bağlantı hatası deneme tüketmez; bağımlı kimlikler için iş; "ayrılmış ama kapatılamamış" metriği
+- 053-tarihli-aski.md — Askı işareti yerine başlangıç ve dönüş tarihi
+- 054-kuru-calistirma-ve-yedekten-donus.md — Worker kuru çalıştırma modu; yedekten dönüş adımları
+- 055-netlestirmeler-onay-csv-operator-parola.md — Onay anında yeniden önizleme; CSV tarihli ek role dokunmaz; kimlik no eşleşmesi sicil değişimi önerisi; ayrılmış operatör yazamaz; parola reddinde yeniden üretim
+- 056-ise-baslama-gunu-akisi.md — Hedef sahne: "kaydet ve ilk parolayı ver" tek adım, ≤ 60 sn (N-13); okunabilir ilk parola; kullanılmamış kayıt parola verilmiş olsa da iptal edilebilir
+- 057-birincil-kaynak-dogrulamasi.md — Zimbra hesabı parolasız açılır; Zimbra ön koşulları düzeltildi (geri düşme varsayılan kapalı, arama filtresi yalnızca `ldap` mekanizmasında, admin hesabı yönetilen alan adının dışında); AD hesabı tek `add`; `<GUID=…>` yalnızca aramada; `ldap3` kuralları; Carbonio v1.x adayı
+- 058-zimbra-erisilemezken-ad-uretimi.md — Ad üretimi AD'yi şart koşar, Zimbra'yı koşmaz; Zimbra erişilemezken kontrol atlanır, çakışma Zimbra işinde müdahale olur (011, 022 ve docs/08 Faz 4 cümlesini değiştirir)
+- 059-netlestirmeler-operator-geri-alma-aski-bitisi-accountexpires.md — Ayrılmış operatör kontrolü her istekte ve oturum açılışında; `ayrıldı`dan her çıkış geri almadır; askı bitişi iznin son günüdür; `accountExpires` bitiş kaldırılınca süresiz yazılır
+- 060-lastlogontimestamp-on-kosulu-acilista-dogrulanir.md — `msDS-LogonTimeSyncInterval = 0` ise AD connector'ı başlamaz; `lastLogonTimestamp` replikasyon penceresi kabul edildi
+- 061-dagitim-sozlesmesi-compose-ve-kubernetes.md — Dört topoloji aynı imaj ve tek `compose.yaml` ile: tek sunucu (referans), uygulama + veritabanı, ön yüz + worker, Kubernetes; chart yok; süreç sözleşmesi (SIGTERM, `worker-health`, sırasız başlangıç, migration container'ı, süreçte durum yok, servis alt kümesi, uzak PostgreSQL'e `verify-full`, token'lı metrik); worker tek kopya, `Recreate`
+- 062-is-kirasi-ve-yarida-kalan-is.md — İş 5 dk kirayla alınır, ölen worker'ın işi deneme tüketmeden yeniden alınır; niyet satırı işlemden önce, sayaç niyeti sayar; iki worker güvenli, sayaç en fazla bir iş aşar
+- 063-kalici-urun-adi-opensicil.md — 001'in adlandırma kısmının yerine geçer: kalıcı ürün adı OpenSicil; GitHub/crates.io/Docker Hub'da çakışma yok
+- 064-frontend-htmx-tailwind.md — Ayrı frontend yok; backend htmx + Tailwind ile HTML şablonu üretir, Node/SPA build zinciri yok
+- 065-oidc-akisi-backend.md — OIDC akışı backend'de yürütülür, oauth2-proxy eklenmez; oturum PostgreSQL'de
+- 066-tls-nginxte-sonlanir.md — `compose.yaml` referansında TLS nginx'te sonlanır; dış proxy/Ingress'te düz HTTP moduna alınabilir
