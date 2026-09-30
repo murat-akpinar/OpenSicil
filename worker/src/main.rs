@@ -1,4 +1,9 @@
+mod ad;
+mod catalog;
 mod common_settings;
+// backend kopyasiyla birebir ayni; worker su an yalnizca cozer, ilk parola (3d) sifreler.
+#[allow(dead_code)]
+mod crypto;
 mod db;
 // effective_manager'i AD eslemesi (3a connector) cagirir; backend kopyasiyla birebir ayni.
 #[allow(dead_code)]
@@ -49,6 +54,8 @@ struct Env {
     database_url: String,
     time_zone: String,
     write_mode: writes::Mode,
+    aead_key: [u8; crypto::KEY_LEN],
+    ad_ca_file: Option<String>,
 }
 
 // Ortak ayarlar acilista dogrulanir ve loglanir; backend'in satiriyla yan
@@ -68,6 +75,11 @@ fn load_env() -> Result<Env, String> {
         }
         Err(_) => return Err("worker: ortam değişkeni eksik: DRY_RUN".to_string()),
     };
+    let aead_key = std::env::var("AEAD_MASTER_KEY")
+        .map_err(|_| "worker: ortam değişkeni eksik: AEAD_MASTER_KEY".to_string())
+        .and_then(|v| {
+            crypto::parse_key("AEAD_MASTER_KEY", &v).map_err(|e| format!("worker: {e}"))
+        })?;
     println!("worker: ortak ayarlar: {common}");
     if dry_run {
         println!("worker: KURU ÇALIŞTIRMA açık — hedefe hiçbir şey yazılmaz (ADR-054)");
@@ -76,7 +88,57 @@ fn load_env() -> Result<Env, String> {
         database_url,
         time_zone: common.time_zone,
         write_mode: writes::Mode { dry_run },
+        aead_key,
+        ad_ca_file: std::env::var("AD_CA_FILE").ok(),
     })
+}
+
+// Acilista katalog yenileme (docs/03 katalog; ADR-051: okuma seridi Faz 5'e kadar
+// burada). AD yapilandirilmamissa atlanir; DC'ye ulasilamiyorsa surec cikmaz,
+// loglar ve devam eder (ADR-061); kapsam hatasi da AD connector'ini baslatmaz.
+async fn refresh_catalog_at_startup(pool: &PgPool, env: &Env) {
+    let cfg = match ad::load_config(pool, &env.aead_key, env.ad_ca_file.as_deref()).await {
+        Ok(Some(cfg)) => cfg,
+        Ok(None) => {
+            println!("worker: AD yapılandırılmamış, katalog yenileme atlandı");
+            return;
+        }
+        Err(e) => {
+            eprintln!("worker: AD ayarları okunamadı, katalog yenileme atlandı: {e}");
+            return;
+        }
+    };
+    let scope = match ad::parse_scope(|name| std::env::var(name).ok()) {
+        Ok(scope) => scope,
+        Err(e) => {
+            eprintln!("worker: yönetilen kapsam geçersiz, AD connector'ı başlamadı: {e}");
+            return;
+        }
+    };
+    let target: Result<i64, sqlx::Error> =
+        sqlx::query_scalar("SELECT id FROM target_systems WHERE kind = 'ad'")
+            .fetch_one(pool)
+            .await;
+    let outcome = async {
+        let target = target.map_err(|e| format!("hedef sistem okunamadı: {e}"))?;
+        let mut ldap = ad::connect(&cfg).await.map_err(|e| e.to_string())?;
+        let snapshot = ad::read_catalog(&mut ldap, &scope)
+            .await
+            .map_err(|e| e.to_string())?;
+        ldap.unbind().await.ok();
+        let counts = catalog::sync_snapshot(pool, target, &snapshot)
+            .await
+            .map_err(|e| format!("katalog yazılamadı: {e}"))?;
+        Ok::<_, String>((counts, snapshot.forbidden.len()))
+    }
+    .await;
+    match outcome {
+        Ok((counts, forbidden)) => println!(
+            "worker: AD kataloğu yenilendi: {} OU, {} grup, {} kayıp; {forbidden} yasaklı grup kataloğa alınmadı",
+            counts.ous, counts.groups, counts.marked_missing
+        ),
+        Err(e) => eprintln!("worker: AD kataloğu yenilenemedi: {e}"),
+    }
 }
 
 // SIGTERM'de eldeki is bitirilir, yeni is alinmaz (ADR-061 madde 1): bayrak +
@@ -126,6 +188,7 @@ async fn run() -> ExitCode {
     };
     let worker_id = worker_id();
     println!("worker: {worker_id} başladı, {POLL_INTERVAL:?} aralıkla yoklanıyor");
+    refresh_catalog_at_startup(&pool, &env).await;
 
     // Yazma seridi tek sirada (ADR-047): bir is bitmeden digeri alinmaz;
     // kuyruk bosalinca 5 sn beklenir. Erisilemeyen hedefin isleri bir yoklama
@@ -230,6 +293,10 @@ mod tests {
         unsafe {
             std::env::set_var("DATABASE_URL", &test_url);
             std::env::set_var("DRY_RUN", "true");
+            std::env::set_var(
+                "AEAD_MASTER_KEY",
+                "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+            );
             for (name, value) in common_settings::tests::ENV_EXAMPLE_DEFAULTS {
                 std::env::set_var(name, value);
             }

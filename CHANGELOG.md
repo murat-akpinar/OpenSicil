@@ -40,4 +40,5 @@
 - Iş kuyruğu, kira, niyet satırı ve tek sıralı motor döngüsü
 - Bağlantı hatası deneme tüketmez, erişilemeyen hedefin işleri bekletilir (ADR-052)
 - Connector yazmaları tek noktadan geçer, kuru çalıştırma modu (ADR-054)
+- AD connector okuma yolu ve katalog (LDAPS, yasaklı gruplar, lab seed)
 

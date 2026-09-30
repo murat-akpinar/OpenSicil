@@ -48,6 +48,15 @@ pub enum WriteError {
     Failed(String),
 }
 
+impl std::fmt::Display for WriteError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WriteError::Unreachable(r) => write!(f, "hedefe ulaşılamıyor: {r}"),
+            WriteError::Failed(r) => write!(f, "{r}"),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum WriteFailure {
     LeaseLost,

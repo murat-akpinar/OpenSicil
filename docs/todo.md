@@ -83,7 +83,8 @@ Kurallar:
 - [x] Müdahaledeki iş açık sayılır, bağlantı hatası deneme tüketmez ([ADR-052](decisions/052-uygulanamayan-fark.md))
 - [x] Connector yazma çağrıları tek noktadan geçer + kuru çalıştırma modu ([ADR-054](decisions/054-kuru-calistirma-ve-yedekten-donus.md))
   - Not: ekrandaki kalıcı şerit ve metrik bayrağı backend'in metrik ucuyla (Faz 4) gelir; worker tarafı (yazma kesimi, "uygulanacaktı" sonucu, açılış logu) burada
-- [ ] AD connector okuma yolu + katalog (OU, grup, SID, yasaklı grup, iç içe üyelik)
+- [x] AD connector okuma yolu + katalog (OU, grup, SID, yasaklı grup, iç içe üyelik)
+  - Not: lab için `sh samba-lab/gen-tls.sh` (SAN'lı LDAPS sertifikası) ve `sh samba-lab/seed.sh` (OU/grup/yasaklı grup seed'i); lab testi `AD_LAB_URL`, `AD_LAB_BIND_DN`, `AD_LAB_PASSWORD`, `AD_CA_FILE` ile çalışır (docs/09 lab)
 - [ ] Açılış kontrolleri: kapsam DN'leri, `msDS-LogonTimeSyncInterval` ([ADR-060](decisions/060-lastlogontimestamp-on-kosulu-acilista-dogrulanir.md))
 - [ ] Şablonla kullanıcı adı üretimi; yalnızca veritabanı ve AD çakışması kontrol edilir
 - [ ] Varsayılan eşleme + tek `add` ile hesap aç/etkinleştir/pasifleştir ([ADR-057](decisions/057-birincil-kaynak-dogrulamasi.md))

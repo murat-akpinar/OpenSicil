@@ -82,7 +82,7 @@ mod tests {
     // Docker build context'inde worker dizini yoktur; orada test atlanir.
     #[test]
     fn twin_modules_match_worker_copies() {
-        for name in ["common_settings.rs", "desired_state.rs"] {
+        for name in ["common_settings.rs", "desired_state.rs", "crypto.rs"] {
             let mine =
                 std::fs::read_to_string(format!("src/{name}")).expect("kendi kopyası okunamadı");
             let Ok(theirs) = std::fs::read_to_string(format!("../worker/src/{name}")) else {

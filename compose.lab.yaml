@@ -37,9 +37,24 @@ services:
     environment:
       SAMBACC_CONFIG: /etc/opensicil/config.json
       SAMBA_CONTAINER_ID: ad
+    # ponytail: host'tan (worker entegrasyon testleri) LDAPS icin 6360; SAN'li
+    # lab sertifikasi `sh samba-lab/gen-tls.sh` ile uretilir (git'e girmez), Samba
+    # kendi sertifikasi yerine bunu sunar (config.json "globals"). docker.md'nin
+    # "yalnizca nginx port acar" kurali urun compose'u icindir, lab icin degil.
+    ports:
+      - "6360:636"
     volumes:
       - ./samba-lab/config.json:/etc/opensicil/config.json:ro
-    command: ["run", "--setup=provision", "--setup=populate"]
+      - ./samba-lab/tls:/etc/opensicil/tls:ro
+    # Samba TLS anahtarini root:0600 ister (CVE-2013-4476 kontrolu); bind mount
+    # host sahipligini tasidigi icin dosyalar once container icine kopyalanir.
+    entrypoint: ["sh", "-c"]
+    command:
+      - >-
+        mkdir -p /etc/samba/tls
+        && cp /etc/opensicil/tls/ca.pem /etc/opensicil/tls/cert.pem /etc/opensicil/tls/key.pem /etc/samba/tls/
+        && chmod 600 /etc/samba/tls/key.pem
+        && exec samba-dc-container run --setup=provision --setup=populate
     healthcheck:
       test: ["CMD", "samba-tool", "domain", "info", "127.0.0.1"]
       interval: 5s

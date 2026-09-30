@@ -6,6 +6,8 @@ target/
 
 # yerel gelistirme TLS sertifikasi (self-signed); sir sayilir, commit'lenmez
 nginx/tls/
+# lab Samba AD LDAPS sertifikasi (samba-lab/gen-tls.sh uretir)
+samba-lab/tls/
 
 # kişisel, paylaşılmaz
 CLAUDE.md

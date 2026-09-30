@@ -4,7 +4,18 @@
     "ad": {
       "instance_features": ["addc"],
       "domain_settings": "opensicil",
-      "instance_name": "DC1"
+      "instance_name": "DC1",
+      "globals": ["tls"]
+    }
+  },
+  "globals": {
+    "tls": {
+      "options": {
+        "tls enabled": "yes",
+        "tls certfile": "/etc/samba/tls/cert.pem",
+        "tls keyfile": "/etc/samba/tls/key.pem",
+        "tls cafile": "/etc/samba/tls/ca.pem"
+      }
     }
   },
   "domain_settings": {
