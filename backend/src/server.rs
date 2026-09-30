@@ -69,22 +69,13 @@ pub async fn run() -> ExitCode {
         }
     };
 
-    let pool = match crate::db::connect_pool(&database_url).await {
+    let pool = match prepare_pool(&database_url, &time_zone).await {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("backend: veritabanına bağlanılamadı: {e}");
+            eprintln!("backend: {e}");
             return ExitCode::FAILURE;
         }
     };
-
-    if let Err(e) = crate::db::check_schema_ready(&pool).await {
-        eprintln!("backend: şema hazır değil: {e}");
-        return ExitCode::FAILURE;
-    }
-    if let Err(e) = crate::db::check_time_zone(&pool, &time_zone).await {
-        eprintln!("backend: {e}");
-        return ExitCode::FAILURE;
-    }
 
     let app = build_router(AppState {
         pool,
@@ -115,6 +106,18 @@ pub async fn run() -> ExitCode {
 
 fn key_from_env(var: &str) -> Result<[u8; crate::crypto::KEY_LEN], String> {
     crate::crypto::parse_key(var, &env_required(var)?)
+}
+
+// Baglanti, sema (ADR-061 madde 3) ve saat dilimi kontrolu tek yerde (run() ≤ 50 satir).
+async fn prepare_pool(database_url: &str, time_zone: &str) -> Result<sqlx::PgPool, String> {
+    let pool = crate::db::connect_pool(database_url)
+        .await
+        .map_err(|e| format!("veritabanına bağlanılamadı: {e}"))?;
+    crate::db::check_schema_ready(&pool)
+        .await
+        .map_err(|e| format!("şema hazır değil: {e}"))?;
+    crate::db::check_time_zone(&pool, time_zone).await?;
+    Ok(pool)
 }
 
 // SIGTERM'de yeni baglanti almayi durdurur, acik istekler biter (ADR-061 madde 1).

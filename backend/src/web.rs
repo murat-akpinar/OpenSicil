@@ -300,6 +300,11 @@ async fn establish_operator_session(
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
+    audit_operator_login(state, &operator).await;
+    operator_home_with_cookie(&token, result.username, result.authorities)
+}
+
+async fn audit_operator_login(state: &AppState, operator: &crate::operator_session::Operator) {
     let actor = crate::audit::Actor {
         subject: Some(&operator.subject),
         username: &operator.username,
@@ -316,21 +321,23 @@ async fn establish_operator_session(
     {
         eprintln!("web: denetim kaydı yazılamadı (operator.login): {e}");
     }
+}
 
+fn operator_home_with_cookie(token: &str, username: String, authorities: Vec<String>) -> Response {
     let mut headers = HeaderMap::new();
     headers.insert(
         header::SET_COOKIE,
         cookie_header_value(&set_cookie_header(
             OPERATOR_SESSION_COOKIE_NAME,
-            &token,
+            token,
             crate::operator_session::SESSION_LIFETIME_HOURS * 3600,
         )),
     );
     (
         headers,
         render(&OperatorHomeTemplate {
-            username: result.username,
-            authorities: result.authorities,
+            username,
+            authorities,
         }),
     )
         .into_response()

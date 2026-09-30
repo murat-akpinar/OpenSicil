@@ -32,22 +32,25 @@ async fn prepare_pool(database_url: &str) -> Result<PgPool, String> {
     Ok(pool)
 }
 
-async fn run() -> ExitCode {
-    let Some(database_url) = std::env::var("DATABASE_URL").ok() else {
-        eprintln!("worker: ortam değişkeni eksik: DATABASE_URL");
-        return ExitCode::FAILURE;
-    };
+// Ortak ayarlar acilista dogrulanir ve loglanir; backend'in satiriyla yan
+// yana konunca iki servisin sapmasi gorulur (ADR-039). Sayac ve sahiplenme
+// kararlari Faz 3'te bu degerlerle verilir. DATABASE_URL'i doner.
+fn load_env() -> Result<String, String> {
+    let database_url = std::env::var("DATABASE_URL")
+        .map_err(|_| "worker: ortam değişkeni eksik: DATABASE_URL".to_string())?;
+    let common = common_settings::CommonSettings::from_env().map_err(|e| format!("worker: {e}"))?;
+    println!("worker: ortak ayarlar: {common}");
+    Ok(database_url)
+}
 
-    // Ortak ayarlar acilista dogrulanir ve loglanir; backend'in satiriyla yan
-    // yana konunca iki servisin sapmasi gorulur (ADR-039). Sayac ve sahiplenme
-    // kararlari Faz 3'te bu degerlerle verilir.
-    match common_settings::CommonSettings::from_env() {
-        Ok(common) => println!("worker: ortak ayarlar: {common}"),
+async fn run() -> ExitCode {
+    let database_url = match load_env() {
+        Ok(url) => url,
         Err(e) => {
-            eprintln!("worker: {e}");
+            eprintln!("{e}");
             return ExitCode::FAILURE;
         }
-    }
+    };
 
     let pool = match prepare_pool(&database_url).await {
         Ok(p) => p,

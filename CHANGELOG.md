@@ -20,6 +20,7 @@
 - Faz 1a güvenlik ve test kapanışını tamamla
 - Faz 1b güvenlik ve test kapanışını tamamla
 - Faz 1c güvenlik ve test kapanışını tamamla
+- Faz 2 güvenlik ve test kapanışını tamamla
 
 ### Özellikler
 
