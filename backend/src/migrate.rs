@@ -67,6 +67,9 @@ pub async fn run() -> ExitCode {
 //   silindi temizligi (kisisel veri kolonlari + deleted_at) yalnizca worker
 //   (ADR-015, ADR-038, ADR-077). Kimlik satiri hic silinmez, ic ID kalir.
 // - identity_additional_roles: suresi dolan atamayi worker siler (ADR-020)
+// - catalog_items: yalnizca worker yazar, silmez (kayip isaretler); target_systems
+//   satirlari sabit, varsayilanlarini backend gunceller; yetki ogesi ve tek
+//   degerli ayar tablolari backend'in (ADR-015, docs/03)
 const SERVICE_GRANTS: &str = "\
 GRANT SELECT ON _sqlx_migrations TO {backend}, {worker};
 GRANT SELECT, INSERT, UPDATE, DELETE ON bootstrap_account, bootstrap_sessions, app_settings, \
@@ -80,6 +83,14 @@ GRANT SELECT ON identities TO {backend}, {worker};
 GRANT INSERT ({identity_operator_cols}), UPDATE ({identity_operator_cols}) ON identities TO {backend};
 GRANT UPDATE (username, email, upn, given_name, surname, employee_number, mobile_phone, deleted_at) \
 ON identities TO {worker};
+GRANT SELECT ON target_systems, catalog_items TO {backend}, {worker};
+GRANT UPDATE (account_enabled_default, default_container_item_id, retention_days, \
+delete_requires_approval) ON target_systems TO {backend};
+GRANT INSERT, UPDATE ON catalog_items TO {worker};
+GRANT SELECT, INSERT, UPDATE, DELETE ON role_entitlements, department_entitlements, \
+role_target_settings, department_target_settings TO {backend};
+GRANT SELECT ON role_entitlements, department_entitlements, role_target_settings, \
+department_target_settings TO {worker};
 ";
 
 const IDENTITY_OPERATOR_COLUMNS: &str = "given_name, surname, employee_number, mobile_phone, \
@@ -382,6 +393,7 @@ mod tests {
 
     struct Seed {
         department: i64,
+        base: i64,
         primary: i64,
         additional: i64,
     }
@@ -405,10 +417,12 @@ mod tests {
         .fetch_one(pool)
         .await
         .expect("ek rol açılamadı");
-        sqlx::query("INSERT INTO roles (kind, name) VALUES ('base', 'Temel')")
-            .execute(pool)
-            .await
-            .expect("temel rol açılamadı");
+        let base: i64 = sqlx::query_scalar(
+            "INSERT INTO roles (kind, name) VALUES ('base', 'Temel') RETURNING id",
+        )
+        .fetch_one(pool)
+        .await
+        .expect("temel rol açılamadı");
 
         let forbidden = [
             "INSERT INTO roles (kind, name) VALUES ('base', 'İkinci Temel')",
@@ -422,6 +436,7 @@ mod tests {
         }
         Seed {
             department,
+            base,
             primary,
             additional,
         }
@@ -510,6 +525,160 @@ mod tests {
             let result = sqlx::query(sql).bind(id).execute(pool).await;
             assert!(result.is_err(), "worker için reddedilmeliydi: {sql}");
         }
+    }
+
+    // docs/03 katalog: yetki ogesi yalnizca grup/liste, konteyner yalnizca ayni
+    // hedefin OU/COS'u, tek degerli ayar yalnizca birincil rol; katalogu worker yazar.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn catalog_enforces_item_kinds_and_writer_roles() {
+        let f = ServiceRoles::setup("catalog").await;
+        let catalog = crate::test_support::seed_example_catalog(&f.pool).await;
+        let seed = seed_department_and_roles(&f.backend_pool).await;
+        assert_backend_links_roles_to_catalog(&f.backend_pool, &seed, &catalog).await;
+        assert_only_worker_writes_catalog(&f.backend_pool, &f.worker_pool, &catalog).await;
+        f.teardown().await;
+    }
+
+    // sqlx yalnizca 'static SQL'i "denetlenmis" sayar; testteki her sorgu sabittir.
+    fn bind_all(
+        sql: &'static str,
+        binds: &[i64],
+    ) -> sqlx::query::Query<'static, sqlx::Postgres, sqlx::postgres::PgArguments> {
+        let mut query = sqlx::query(sql);
+        for value in binds {
+            query = query.bind(*value);
+        }
+        query
+    }
+
+    async fn assert_rejected(pool: &PgPool, sql: &'static str, binds: &[i64], why: &str) {
+        assert!(
+            bind_all(sql, binds).execute(pool).await.is_err(),
+            "{why}: {sql}"
+        );
+    }
+
+    async fn assert_backend_links_roles_to_catalog(
+        pool: &PgPool,
+        seed: &Seed,
+        catalog: &crate::test_support::ExampleCatalog,
+    ) {
+        const ROLE_ENT: &str =
+            "INSERT INTO role_entitlements (role_id, catalog_item_id) VALUES ($1, $2)";
+        const ROLE_SET: &str = "INSERT INTO role_target_settings \
+            (role_id, target_system_id, container_item_id) VALUES ($1, $2, $3)";
+        const DEPT_ENT: &str =
+            "INSERT INTO department_entitlements (department_id, catalog_item_id) VALUES ($1, $2)";
+        // docs/03 "Örnek" bölümü: temel rol, departman BT, birincil Uzman, ek Nöbet
+        let allowed: [(&'static str, Vec<i64>); 11] = [
+            (ROLE_ENT, vec![seed.base, catalog.gg_internet]),
+            (ROLE_ENT, vec![seed.base, catalog.list_herkes]),
+            (DEPT_ENT, vec![seed.department, catalog.gg_bt_paylasim]),
+            (DEPT_ENT, vec![seed.department, catalog.list_bt]),
+            (ROLE_ENT, vec![seed.primary, catalog.gg_sistem_uzmanlari]),
+            (ROLE_ENT, vec![seed.primary, catalog.gg_vpn]),
+            (ROLE_ENT, vec![seed.additional, catalog.gg_nobet]),
+            (ROLE_ENT, vec![seed.additional, catalog.list_nobet]),
+            (
+                ROLE_SET,
+                vec![seed.primary, catalog.ad, catalog.sistem_uzmanlari_ou],
+            ),
+            (
+                ROLE_SET,
+                vec![seed.primary, catalog.zimbra, catalog.cos_teknik],
+            ),
+            (
+                "INSERT INTO department_target_settings \
+                 (department_id, target_system_id, email_domain) VALUES ($1, $2, 'example.com')",
+                vec![seed.department, catalog.zimbra],
+            ),
+        ];
+        for (sql, binds) in allowed {
+            bind_all(sql, &binds)
+                .execute(pool)
+                .await
+                .unwrap_or_else(|e| panic!("izinli olmalıydı: {sql}: {e}"));
+        }
+
+        let rejected: [(&'static str, Vec<i64>, &str); 4] = [
+            (
+                ROLE_ENT,
+                vec![seed.primary, catalog.personel_ou],
+                "OU yetki öğesi olamaz",
+            ),
+            (
+                ROLE_SET,
+                vec![seed.additional, catalog.ad, catalog.personel_ou],
+                "ek rol tek değerli ayar taşıyamaz",
+            ),
+            (
+                ROLE_SET,
+                vec![seed.primary, catalog.zimbra, catalog.gg_vpn],
+                "grup konteyner olamaz",
+            ),
+            (
+                ROLE_SET,
+                vec![seed.primary, catalog.zimbra, catalog.personel_ou],
+                "konteyner başka hedefin olamaz",
+            ),
+        ];
+        for (sql, binds, why) in rejected {
+            assert_rejected(pool, sql, &binds, why).await;
+        }
+    }
+
+    async fn assert_only_worker_writes_catalog(
+        backend_pool: &PgPool,
+        worker_pool: &PgPool,
+        catalog: &crate::test_support::ExampleCatalog,
+    ) {
+        const NEW_ITEM: &str = "INSERT INTO catalog_items \
+            (target_system_id, kind, external_id, display_name) VALUES ($1, 'group', 'guid-yeni', 'GG-Yeni')";
+        sqlx::query("UPDATE target_systems SET retention_days = 30 WHERE id = $1")
+            .bind(catalog.ad)
+            .execute(backend_pool)
+            .await
+            .expect("backend hedef sistem varsayılanını güncelleyebilmeli");
+        assert_rejected(
+            backend_pool,
+            NEW_ITEM,
+            &[catalog.ad],
+            "backend katalog yazamamalı",
+        )
+        .await;
+        assert_rejected(
+            backend_pool,
+            "UPDATE target_systems SET kind = 'zimbra' WHERE id = $1",
+            &[catalog.ad],
+            "backend hedef sistem türünü değiştirememeli",
+        )
+        .await;
+
+        sqlx::query(NEW_ITEM)
+            .bind(catalog.ad)
+            .execute(worker_pool)
+            .await
+            .expect("worker katalog öğesi ekleyebilmeli");
+        sqlx::query("UPDATE catalog_items SET missing_since = now() WHERE id = $1")
+            .bind(catalog.gg_nobet)
+            .execute(worker_pool)
+            .await
+            .expect("worker öğeyi kayıp işaretleyebilmeli");
+        assert_rejected(
+            worker_pool,
+            "DELETE FROM catalog_items WHERE id = $1",
+            &[catalog.gg_nobet],
+            "katalog öğesi silinmez, kayıp işaretlenir",
+        )
+        .await;
+        assert_rejected(
+            worker_pool,
+            "INSERT INTO role_entitlements (role_id, catalog_item_id) SELECT id, $1 FROM roles LIMIT 1",
+            &[catalog.gg_vpn],
+            "worker rol tanımı yazamamalı",
+        )
+        .await;
     }
 
     // Gecici DB + iki servis rolu + GRANT; izin testleri paylasir.

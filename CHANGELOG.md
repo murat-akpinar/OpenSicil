@@ -30,4 +30,5 @@
 - Lab compose'una Samba AD ekle
 - Veritabanı rolleri ve denetim tablosu (current_user kolonu)
 - Kimlik modeli tabloları ve yönetilen kapsam kararı (ADR-077)
+- Katalog tabloları ve hedef sistem kaydı
 
