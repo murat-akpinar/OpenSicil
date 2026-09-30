@@ -1,8 +1,17 @@
+mod auth;
+mod bootstrap_account;
+mod cookie;
+mod crypto;
 mod db;
 mod health;
 mod logging;
 mod migrate;
 mod server;
+mod session;
+mod settings;
+#[cfg(test)]
+mod test_support;
+mod web;
 
 use std::process::ExitCode;
 

@@ -29,7 +29,7 @@ Kurallar:
   - Kabul: `.env.example` güncel, `docs/MAP.md` güncel
 
 ### 1b. Giriş
-- [ ] Yerel bootstrap hesabı ve Yapılandırma sayfası ([ADR-068](decisions/068-yapilandirma-sayfasi-ve-bootstrap-hesabi.md))
+- [x] Yerel bootstrap hesabı ve Yapılandırma sayfası ([ADR-068](decisions/068-yapilandirma-sayfasi-ve-bootstrap-hesabi.md))
   - Kabul: migration ile `admin`/`admin` seed ediliyor; ilk girişte eski parola sorulmadan yeni parola zorunlu
   - Kabul: bu hesapla yalnızca Yapılandırma sayfasına (AD, Zimbra, OIDC bağlantı ayarları) erişilebiliyor, başka hiçbir ekrana değil
   - Kabul: AD servis hesabı parolası, Zimbra admin parolası, OIDC client secret DB'de AEAD ile şifreli saklanıyor, `.env`'de değil

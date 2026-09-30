@@ -13,7 +13,7 @@ Yer imleri. Bir dosya eklendiğinde, taşındığında, silindiğinde veya yeni 
 - `compose.yaml` / `compose.override.yaml` → servisler (nginx, backend, worker, migrate, db); prod-benzeri `-f compose.yaml` ile override'sız çalışır
 - `.env.example` → gereken tüm ortam değişkeni adları (değer değil)
 - `nginx/` → `Dockerfile` (nginxinc/nginx-unprivileged), `nginx.conf` (TLS sonlanması, HTTP→HTTPS yönlendirme, `/healthz` — yönlendirmesiz iç healthcheck, `access_log off` — güvenlik header'ları — ADR-066)
-- `backend/` → axum + sqlx; `src/main.rs` (komut yönlendirme: `migrate` / sunucu), `src/server.rs` (HTTP sunucu), `src/health.rs` (`/api/health`), `src/migrate.rs` (rol oluşturma + şema migration), `src/logging.rs` (istek log'u, gerçek istemci IP'si `X-Forwarded-For`'dan), `src/db.rs`; `migrations/` (sqlx migration dosyaları), `.sqlx/` (offline önbellek, şu an boş — macro kullanılmıyor)
+- `backend/` → axum + sqlx; `src/main.rs` (komut yönlendirme: `migrate` / sunucu), `src/server.rs` (HTTP sunucu), `src/health.rs` (`/api/health`), `src/migrate.rs` (rol oluşturma + şema migration + bootstrap hesabı seed), `src/logging.rs` (istek log'u, gerçek istemci IP'si `X-Forwarded-For`'dan), `src/db.rs`, `src/web.rs` (HTML route'ları, askama), `src/auth.rs` (argon2id parola hash), `src/crypto.rs` (chacha20poly1305 AEAD), `src/cookie.rs` (oturum çerezi), `src/session.rs` (bootstrap oturumu), `src/settings.rs` (AD/Zimbra/OIDC ayarları, şifreli), `src/bootstrap_account.rs` (yerel admin hesabı), `src/test_support.rs` (yalnızca test: gecici DB); `templates/` (askama HTML şablonları); `migrations/` (sqlx migration dosyaları), `.sqlx/` (offline önbellek, şu an boş — macro kullanılmıyor)
 - `worker/` → sqlx; `src/main.rs` (nabız döngüsü / `worker-health`), `src/heartbeat.rs` (`/tmp/worker-heartbeat`), `src/db.rs`
 
 ## Feature indeksi
@@ -22,11 +22,14 @@ Koddaki `--- START FEATURE: <ad> ---` markerlarının karşılığı. Aramak iç
 
 | Feature | Nerede |
 |---|---|
-| <user-login> | <backend/src/auth/> |
+| bootstrap-admin | `backend/src/web.rs` |
 
 ## Ortak yardımcılar
 Yeni bir şey yazmadan önce buraya bak. Aynı işi yapan varsa tekrar yazma.
 
 | Ne yapar | Nerede |
 |---|---|
-| <istek doğrulama şeması> | <backend/src/common/validation> |
+| Parola hash (argon2id) | `backend/src/auth.rs` |
+| AEAD şifreleme/çözme (chacha20poly1305) | `backend/src/crypto.rs` |
+| Oturum çerezi kur/oku/temizle (HttpOnly+Secure+SameSite) | `backend/src/cookie.rs` |
+| Oturum token üret/hashle/doğrula | `backend/src/session.rs` |

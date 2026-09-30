@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Giriş — OpenSicil{% endblock %}
+{% block content %}
+<h1 class="text-xl font-semibold mb-6">OpenSicil — Yerel Yönetim Girişi</h1>
+{% if !error.is_empty() %}
+<p class="mb-4" style="color:#f38ba8;">{{ error }}</p>
+{% endif %}
+<form method="post" action="/login" class="space-y-4">
+  <div>
+    <label class="block text-sm mb-1" for="username">Kullanıcı adı</label>
+    <input class="w-full rounded px-3 py-2 text-black" type="text" id="username" name="username" value="admin" required>
+  </div>
+  <div>
+    <label class="block text-sm mb-1" for="password">Parola</label>
+    <input class="w-full rounded px-3 py-2 text-black" type="password" id="password" name="password" required>
+  </div>
+  <button class="w-full rounded py-2" style="background:#89b4fa; color:#1e1e2e;" type="submit">Giriş</button>
+</form>
+{% endblock %}

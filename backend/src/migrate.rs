@@ -40,6 +40,11 @@ pub async fn run() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
+    if let Err(e) = seed_bootstrap_account(&pool).await {
+        eprintln!("{e}");
+        return ExitCode::FAILURE;
+    }
+
     // backend ve worker acilista _sqlx_migrations'a bakarak semanin hazir
     // olup olmadigini kontrol eder (ADR-061 madde 3, crate::db::check_schema_ready)
     for user_var in ["POSTGRES_BACKEND_USER", "POSTGRES_WORKER_USER"] {
@@ -57,6 +62,31 @@ pub async fn run() -> ExitCode {
 
     println!("migrate: tamamlandı");
     ExitCode::SUCCESS
+}
+
+// ADR-068: admin/admin parolasi SQL migration'a duz metin gomulmez, hash burada
+// hesaplanir; hesap zaten varsa (ikinci calistirmada) dokunulmaz.
+pub(crate) async fn seed_bootstrap_account(pool: &PgPool) -> Result<(), String> {
+    let exists: bool =
+        sqlx::query_scalar("SELECT EXISTS (SELECT FROM bootstrap_account WHERE id = TRUE)")
+            .fetch_one(pool)
+            .await
+            .map_err(|e| format!("migrate: bootstrap hesabı kontrol edilemedi: {e}"))?;
+    if exists {
+        return Ok(());
+    }
+
+    let password_hash = crate::auth::hash_password("admin")
+        .map_err(|e| format!("migrate: bootstrap parolası hash'lenemedi: {e}"))?;
+    sqlx::query(
+        "INSERT INTO bootstrap_account (id, username, password_hash, must_change_password) \
+         VALUES (TRUE, 'admin', $1, TRUE)",
+    )
+    .bind(password_hash)
+    .execute(pool)
+    .await
+    .map_err(|e| format!("migrate: bootstrap hesabı seed edilemedi: {e}"))?;
+    Ok(())
 }
 
 async fn prepare_roles(pool: &PgPool) -> Result<(), String> {
@@ -199,32 +229,53 @@ mod tests {
         assert!(matches!(result, Err(RoleError::InvalidUsername(_))));
     }
 
-    // testdb'yi paylasan diger entegrasyon testleriyle (run_succeeds_end_to_end)
-    // _sqlx_migrations semasi cakismasin diye kendi gecici veritabanini kurar.
-    async fn fresh_test_db(admin_pool: &PgPool, admin_url: &str) -> (PgPool, String) {
-        let db_name = format!(
-            "opensicil_test_{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        );
-        sqlx::query(sqlx::AssertSqlSafe(format!("CREATE DATABASE {db_name}")))
-            .execute(admin_pool)
-            .await
-            .expect("test veritabanı oluşturulamadı");
-        let base = admin_url
-            .rsplit_once('/')
-            .map(|(head, _)| head)
-            .unwrap_or(admin_url);
-        let pool = crate::db::connect_pool(&format!("{base}/{db_name}"))
-            .await
-            .expect("test pool kurulamadı");
-        (pool, db_name)
-    }
-
     // Gercek Postgres gerektirir (ADR-070): DATABASE_URL, testler icin
     // ayrilmis bir veritabanina isaret etmeli (proje .env'i degil).
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn seed_bootstrap_account_is_idempotent() {
+        let database_url =
+            std::env::var("DATABASE_URL").expect("DATABASE_URL testler için ayarlanmalı");
+        let admin_pool = crate::db::connect_pool(&database_url)
+            .await
+            .expect("admin pool kurulamadı");
+        let (pool, db_name) = crate::test_support::create_temp_db(&admin_pool, &database_url).await;
+
+        let migrator = sqlx::migrate::Migrator::new(Path::new("./migrations"))
+            .await
+            .expect("migrator kurulamadı");
+        migrator.run(&pool).await.expect("migration çalışmadı");
+
+        seed_bootstrap_account(&pool)
+            .await
+            .expect("ilk seed başarısız");
+        let hash_after_first: String =
+            sqlx::query_scalar("SELECT password_hash FROM bootstrap_account WHERE id = TRUE")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+
+        seed_bootstrap_account(&pool)
+            .await
+            .expect("ikinci çağrı başarısız olmamalı");
+        let hash_after_second: String =
+            sqlx::query_scalar("SELECT password_hash FROM bootstrap_account WHERE id = TRUE")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+
+        assert_eq!(
+            hash_after_first, hash_after_second,
+            "hesap zaten varken parola hash'i değişmemeli"
+        );
+
+        drop(pool);
+        sqlx::query(sqlx::AssertSqlSafe(format!("DROP DATABASE {db_name}")))
+            .execute(&admin_pool)
+            .await
+            .expect("test veritabanı silinemedi");
+    }
+
     #[tokio::test]
     #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
     async fn ensure_role_creates_then_alters_and_grants_migrations_read() {
@@ -233,7 +284,7 @@ mod tests {
         let admin_pool = crate::db::connect_pool(&database_url)
             .await
             .expect("admin pool kurulamadı");
-        let (pool, db_name) = fresh_test_db(&admin_pool, &database_url).await;
+        let (pool, db_name) = crate::test_support::create_temp_db(&admin_pool, &database_url).await;
 
         let role = format!("opensicil_test_role_{}", std::process::id());
         let cleanup = || async {

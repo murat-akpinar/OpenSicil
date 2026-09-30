@@ -170,3 +170,12 @@ Motor, kapatılmış hesabı geri açmaz ve silinmiş hesabı yeniden açmaz ([A
 
 ## Migration
 Aynı imajın `migrate` alt komutu, şema sahibi rolüyle **tek seferlik container** olarak çalışır: compose'da backend ve worker'ın `service_completed_successfully` ile beklediği servis, Kubernetes'te Job. Sahip rolünün parolası yalnızca bu container'a verilir ([ADR-015](decisions/015-veritabani-rolleri.md), [ADR-061](decisions/061-dagitim-sozlesmesi-compose-ve-kubernetes.md)). Backend ve worker açılışta şema sürümüne bakar; eskiyse çıkar, orkestratör yeniden başlatır. Komutlar: tek sunucuda (topoloji A) `docker compose up -d` migrate'i `depends_on: service_completed_successfully` ile otomatik önce çalıştırır; elle ya da B/C'de tek başına çalıştırmak için `docker compose run --rm --no-deps migrate`.
+
+## İlk giriş
+`.env`'de artık yalnızca DB bağlantısı ve AEAD ana anahtarı var; AD/Zimbra/OIDC ayarları web'den girilir ([ADR-068](decisions/068-yapilandirma-sayfasi-ve-bootstrap-hesabi.md)):
+
+1. `docker compose up -d` (migrate önce çalışır, `bootstrap_account` tablosuna `admin`/`admin` seed edilir).
+2. `https://<PUBLIC_URL>/login` adresine `admin` / `admin` ile girin.
+3. İlk girişte eski parola sorulmadan yeni bir parola girmeniz istenir (en az 12 karakter). Bu hesap **yalnızca** Yapılandırma sayfasına erişebilir, başka hiçbir ekrana giremez.
+4. Yapılandırma sayfasından AD bağlantısını (host, bind DN, servis hesabı parolası), Zimbra bağlantısını (admin URL, admin parolası) ve OIDC ayarlarını (issuer, client id/secret) girin. Sır alanları boş bırakılırsa mevcut değer korunur; kaydedilen sırlar ekranda bir daha düz metin gösterilmez.
+5. En az bir `OpenSicil-Admins` OIDC girişi doğrulanınca yerel `admin` girişi gizlenir/pasifleşir ([ADR-068](decisions/068-yapilandirma-sayfasi-ve-bootstrap-hesabi.md) madde 3); OIDC girişi henüz kurulmadıysa (Faz 1b'nin sıradaki kutucuğu) bu adım geçerli değildir.

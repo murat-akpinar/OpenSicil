@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}OpenSicil{% endblock %}</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4" style="background:#1e1e2e; color:#cdd6f4; font-family: ui-monospace, monospace;">
+  <div class="w-full max-w-md rounded-lg shadow-lg p-8" style="background:#181825; border:1px solid #313244;">
+    {% block content %}{% endblock %}
+  </div>
+</body>
+</html>

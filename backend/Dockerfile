@@ -11,6 +11,9 @@ COPY Cargo.toml Cargo.lock ./
 COPY .sqlx ./.sqlx
 COPY migrations ./migrations
 COPY src ./src
+# askama sablonlarini derleme aninda Rust koduna gomer (askama_derive); runtime
+# imajinda templates/ dizinine gerek yok.
+COPY templates ./templates
 
 RUN cargo build --release --locked
 
