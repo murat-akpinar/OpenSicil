@@ -2,6 +2,10 @@ tmp/
 .env
 .env.local
 *.log
+target/
+
+# yerel gelistirme TLS sertifikasi (self-signed); sir sayilir, commit'lenmez
+nginx/tls/
 
 # kişisel, paylaşılmaz
 CLAUDE.md

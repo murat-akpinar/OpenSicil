@@ -1,0 +1,6 @@
+target/
+tmp/
+tests/
+.env
+.git/
+*.md

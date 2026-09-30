@@ -9,9 +9,12 @@ Yer imleri. Bir dosya eklendiğinde, taşındığında, silindiğinde veya yeni 
 - `docs/09-kurulum.md` → kurulum ön koşulları, boyutlandırma, ayarlar; env veya ön koşul ekleyen her kutucuk günceller
 - `docs/10-saha-notlari.md` → gerçek kurumda bugün işlerin nasıl yürüdüğü (olgu → tasarımdaki karşılığı → sonuç) henüz bilinmeyenler, son taramanın ve dağıtım gözden geçirmesinin sahne sonuçları ve bilerek yazılmayanlar; sahne yürütmeli gözden geçirmenin girdisi ve kaydı
 - `docs/11-dogrulama-notlari.md` → teknik iddiaların birincil kaynakla sınanmış hali (Zimbra, AD, Samba, `ldap3`, Keycloak, dağıtım): sonuç, alıntı, kaynak; yeni iddia önce buraya soru olarak girer
-- `docs/decisions/` → karar kayıtları (001–066; 025'in yerine 041 geçti)
-- `nginx/nginx.conf` → yönlendirme kuralları, güvenlik header'ları
-- `<backend/src/...>` → <ne işe yarar>
+- `docs/decisions/` → karar kayıtları (001–069; 025'in yerine 041, 001'in adlandırma kısmının yerine 063 geçti)
+- `compose.yaml` / `compose.override.yaml` → servisler (nginx, backend, worker, migrate, db); prod-benzeri `-f compose.yaml` ile override'sız çalışır
+- `.env.example` → gereken tüm ortam değişkeni adları (değer değil)
+- `nginx/` → `Dockerfile` (nginxinc/nginx-unprivileged), `nginx.conf` (TLS sonlanması, yönlendirme, güvenlik header'ları — ADR-066)
+- `backend/` → `Dockerfile` (Rust multi-stage); kaynak kod henüz yok
+- `worker/` → `Dockerfile` (Rust multi-stage); kaynak kod henüz yok
 
 ## Feature indeksi
 Koddaki `--- START FEATURE: <ad> ---` markerlarının karşılığı. Aramak için:

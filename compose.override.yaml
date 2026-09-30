@@ -1,0 +1,10 @@
+# Dev varsayilani (docker compose up); prod-benzeri calistirma icin
+# `docker compose -f compose.yaml up` kullanilir, bu dosya yuklenmez.
+services:
+  backend:
+    environment:
+      RUST_LOG: debug
+
+  worker:
+    environment:
+      RUST_LOG: debug

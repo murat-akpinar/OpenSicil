@@ -5,6 +5,7 @@
 ### Bakım
 
 - Proje dokümantasyonu ve ilk yapılandırma dosyaları
+- Docker iskeleti ve compose yapilandirmasini olustur
 
 ### Dokümantasyon
 
