@@ -9,6 +9,9 @@ mod db;
 #[allow(dead_code)]
 mod desired_state;
 mod health;
+// Kimlik kayit formu (3a) is acana kadar yalnizca testler cagirir.
+#[allow(dead_code)]
+mod jobs;
 mod logging;
 mod migrate;
 // Kimlik kayit formu (3a) tuketene kadar yalnizca testler cagirir (ADR-010).

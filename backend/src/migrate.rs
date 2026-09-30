@@ -71,6 +71,8 @@ pub async fn run() -> ExitCode {
 // - catalog_items: yalnizca worker yazar, silmez (kayip isaretler); target_systems
 //   satirlari sabit, varsayilanlarini backend gunceller; yetki ogesi ve tek
 //   degerli ayar tablolari backend'in (ADR-015, docs/03)
+// - account_links: yalnizca worker (ADR-015); jobs: backend acar ve "tekrar dene"
+//   ister, durum/kira/sonuc yalnizca worker (ADR-052, ADR-062)
 const SERVICE_GRANTS: &str = "\
 GRANT SELECT ON _sqlx_migrations TO {backend}, {worker};
 GRANT SELECT, INSERT, UPDATE, DELETE ON bootstrap_account, bootstrap_sessions, app_settings, \
@@ -95,6 +97,12 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON role_entitlements, department_entitlemen
 role_target_settings, department_target_settings TO {backend};
 GRANT SELECT ON role_entitlements, department_entitlements, role_target_settings, \
 department_target_settings TO {worker};
+GRANT SELECT ON account_links, jobs TO {backend}, {worker};
+GRANT INSERT, UPDATE, DELETE ON account_links TO {worker};
+GRANT INSERT (identity_id, target_system_id, priority), UPDATE (priority, retry_requested) \
+ON jobs TO {backend};
+GRANT UPDATE (status, attempts, next_attempt_at, locked_by, locked_until, retry_requested, \
+last_error, result, finished_at) ON jobs TO {worker};
 ";
 
 const IDENTITY_OPERATOR_COLUMNS: &str = "given_name, surname, employee_number, mobile_phone, \

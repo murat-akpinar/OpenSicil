@@ -14,3 +14,10 @@ sqlx = { version = "0.9", default-features = false, features = [
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "time", "test-util"] }
+# Testler ../backend/migrations ile gecici DB kurar (ADR-070 ek); "migrate" yalnizca test derlemesinde
+sqlx = { version = "0.9", default-features = false, features = [
+  "runtime-tokio",
+  "tls-rustls-ring",
+  "postgres",
+  "migrate",
+] }
