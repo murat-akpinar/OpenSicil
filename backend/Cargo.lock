@@ -165,6 +165,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "chacha20poly1305",
+ "hmac 0.12.1",
  "openidconnect",
  "rand 0.8.8",
  "serde",

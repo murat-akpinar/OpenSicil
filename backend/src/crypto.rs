@@ -7,17 +7,15 @@ const NONCE_LEN: usize = 12;
 pub const KEY_LEN: usize = 32;
 
 // ADR-069: chacha20poly1305, kimlik no + ilk parola + AD/Zimbra/OIDC sirlari icin tek AEAD.
+// AEAD ana anahtari ve blind index anahtari ayni bicimdedir: base64, 32 bayt (ADR-010).
 // Ham [u8; 32] dondurulur; GenericArray tipi bu modulun disina sizmaz.
-pub fn parse_master_key(base64_value: &str) -> Result<[u8; KEY_LEN], String> {
+pub fn parse_key(var_name: &str, base64_value: &str) -> Result<[u8; KEY_LEN], String> {
     let bytes = BASE64
         .decode(base64_value)
-        .map_err(|e| format!("AEAD_MASTER_KEY base64 çözülemedi: {e}"))?;
-    bytes.try_into().map_err(|b: Vec<u8>| {
-        format!(
-            "AEAD_MASTER_KEY {KEY_LEN} bayt olmalı, {} bayt geldi",
-            b.len()
-        )
-    })
+        .map_err(|e| format!("{var_name} base64 çözülemedi: {e}"))?;
+    bytes
+        .try_into()
+        .map_err(|b: Vec<u8>| format!("{var_name} {KEY_LEN} bayt olmalı, {} bayt geldi", b.len()))
 }
 
 // Cikti: nonce (12 bayt) + sifreli metin, tek BYTEA sutununda saklanir.
@@ -54,7 +52,7 @@ mod tests {
     use super::*;
 
     fn key_from_byte(fill: u8) -> [u8; KEY_LEN] {
-        parse_master_key(&BASE64.encode([fill; KEY_LEN])).unwrap()
+        parse_key("AEAD_MASTER_KEY", &BASE64.encode([fill; KEY_LEN])).unwrap()
     }
 
     fn test_key() -> [u8; KEY_LEN] {
@@ -90,12 +88,13 @@ mod tests {
     }
 
     #[test]
-    fn parse_master_key_rejects_wrong_length() {
-        assert!(parse_master_key(&BASE64.encode(b"cok-kisa")).is_err());
+    fn parse_key_rejects_wrong_length_and_names_the_variable() {
+        let err = parse_key("BLIND_INDEX_KEY", &BASE64.encode(b"cok-kisa")).unwrap_err();
+        assert!(err.starts_with("BLIND_INDEX_KEY"), "{err}");
     }
 
     #[test]
-    fn parse_master_key_rejects_invalid_base64() {
-        assert!(parse_master_key("!!!not-base64!!!").is_err());
+    fn parse_key_rejects_invalid_base64() {
+        assert!(parse_key("AEAD_MASTER_KEY", "!!!not-base64!!!").is_err());
     }
 }

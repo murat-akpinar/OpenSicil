@@ -20,6 +20,10 @@ const MIN_PASSWORD_LENGTH: usize = 12;
 pub struct AppState {
     pub pool: PgPool,
     pub aead_key: [u8; crate::crypto::KEY_LEN],
+    // kimlik numarasi blind index'i (ADR-010); kimlik kayit formu 3a'da okur,
+    // o gune kadar yalnizca acilista dogrulanip tasinir
+    #[allow(dead_code)]
+    pub blind_index_key: [u8; crate::crypto::KEY_LEN],
     pub public_url: String,
 }
 
@@ -488,6 +492,7 @@ mod tests {
         routes().with_state(AppState {
             pool,
             aead_key: [3u8; crate::crypto::KEY_LEN],
+            blind_index_key: [4u8; crate::crypto::KEY_LEN],
             public_url: public_url.to_string(),
         })
     }

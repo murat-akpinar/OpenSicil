@@ -150,7 +150,11 @@ mod tests {
     fn test_key() -> [u8; crate::crypto::KEY_LEN] {
         use base64::engine::general_purpose::STANDARD as BASE64;
         use base64::Engine;
-        crate::crypto::parse_master_key(&BASE64.encode([7u8; crate::crypto::KEY_LEN])).unwrap()
+        crate::crypto::parse_key(
+            "AEAD_MASTER_KEY",
+            &BASE64.encode([7u8; crate::crypto::KEY_LEN]),
+        )
+        .unwrap()
     }
 
     fn sample_input() -> AppSettingsInput {

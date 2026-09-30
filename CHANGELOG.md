@@ -32,4 +32,5 @@
 - Kimlik modeli tabloları ve yönetilen kapsam kararı (ADR-077)
 - Katalog tabloları ve hedef sistem kaydı
 - Denetim kaydı alanları ve worker işlem türleri
+- Kimlik numarası AEAD ve blind index ile şifrelenir
 

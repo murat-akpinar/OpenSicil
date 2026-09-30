@@ -7,6 +7,9 @@ mod db;
 mod health;
 mod logging;
 mod migrate;
+// Kimlik kayit formu (3a) tuketene kadar yalnizca testler cagirir (ADR-010).
+#[allow(dead_code)]
+mod national_id;
 mod oidc;
 mod operator_session;
 mod server;

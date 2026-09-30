@@ -25,16 +25,15 @@ pub async fn run() -> ExitCode {
         }
     };
 
-    let aead_key = match std::env::var("AEAD_MASTER_KEY") {
-        Ok(v) => match crate::crypto::parse_master_key(&v) {
-            Ok(k) => k,
-            Err(e) => {
-                eprintln!("backend: {e}");
-                return ExitCode::FAILURE;
-            }
-        },
-        Err(_) => {
-            eprintln!("backend: AEAD_MASTER_KEY ortam değişkeni eksik");
+    // Iki anahtar da acilista dogrulanir: eksik ya da bozuk anahtar ilk kimlik
+    // kaydinda degil, kurulumda goze carpar (ADR-010).
+    let (aead_key, blind_index_key) = match (
+        key_from_env("AEAD_MASTER_KEY"),
+        key_from_env("BLIND_INDEX_KEY"),
+    ) {
+        (Ok(a), Ok(b)) => (a, b),
+        (Err(e), _) | (_, Err(e)) => {
+            eprintln!("backend: {e}");
             return ExitCode::FAILURE;
         }
     };
@@ -63,6 +62,7 @@ pub async fn run() -> ExitCode {
     let app = build_router(AppState {
         pool,
         aead_key,
+        blind_index_key,
         public_url,
     });
 
@@ -83,6 +83,11 @@ pub async fn run() -> ExitCode {
         return ExitCode::FAILURE;
     }
     ExitCode::SUCCESS
+}
+
+fn key_from_env(var: &str) -> Result<[u8; crate::crypto::KEY_LEN], String> {
+    let value = std::env::var(var).map_err(|_| format!("{var} ortam değişkeni eksik"))?;
+    crate::crypto::parse_key(var, &value)
 }
 
 // SIGTERM'de yeni baglanti almayi durdurur, acik istekler biter (ADR-061 madde 1).
@@ -116,6 +121,7 @@ mod tests {
         AppState {
             pool: lazy_unreachable_pool(),
             aead_key: [0u8; crate::crypto::KEY_LEN],
+            blind_index_key: [0u8; crate::crypto::KEY_LEN],
             public_url: "https://localhost".to_string(),
         }
     }
