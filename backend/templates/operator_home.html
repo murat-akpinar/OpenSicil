@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Giriş başarılı — OpenSicil{% endblock %}
+{% block content %}
+<div class="flex justify-between items-center mb-6">
+  <h1 class="text-xl font-semibold">Giriş başarılı</h1>
+  <form method="post" action="/logout"><button class="text-sm underline" type="submit">Çıkış</button></form>
+</div>
+<p class="mb-2">Kullanıcı: {{ username }}</p>
+<p class="mb-2">Yetkiler:</p>
+<ul class="list-disc list-inside">
+{% for authority in authorities %}
+  <li>{{ authority }}</li>
+{% endfor %}
+</ul>
+{% endblock %}

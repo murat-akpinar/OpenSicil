@@ -33,8 +33,8 @@ pub fn encrypt(key: &[u8; KEY_LEN], plaintext: &[u8]) -> Vec<u8> {
     out
 }
 
-// Faz 3'teki AD/Zimbra connector'ı çözüp kullanacak; şimdilik yalnızca testler çağırır.
-#[allow(dead_code)]
+// OIDC client secret'ı (settings::load_oidc_credentials) ve Faz 3'teki AD/Zimbra
+// connector'ı bunu çözüp kullanır.
 pub fn decrypt(key: &[u8; KEY_LEN], data: &[u8]) -> Result<Vec<u8>, String> {
     if data.len() < NONCE_LEN {
         return Err("şifreli veri çok kısa".to_string());

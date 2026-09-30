@@ -1,0 +1,23 @@
+# Faz 1b/1c lab: yalnizca Keycloak (Samba AD 1c'de eklenir, ADR-027).
+# ponytail: host portu acarak tarayici/host testleri docker agina girmeden
+# `http://localhost:8081` ile konusabiliyor; gercek docker-network/PUBLIC_URL
+# issuer cozumu (backend container'i icinden erisim) Faz 1c'nin isi.
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.7.5
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: lab-only-not-secret
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./keycloak-lab/realm-opensicil.json:/opt/keycloak/data/import/realm-opensicil.json:ro
+    healthcheck:
+      # curl/wget yok (RHEL UBI minimal); /dev/tcp bash'te var, ham HTTP istegiyle
+      # /realms/master'a bakiliyor (yonetim portu 9000 dev modda dinlemiyor).
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080 && echo -e 'GET /realms/master HTTP/1.1\\r\\nhost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q 'HTTP/1.1 200' <&3"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped

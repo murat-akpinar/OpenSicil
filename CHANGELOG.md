@@ -22,4 +22,5 @@
 - Backend, worker ve nginx iskeletini ayağa kaldır
 - Backend ve worker'a SIGTERM ve şema hazırlık kontrolü ekle
 - Yerel bootstrap hesabı ve Yapılandırma sayfasını ekle
+- OIDC yonetim girisi ve alti yonetim yetkisi
 

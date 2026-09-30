@@ -6,11 +6,14 @@ mod db;
 mod health;
 mod logging;
 mod migrate;
+mod oidc;
+mod operator_session;
 mod server;
 mod session;
 mod settings;
 #[cfg(test)]
 mod test_support;
+mod token;
 mod web;
 
 use std::process::ExitCode;

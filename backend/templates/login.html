@@ -5,6 +5,7 @@
 {% if !error.is_empty() %}
 <p class="mb-4" style="color:#f38ba8;">{{ error }}</p>
 {% endif %}
+{% if !oidc_admin_verified %}
 <form method="post" action="/login" class="space-y-4">
   <div>
     <label class="block text-sm mb-1" for="username">Kullanıcı adı</label>
@@ -16,4 +17,8 @@
   </div>
   <button class="w-full rounded py-2" style="background:#89b4fa; color:#1e1e2e;" type="submit">Giriş</button>
 </form>
+{% endif %}
+{% if oidc_configured %}
+<a href="/oidc/login" class="block text-center rounded py-2{% if !oidc_admin_verified %} mt-4{% endif %}" style="background:#a6e3a1; color:#1e1e2e;">OIDC ile giriş</a>
+{% endif %}
 {% endblock %}

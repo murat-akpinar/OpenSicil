@@ -33,7 +33,7 @@ Kurallar:
   - Kabul: migration ile `admin`/`admin` seed ediliyor; ilk girişte eski parola sorulmadan yeni parola zorunlu
   - Kabul: bu hesapla yalnızca Yapılandırma sayfasına (AD, Zimbra, OIDC bağlantı ayarları) erişilebiliyor, başka hiçbir ekrana değil
   - Kabul: AD servis hesabı parolası, Zimbra admin parolası, OIDC client secret DB'de AEAD ile şifreli saklanıyor, `.env`'de değil
-- [ ] OIDC girişi ve altı yönetim yetkisi ([ADR-005](decisions/005-yonetim-girisi-oidc.md), [ADR-065](decisions/065-oidc-akisi-backend.md))
+- [x] OIDC girişi ve altı yönetim yetkisi ([ADR-005](decisions/005-yonetim-girisi-oidc.md), [ADR-065](decisions/065-oidc-akisi-backend.md))
   - Kabul: Keycloak lab'ına karşı giriş yapılıyor, yetkiler `groups` claim'inden okunuyor
   - Kabul: oturum PostgreSQL'de saklanıyor
   - Kabul: en az bir `OpenSicil-Admins` girişi doğrulanınca yerel bootstrap giriş formu gizleniyor/pasifleşiyor

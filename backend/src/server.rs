@@ -39,6 +39,14 @@ pub async fn run() -> ExitCode {
         }
     };
 
+    let public_url = match std::env::var("PUBLIC_URL") {
+        Ok(v) => v,
+        Err(_) => {
+            eprintln!("backend: PUBLIC_URL ortam değişkeni eksik");
+            return ExitCode::FAILURE;
+        }
+    };
+
     let pool = match crate::db::connect_pool(&database_url).await {
         Ok(p) => p,
         Err(e) => {
@@ -52,7 +60,11 @@ pub async fn run() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    let app = build_router(AppState { pool, aead_key });
+    let app = build_router(AppState {
+        pool,
+        aead_key,
+        public_url,
+    });
 
     let listener = match tokio::net::TcpListener::bind("0.0.0.0:8000").await {
         Ok(l) => l,
@@ -104,6 +116,7 @@ mod tests {
         AppState {
             pool: lazy_unreachable_pool(),
             aead_key: [0u8; crate::crypto::KEY_LEN],
+            public_url: "https://localhost".to_string(),
         }
     }
 

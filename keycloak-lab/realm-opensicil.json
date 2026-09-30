@@ -1,0 +1,77 @@
+{
+  "realm": "opensicil",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "clients": [
+    {
+      "clientId": "opensicil-backend",
+      "enabled": true,
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "secret": "lab-only-not-secret",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost:8000/oidc/callback",
+        "https://localhost/oidc/callback"
+      ],
+      "webOrigins": ["+"],
+      "protocolMappers": [
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": {
+            "full.path": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "claim.name": "groups"
+          }
+        }
+      ]
+    }
+  ],
+  "groups": [
+    { "name": "OpenSicil-Auditors" },
+    { "name": "OpenSicil-HR" },
+    { "name": "OpenSicil-RoleAdmins" },
+    { "name": "OpenSicil-PII" },
+    { "name": "OpenSicil-Admins" },
+    { "name": "OpenSicil-Helpdesk" }
+  ],
+  "users": [
+    {
+      "username": "test-admin",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "test-admin@opensicil.lab",
+      "firstName": "Test",
+      "lastName": "Admin",
+      "credentials": [{ "type": "password", "value": "test-admin-pw", "temporary": false }],
+      "groups": ["/OpenSicil-Admins"]
+    },
+    {
+      "username": "test-hr",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "test-hr@opensicil.lab",
+      "firstName": "Test",
+      "lastName": "HR",
+      "credentials": [{ "type": "password", "value": "test-hr-pw", "temporary": false }],
+      "groups": ["/OpenSicil-HR"]
+    },
+    {
+      "username": "test-none",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "test-none@opensicil.lab",
+      "firstName": "Test",
+      "lastName": "Yetkisiz",
+      "credentials": [{ "type": "password", "value": "test-none-pw", "temporary": false }],
+      "groups": []
+    }
+  ]
+}

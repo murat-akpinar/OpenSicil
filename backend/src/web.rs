@@ -1,5 +1,5 @@
 use askama::Template;
-use axum::extract::{Form, FromRequestParts, State};
+use axum::extract::{Form, FromRequestParts, Query, State};
 use axum::http::request::Parts;
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{Html, IntoResponse, Redirect, Response};
@@ -8,7 +8,10 @@ use axum::Router;
 use serde::Deserialize;
 use sqlx::PgPool;
 
-use crate::cookie::{clear_cookie_header, get_cookie, set_cookie_header, SESSION_COOKIE_NAME};
+use crate::cookie::{
+    clear_cookie_header, get_cookie, set_cookie_header, OPERATOR_SESSION_COOKIE_NAME,
+    SESSION_COOKIE_NAME,
+};
 use crate::session::SESSION_LIFETIME_HOURS;
 
 const MIN_PASSWORD_LENGTH: usize = 12;
@@ -17,6 +20,7 @@ const MIN_PASSWORD_LENGTH: usize = 12;
 pub struct AppState {
     pub pool: PgPool,
     pub aead_key: [u8; crate::crypto::KEY_LEN],
+    pub public_url: String,
 }
 
 // --- START FEATURE: bootstrap-admin ---
@@ -27,7 +31,18 @@ pub struct AppState {
 #[template(path = "login.html")]
 struct LoginTemplate {
     error: String,
+    oidc_configured: bool,
+    oidc_admin_verified: bool,
 }
+
+// --- START FEATURE: oidc-login ---
+#[derive(Template)]
+#[template(path = "operator_home.html")]
+struct OperatorHomeTemplate {
+    username: String,
+    authorities: Vec<String>,
+}
+// --- END FEATURE: oidc-login ---
 
 #[derive(Template)]
 #[template(path = "change_password.html")]
@@ -98,12 +113,44 @@ pub fn routes() -> Router<AppState> {
             get(change_password_form).post(change_password_submit),
         )
         .route("/config", get(config_form).post(config_submit))
+        // --- START FEATURE: oidc-login ---
+        .route("/oidc/login", get(oidc_login))
+        .route("/oidc/callback", get(oidc_callback))
+    // --- END FEATURE: oidc-login ---
 }
 
-async fn login_form() -> Response {
+// Ayarlar okunamazsa (DB gecici erisilemez) giris sayfasi yine de gosterilir:
+// OIDC baglantisi gizlenir, bootstrap formu gorunur kalir (tek giris kapisi
+// bir DB hiccup'inda tumden kapanmaz); asil dogrulama zaten girisi deneyince olur.
+async fn render_login(pool: &PgPool, error: String) -> Response {
+    let settings = match crate::settings::load(pool).await {
+        Ok(s) => Some(s),
+        Err(e) => {
+            eprintln!("web: ayarlar okunamadı: {e}");
+            None
+        }
+    };
     render(&LoginTemplate {
-        error: String::new(),
+        error,
+        oidc_configured: settings.as_ref().is_some_and(crate::oidc::is_configured),
+        oidc_admin_verified: settings.as_ref().is_some_and(|s| s.oidc_admin_verified),
     })
+}
+
+// Operator oturumu zaten gecerliyse (cerez var ve DB'de suresi gecmemis),
+// giris formunu degil dogrudan giris sonrasi sayfayi goster.
+async fn login_form(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if let Some(token) = get_cookie(&headers, OPERATOR_SESSION_COOKIE_NAME) {
+        if let Ok(Some(operator)) =
+            crate::operator_session::validate_session(&state.pool, &token).await
+        {
+            return render(&OperatorHomeTemplate {
+                username: operator.username,
+                authorities: operator.authorities,
+            });
+        }
+    }
+    render_login(&state.pool, String::new()).await
 }
 
 #[derive(Deserialize)]
@@ -117,9 +164,8 @@ async fn login_submit(State(state): State<AppState>, Form(form): Form<LoginForm>
     {
         Ok(true) => {}
         Ok(false) => {
-            return render(&LoginTemplate {
-                error: "Kullanıcı adı ya da parola yanlış".to_string(),
-            });
+            return render_login(&state.pool, "Kullanıcı adı ya da parola yanlış".to_string())
+                .await;
         }
         Err(e) => {
             eprintln!("web: giriş kontrolü başarısız: {e}");
@@ -139,16 +185,122 @@ async fn login_submit(State(state): State<AppState>, Form(form): Form<LoginForm>
 }
 
 async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let mut response_headers = HeaderMap::new();
     if let Some(token) = get_cookie(&headers, SESSION_COOKIE_NAME) {
         let _ = crate::session::delete_session(&state.pool, &token).await;
+        response_headers.append(
+            header::SET_COOKIE,
+            cookie_header_value(&clear_cookie_header(SESSION_COOKIE_NAME)),
+        );
     }
-    let mut response_headers = HeaderMap::new();
-    response_headers.insert(
-        header::SET_COOKIE,
-        cookie_header_value(&clear_cookie_header(SESSION_COOKIE_NAME)),
-    );
+    if let Some(token) = get_cookie(&headers, OPERATOR_SESSION_COOKIE_NAME) {
+        let _ = crate::operator_session::delete_session(&state.pool, &token).await;
+        response_headers.append(
+            header::SET_COOKIE,
+            cookie_header_value(&clear_cookie_header(OPERATOR_SESSION_COOKIE_NAME)),
+        );
+    }
     (response_headers, Redirect::to("/login")).into_response()
 }
+
+// --- START FEATURE: oidc-login ---
+async fn oidc_login(State(state): State<AppState>) -> Response {
+    let redirect_uri = format!("{}/oidc/callback", state.public_url);
+    match crate::oidc::login_redirect(&state.pool, &state.aead_key, &redirect_uri).await {
+        Ok(url) => Redirect::to(&url).into_response(),
+        Err(e) => {
+            eprintln!("web: oidc girişi başlatılamadı: {e}");
+            Redirect::to("/login").into_response()
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct OidcCallbackQuery {
+    code: Option<String>,
+    state: Option<String>,
+    error: Option<String>,
+}
+
+async fn oidc_callback(
+    State(state): State<AppState>,
+    Query(query): Query<OidcCallbackQuery>,
+) -> Response {
+    let (Some(code), Some(oidc_state)) = (query.code, query.state) else {
+        eprintln!(
+            "web: oidc geri dönüşünde eksik parametre (error={:?})",
+            query.error
+        );
+        return Redirect::to("/login").into_response();
+    };
+
+    let redirect_uri = format!("{}/oidc/callback", state.public_url);
+    match crate::oidc::handle_callback(
+        &state.pool,
+        &state.aead_key,
+        &redirect_uri,
+        code,
+        oidc_state,
+    )
+    .await
+    {
+        Ok(result) => establish_operator_session(&state, result).await,
+        Err(e) => {
+            eprintln!("web: oidc girişi başarısız: {e}");
+            Redirect::to("/login").into_response()
+        }
+    }
+}
+
+// id_token dogrulandiktan sonraki adim: ilk OpenSicil-Admins girisi isaretlenir
+// (ADR-068 madde 3), operator oturumu kurulur, cerez set edilir.
+async fn establish_operator_session(
+    state: &AppState,
+    result: crate::oidc::LoginResult,
+) -> Response {
+    if result
+        .authorities
+        .iter()
+        .any(|a| a == crate::oidc::ADMIN_AUTHORITY)
+    {
+        if let Err(e) = crate::settings::mark_oidc_admin_verified(&state.pool).await {
+            eprintln!("web: oidc admin doğrulaması işaretlenemedi: {e}");
+        }
+    }
+
+    let operator = crate::operator_session::Operator {
+        subject: result.subject,
+        username: result.username.clone(),
+        email: result.email,
+        authorities: result.authorities.clone(),
+    };
+    let token = match crate::operator_session::create_session(&state.pool, &operator).await {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("web: operatör oturumu oluşturulamadı: {e}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::SET_COOKIE,
+        cookie_header_value(&set_cookie_header(
+            OPERATOR_SESSION_COOKIE_NAME,
+            &token,
+            crate::operator_session::SESSION_LIFETIME_HOURS * 3600,
+        )),
+    );
+    (
+        headers,
+        render(&OperatorHomeTemplate {
+            username: result.username,
+            authorities: result.authorities,
+        }),
+    )
+        .into_response()
+}
+// --- END FEATURE: oidc-login ---
 
 async fn change_password_form(_session: BootstrapSession) -> Response {
     render(&ChangePasswordTemplate {
@@ -270,12 +422,19 @@ mod tests {
     use super::*;
     use axum::body::Body;
     use axum::http::Request;
+    // Ayri bir Cargo.toml girdisi gerekmez: openidconnect zaten reqwest'i disa aciyor.
+    use openidconnect::reqwest;
     use tower::ServiceExt;
 
     fn test_app(pool: PgPool) -> Router {
+        test_app_with_public_url(pool, "https://localhost")
+    }
+
+    fn test_app_with_public_url(pool: PgPool, public_url: &str) -> Router {
         routes().with_state(AppState {
             pool,
             aead_key: [3u8; crate::crypto::KEY_LEN],
+            public_url: public_url.to_string(),
         })
     }
 
@@ -466,4 +625,187 @@ mod tests {
         drop(pool);
         crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
     }
+
+    // --- START FEATURE: oidc-login ---
+    // Gercek lab Keycloak'ina karsi uctan uca: /oidc/login'den donen yonlendirme
+    // URL'sine gercekten gidip Keycloak'in kendi giris formunu dolduruyor, donen
+    // code+state'i kendi /oidc/callback'imize veriyoruz (ADR-027 deseni: ortam
+    // degiskeni yoksa bu test calismaz, --ignore varsayilani).
+    //
+    // `docker compose -f compose.lab.yaml up -d` ile lab Keycloak'i ayakta olmali:
+    //   DATABASE_URL=postgres://testuser:testpass@localhost:15432/testdb \
+    //   OIDC_LAB_ISSUER=http://localhost:8081/realms/opensicil \
+    //   cargo test --include-ignored oidc_login_flow_against_lab_keycloak
+
+    fn cookie_header_from_set_cookies(response: &reqwest::Response) -> String {
+        response
+            .headers()
+            .get_all(reqwest::header::SET_COOKIE)
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .filter_map(|raw| raw.split(';').next())
+            .collect::<Vec<_>>()
+            .join("; ")
+    }
+
+    // Keycloak'in giris sayfasindaki ana formun action URL'sini (session_code,
+    // execution, tab_id tasiyan) ham HTML'den cikarir; bagimlilik eklemeden.
+    fn extract_login_form_action(html: &str) -> String {
+        let form_start = html
+            .find(r#"id="kc-form-login""#)
+            .expect("kc-form-login formu bulunamadı");
+        let action_key = "action=\"";
+        let action_start = html[form_start..]
+            .find(action_key)
+            .map(|i| form_start + i + action_key.len())
+            .expect("form action bulunamadı");
+        let action_end = html[action_start..]
+            .find('"')
+            .map(|i| action_start + i)
+            .expect("form action kapanışı bulunamadı");
+        html[action_start..action_end].replace("&amp;", "&")
+    }
+
+    fn query_param(url: &str, name: &str) -> Option<String> {
+        let (_, query) = url.split_once('?')?;
+        query.split('&').find_map(|pair| {
+            let (key, value) = pair.split_once('=')?;
+            (key == name).then(|| percent_decode(value))
+        })
+    }
+
+    // OIDC query parametreleri icin yeterli, tam bir URL kutuphanesi degil.
+    fn percent_decode(value: &str) -> String {
+        let bytes = value.as_bytes();
+        let mut out = Vec::with_capacity(bytes.len());
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'%' && i + 2 < bytes.len() {
+                if let Ok(byte) = u8::from_str_radix(&value[i + 1..i + 3], 16) {
+                    out.push(byte);
+                    i += 3;
+                    continue;
+                }
+            }
+            out.push(bytes[i]);
+            i += 1;
+        }
+        String::from_utf8_lossy(&out).into_owned()
+    }
+
+    #[tokio::test]
+    #[ignore = "gerçek Postgres ve lab Keycloak gerektirir: DATABASE_URL + OIDC_LAB_ISSUER ile çalıştır (--include-ignored)"]
+    async fn oidc_login_flow_against_lab_keycloak() {
+        let issuer = std::env::var("OIDC_LAB_ISSUER")
+            .expect("OIDC_LAB_ISSUER lab Keycloak'a işaret etmeli (bkz. yukarıdaki yorum)");
+
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        // test_app_with_public_url'in kurdugu AppState.aead_key ile ayni olmali.
+        let key = [3u8; crate::crypto::KEY_LEN];
+        crate::settings::save(
+            &pool,
+            &key,
+            &crate::settings::AppSettingsInput {
+                ad_host: String::new(),
+                ad_bind_dn: String::new(),
+                ad_service_password: String::new(),
+                zimbra_url: String::new(),
+                zimbra_admin_password: String::new(),
+                oidc_issuer: issuer,
+                oidc_client_id: "opensicil-backend".to_string(),
+                oidc_client_secret: "lab-only-not-secret".to_string(),
+            },
+        )
+        .await
+        .expect("oidc ayarları kaydedilemedi");
+
+        let app = test_app_with_public_url(pool.clone(), "http://localhost:8000");
+
+        // 1) /oidc/login bizim router'imizdan Keycloak'in authorize URL'sine yonlendirir.
+        let response = app
+            .clone()
+            .oneshot(get_request("/oidc/login", None))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        let authorize_url = location_of(&response).to_string();
+
+        // 2) Gercek Keycloak'a git, giris formunu al.
+        let http = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap();
+        let login_page = http.get(&authorize_url).send().await.unwrap();
+        assert_eq!(login_page.status(), reqwest::StatusCode::OK);
+        let kc_cookies = cookie_header_from_set_cookies(&login_page);
+        let login_html = login_page.text().await.unwrap();
+        let form_action = extract_login_form_action(&login_html);
+
+        // 3) test-admin/test-admin-pw ile giris yap (keycloak-lab/realm-opensicil.json).
+        let login_response = http
+            .post(&form_action)
+            .header(reqwest::header::COOKIE, &kc_cookies)
+            .form(&[("username", "test-admin"), ("password", "test-admin-pw")])
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            login_response.status(),
+            reqwest::StatusCode::FOUND,
+            "Keycloak girişi başarısız görünüyor (beklenen 302 yönlendirme)"
+        );
+        let redirect_to = login_response
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert!(redirect_to.starts_with("http://localhost:8000/oidc/callback"));
+        let code = query_param(&redirect_to, "code").expect("code parametresi yok");
+        let state = query_param(&redirect_to, "state").expect("state parametresi yok");
+
+        // 4) code+state'i kendi /oidc/callback'imize ver.
+        let callback_uri = format!("/oidc/callback?code={code}&state={state}");
+        let response = app
+            .clone()
+            .oneshot(get_request(&callback_uri, None))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let operator_cookie = set_cookie_value(&response);
+        assert!(operator_cookie.starts_with("opensicil_operator_session="));
+        let body = body_string(response).await;
+        assert!(body.contains("test-admin"));
+        assert!(body.contains("admin"));
+
+        // 5) test-admin OpenSicil-Admins'te oldugu icin admin dogrulama isareti kuruldu;
+        // /login artik bootstrap formunu gizliyor.
+        let settings = crate::settings::load(&pool).await.unwrap();
+        assert!(settings.oidc_admin_verified);
+
+        let response = app
+            .clone()
+            .oneshot(get_request("/login", None))
+            .await
+            .unwrap();
+        let body = body_string(response).await;
+        assert!(!body.contains(r#"name="username""#));
+        assert!(body.contains("/oidc/login"));
+
+        // 6) operatör oturumu cerezle geri geliyor.
+        let response = app
+            .clone()
+            .oneshot(get_request("/login", Some(&operator_cookie)))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_string(response).await;
+        assert!(body.contains("test-admin"));
+
+        drop(app);
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+    // --- END FEATURE: oidc-login ---
 }

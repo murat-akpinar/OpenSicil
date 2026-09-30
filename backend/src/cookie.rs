@@ -1,6 +1,7 @@
 use axum::http::HeaderMap;
 
 pub const SESSION_COOKIE_NAME: &str = "opensicil_bootstrap_session";
+pub const OPERATOR_SESSION_COOKIE_NAME: &str = "opensicil_operator_session";
 
 // HttpOnly: JS/XSS okuyamaz. Secure: yalnizca TLS uzerinden gider (ADR-066, nginx'te sonlanir).
 // SameSite=Strict: cross-site istekte hic gonderilmez, ayri bir CSRF token'ina gerek birakmaz.

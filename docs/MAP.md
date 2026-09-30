@@ -13,8 +13,10 @@ Yer imleri. Bir dosya eklendiğinde, taşındığında, silindiğinde veya yeni 
 - `compose.yaml` / `compose.override.yaml` → servisler (nginx, backend, worker, migrate, db); prod-benzeri `-f compose.yaml` ile override'sız çalışır
 - `.env.example` → gereken tüm ortam değişkeni adları (değer değil)
 - `nginx/` → `Dockerfile` (nginxinc/nginx-unprivileged), `nginx.conf` (TLS sonlanması, HTTP→HTTPS yönlendirme, `/healthz` — yönlendirmesiz iç healthcheck, `access_log off` — güvenlik header'ları — ADR-066)
-- `backend/` → axum + sqlx; `src/main.rs` (komut yönlendirme: `migrate` / sunucu), `src/server.rs` (HTTP sunucu), `src/health.rs` (`/api/health`), `src/migrate.rs` (rol oluşturma + şema migration + bootstrap hesabı seed), `src/logging.rs` (istek log'u, gerçek istemci IP'si `X-Forwarded-For`'dan), `src/db.rs`, `src/web.rs` (HTML route'ları, askama), `src/auth.rs` (argon2id parola hash), `src/crypto.rs` (chacha20poly1305 AEAD), `src/cookie.rs` (oturum çerezi), `src/session.rs` (bootstrap oturumu), `src/settings.rs` (AD/Zimbra/OIDC ayarları, şifreli), `src/bootstrap_account.rs` (yerel admin hesabı), `src/test_support.rs` (yalnızca test: gecici DB); `templates/` (askama HTML şablonları); `migrations/` (sqlx migration dosyaları), `.sqlx/` (offline önbellek, şu an boş — macro kullanılmıyor)
+- `backend/` → axum + sqlx; `src/main.rs` (komut yönlendirme: `migrate` / sunucu), `src/server.rs` (HTTP sunucu), `src/health.rs` (`/api/health`), `src/migrate.rs` (rol oluşturma + şema migration + bootstrap hesabı seed), `src/logging.rs` (istek log'u, gerçek istemci IP'si `X-Forwarded-For`'dan), `src/db.rs`, `src/web.rs` (HTML route'ları, askama), `src/auth.rs` (argon2id parola hash), `src/crypto.rs` (chacha20poly1305 AEAD), `src/cookie.rs` (oturum çerezleri), `src/token.rs` (oturum token üret/hashle), `src/session.rs` (bootstrap oturumu), `src/operator_session.rs` (OIDC operatör oturumu, ADR-073), `src/oidc.rs` (OIDC akışı: discovery, PKCE/state/nonce, `id_token` doğrulama, `groups` claim → yetki eşlemesi, ADR-073), `src/settings.rs` (AD/Zimbra/OIDC ayarları, şifreli + `load_oidc_credentials` çözülmüş sır), `src/bootstrap_account.rs` (yerel admin hesabı), `src/test_support.rs` (yalnızca test: gecici DB); `templates/` (askama HTML şablonları); `migrations/` (sqlx migration dosyaları), `.sqlx/` (offline önbellek, şu an boş — macro kullanılmıyor)
 - `worker/` → sqlx; `src/main.rs` (nabız döngüsü / `worker-health`), `src/heartbeat.rs` (`/tmp/worker-heartbeat`), `src/db.rs`
+- `compose.lab.yaml` → Faz 1b/1c lab: Keycloak (Samba AD 1c'de eklenir, ADR-027); host portu 8081
+- `keycloak-lab/realm-opensicil.json` → lab realm içe aktarma: istemci `opensicil-backend`, `groups` protokol mapper'ı, altı yönetim grubu, test kullanıcıları (`test-admin`, `test-hr`, `test-none`)
 
 ## Feature indeksi
 Koddaki `--- START FEATURE: <ad> ---` markerlarının karşılığı. Aramak için:
@@ -23,6 +25,7 @@ Koddaki `--- START FEATURE: <ad> ---` markerlarının karşılığı. Aramak iç
 | Feature | Nerede |
 |---|---|
 | bootstrap-admin | `backend/src/web.rs` |
+| oidc-login | `backend/src/oidc.rs`, `backend/src/operator_session.rs`, `backend/src/web.rs` |
 
 ## Ortak yardımcılar
 Yeni bir şey yazmadan önce buraya bak. Aynı işi yapan varsa tekrar yazma.
@@ -32,4 +35,4 @@ Yeni bir şey yazmadan önce buraya bak. Aynı işi yapan varsa tekrar yazma.
 | Parola hash (argon2id) | `backend/src/auth.rs` |
 | AEAD şifreleme/çözme (chacha20poly1305) | `backend/src/crypto.rs` |
 | Oturum çerezi kur/oku/temizle (HttpOnly+Secure+SameSite) | `backend/src/cookie.rs` |
-| Oturum token üret/hashle/doğrula | `backend/src/session.rs` |
+| Oturum token üret/hashle (bootstrap ve operatör oturumu ortak) | `backend/src/token.rs` |
