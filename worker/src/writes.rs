@@ -3,8 +3,8 @@
 // calistirma acikken hedefe HICBIR sey yazilmaz, niyet satiri da acilmaz
 // (sayaclar degismez); acikken once niyet satiri + kira uzatmasi, sonra
 // connector yazmasi, sonra sonuc satiri. Kira baskasina gecmisse yazma yapilmaz.
-// Motor (3a: fark → islemler) her hedef yazmasini buradan gecirir; connector
-// bu dosyayi bilmez, yalnizca `TargetWriter`'i uygular.
+// Motor her hedef yazmasini buradan gecirir; connector yalnizca `TargetWriter`'i
+// uygular ve niyet/sonuc satirlarini bilmez.
 
 use sqlx::PgPool;
 
@@ -16,6 +16,8 @@ use crate::queue::{self, ClaimedJob, Intent, IntentError};
 pub enum OperationClass {
     Destructive,
     Grant,
+    /// Ilk parola teslimi (3d) uretir
+    #[allow(dead_code)]
     FirstPassword,
     Attribute,
 }
@@ -31,13 +33,79 @@ impl OperationClass {
     }
 }
 
+/// Hedefe yazilacak islem; parola JSON detaya asla girmez.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WriteOp {
+    /// Tek `add`: oznitelikler + parola + UAC 514 + pwdLastSet 0 (+ accountExpires)
+    CreateAccount {
+        dn: String,
+        attributes: Vec<(String, String)>,
+        password: String,
+        account_expires: Option<i64>,
+    },
+    SetEnabled {
+        dn: String,
+        enabled: bool,
+    },
+    AddMember {
+        group_dn: String,
+        member_dn: String,
+    },
+    /// Uyelik farki (3b/3c) uretir; motor su an yalnizca ekler
+    #[allow(dead_code)]
+    RemoveMember {
+        group_dn: String,
+        member_dn: String,
+    },
+}
+
+impl WriteOp {
+    pub fn event_type(&self) -> &'static str {
+        match self {
+            WriteOp::CreateAccount { .. } => "ad.account.create",
+            WriteOp::SetEnabled { enabled: true, .. } => "ad.account.enable",
+            WriteOp::SetEnabled { enabled: false, .. } => "ad.account.disable",
+            WriteOp::AddMember { .. } => "ad.group.add_member",
+            WriteOp::RemoveMember { .. } => "ad.group.remove_member",
+        }
+    }
+
+    // Kucuk sabit sekilli JSON; worker'da serde yok. DN'ler tirnak icerebilir → kacis.
+    pub fn detail_json(&self) -> String {
+        let q = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
+        match self {
+            WriteOp::CreateAccount { dn, attributes, .. } => format!(
+                "{{\"dn\":\"{}\",\"attributes\":[{}]}}",
+                q(dn),
+                attributes
+                    .iter()
+                    .map(|(name, _)| format!("\"{}\"", q(name)))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ),
+            WriteOp::SetEnabled { dn, enabled } => {
+                format!("{{\"dn\":\"{}\",\"enabled\":{enabled}}}", q(dn))
+            }
+            WriteOp::AddMember {
+                group_dn,
+                member_dn,
+            }
+            | WriteOp::RemoveMember {
+                group_dn,
+                member_dn,
+            } => format!(
+                "{{\"group\":\"{}\",\"member\":\"{}\"}}",
+                q(group_dn),
+                q(member_dn)
+            ),
+        }
+    }
+}
+
 pub struct WriteRequest<'a> {
-    /// Denetim olay adi, ornek `ad.account.disable`
-    pub event_type: &'a str,
+    pub op: &'a WriteOp,
     pub class: OperationClass,
     pub emergency: bool,
-    /// Denetim satirina yazilan JSON metni (sir icermez)
-    pub detail_json: &'a str,
 }
 
 #[derive(Debug)]
@@ -81,8 +149,7 @@ impl std::fmt::Display for WriteFailure {
 pub trait TargetWriter {
     fn write(
         &mut self,
-        event_type: &str,
-        detail_json: &str,
+        op: &WriteOp,
     ) -> impl std::future::Future<Output = Result<(), WriteError>> + Send;
 }
 
@@ -109,11 +176,12 @@ pub async fn apply<W: TargetWriter>(
     if mode.dry_run {
         return Ok(Applied::DryRun);
     }
+    let detail = request.op.detail_json();
     let intent = Intent {
-        event_type: request.event_type,
+        event_type: request.op.event_type(),
         operation_class: request.class.as_str(),
         emergency: request.emergency,
-        detail_json: request.detail_json,
+        detail_json: &detail,
     };
     let intent_id = queue::record_intent(pool, job, worker_id, &intent)
         .await
@@ -121,10 +189,16 @@ pub async fn apply<W: TargetWriter>(
             IntentError::LeaseLost => WriteFailure::LeaseLost,
             IntentError::Db(e) => WriteFailure::Db(e),
         })?;
-    let outcome = writer.write(request.event_type, request.detail_json).await;
-    queue::record_outcome(pool, job, intent_id, outcome.is_ok(), request.event_type)
-        .await
-        .map_err(WriteFailure::Db)?;
+    let outcome = writer.write(request.op).await;
+    queue::record_outcome(
+        pool,
+        job,
+        intent_id,
+        outcome.is_ok(),
+        request.op.event_type(),
+    )
+    .await
+    .map_err(WriteFailure::Db)?;
     match outcome {
         Ok(()) => Ok(Applied::Applied),
         Err(WriteError::Unreachable(r)) => Err(WriteFailure::Unreachable(r)),
@@ -144,13 +218,28 @@ mod tests {
     }
 
     impl TargetWriter for FakeWriter {
-        async fn write(&mut self, event_type: &str, _detail: &str) -> Result<(), WriteError> {
-            self.calls.push(event_type.to_string());
+        async fn write(&mut self, op: &WriteOp) -> Result<(), WriteError> {
+            self.calls.push(op.event_type().to_string());
             match self.fail_with.take() {
                 Some(e) => Err(e),
                 None => Ok(()),
             }
         }
+    }
+
+    #[test]
+    fn detail_json_never_contains_password_and_escapes_quotes() {
+        let op = WriteOp::CreateAccount {
+            dn: "CN=Yılmaz \"Ayşe\",OU=Personel,DC=x".to_string(),
+            attributes: vec![("givenName".to_string(), "Ayşe".to_string())],
+            password: "Gizli-Parola-1".to_string(),
+            account_expires: None,
+        };
+        let detail = op.detail_json();
+        assert!(!detail.contains("Gizli"), "{detail}");
+        assert!(detail.contains("\\\"Ayşe\\\""), "{detail}");
+        assert!(detail.contains("\"givenName\""), "{detail}");
+        assert_eq!(op.event_type(), "ad.account.create");
     }
 
     async fn audit_rows(pool: &PgPool) -> (i64, i64) {
@@ -170,11 +259,14 @@ mod tests {
         let seed = test_support::seed_example_model(&pool).await;
         test_support::enqueue(&pool, seed.identity, seed.ad, 1).await;
         let job = queue::claim(&pool, "w1", &[]).await.unwrap().unwrap();
+        let op = WriteOp::SetEnabled {
+            dn: "CN=x,OU=Personel,DC=x".to_string(),
+            enabled: false,
+        };
         let request = WriteRequest {
-            event_type: "ad.account.disable",
+            op: &op,
             class: OperationClass::Destructive,
             emergency: false,
-            detail_json: "{}",
         };
         let mut writer = FakeWriter {
             calls: vec![],

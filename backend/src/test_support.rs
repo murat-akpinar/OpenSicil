@@ -8,12 +8,15 @@ use std::path::Path;
 use sqlx::PgPool;
 
 pub async fn create_temp_db(admin_pool: &PgPool, admin_url: &str) -> (PgPool, String) {
+    // Saat çözünürlüğü kaba olabilir; aynı anda başlayan testler aynı damgayı alır.
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let db_name = format!(
-        "opensicil_test_{}",
+        "opensicil_test_{}_{}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_nanos()
+            .as_nanos(),
+        SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     );
     sqlx::query(sqlx::AssertSqlSafe(format!("CREATE DATABASE {db_name}")))
         .execute(admin_pool)

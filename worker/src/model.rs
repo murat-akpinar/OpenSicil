@@ -17,6 +17,28 @@ pub struct JobInput {
     pub model: Model,
     pub link: Option<AccountLink>,
     pub clock: Clock,
+    pub person: Person,
+    pub target_kind: String,
+    /// Baglantinin motorun ihtiyac duydugu ham kismi (GUID, uygulanan durum)
+    pub link_row: Option<LinkRow>,
+}
+
+/// Kimlik alanlari: eslemenin kaynaklari (ADR-012) ve ad uretimi girdisi (ADR-011)
+#[derive(Debug, Clone)]
+pub struct Person {
+    pub given_name: String,
+    pub surname: String,
+    pub employee_number: Option<String>,
+    pub department_name: String,
+    pub username: Option<String>,
+    pub email: Option<String>,
+    pub upn: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LinkRow {
+    pub external_id: String,
+    pub applied_state: Option<String>,
 }
 
 const MAX_DEPARTMENT_DEPTH: i32 = 8;
@@ -63,7 +85,13 @@ pub async fn load(
     let base_entitlements = base_entitlements(pool, target).await?;
     let additional_roles = load_additional_roles(pool, identity_id, target).await?;
     let target_defaults = load_target_defaults(pool, target).await?;
-    let link = load_link(pool, identity_id, target).await?;
+    let (link, link_row) = load_link(pool, identity_id, target).await?;
+    let person = load_person(pool, identity_id).await?;
+    let target_kind: String = sqlx::query_scalar("SELECT kind FROM target_systems WHERE id = $1")
+        .bind(target)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| format!("hedef sistem türü okunamadı: {e}"))?;
     Ok(JobInput {
         timeline,
         model: Model {
@@ -76,6 +104,39 @@ pub async fn load(
         },
         link,
         clock,
+        person,
+        target_kind,
+        link_row,
+    })
+}
+
+type PersonRow = (
+    String,
+    String,
+    Option<String>,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
+
+async fn load_person(pool: &PgPool, identity_id: i64) -> Result<Person, String> {
+    let row: PersonRow = sqlx::query_as(
+        "SELECT i.given_name, i.surname, i.employee_number, d.name, i.username, i.email, i.upn \
+         FROM identities i JOIN departments d ON d.id = i.department_id WHERE i.id = $1",
+    )
+    .bind(identity_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| format!("kimlik alanları okunamadı: {e}"))?;
+    Ok(Person {
+        given_name: row.0,
+        surname: row.1,
+        employee_number: row.2,
+        department_name: row.3,
+        username: row.4,
+        email: row.5,
+        upn: row.6,
     })
 }
 
@@ -271,22 +332,31 @@ async fn load_target_defaults(pool: &PgPool, target: i64) -> Result<TargetDefaul
     })
 }
 
+type LinkQueryRow = (String, Option<bool>, bool, String, Option<String>);
+
 async fn load_link(
     pool: &PgPool,
     identity_id: i64,
     target: i64,
-) -> Result<Option<AccountLink>, String> {
-    let row: Option<(String, Option<bool>, bool)> = sqlx::query_as(
-        "SELECT origin, verified_unused, deletion_approved FROM account_links \
-         WHERE identity_id = $1 AND target_system_id = $2",
+) -> Result<(Option<AccountLink>, Option<LinkRow>), String> {
+    let row: Option<LinkQueryRow> = sqlx::query_as(
+        "SELECT origin, verified_unused, deletion_approved, external_id, applied_state \
+         FROM account_links WHERE identity_id = $1 AND target_system_id = $2",
     )
     .bind(identity_id)
     .bind(target)
     .fetch_optional(pool)
     .await
     .map_err(|e| format!("hesap bağlantısı okunamadı: {e}"))?;
-    Ok(
-        row.map(|(origin, verified_unused, deletion_approved)| AccountLink {
+    let Some((origin, verified_unused, deletion_approved, external_id, applied_state)) = row else {
+        return Ok((None, None));
+    };
+    let link_row = LinkRow {
+        external_id,
+        applied_state,
+    };
+    Ok((
+        Some(AccountLink {
             origin: if origin == "adopted" {
                 Origin::Adopted
             } else {
@@ -295,7 +365,8 @@ async fn load_link(
             verified_unused,
             deletion_approved,
         }),
-    )
+        Some(link_row),
+    ))
 }
 // --- END FEATURE: engine ---
 

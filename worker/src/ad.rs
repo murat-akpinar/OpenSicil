@@ -360,7 +360,7 @@ fn to_group(entry: &SearchEntry) -> Option<DirectoryGroup> {
     })
 }
 
-async fn base_dn(ldap: &mut Ldap) -> Result<String, WriteError> {
+pub async fn base_dn(ldap: &mut Ldap) -> Result<String, WriteError> {
     let root = search(
         ldap,
         "",

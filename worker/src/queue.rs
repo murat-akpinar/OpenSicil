@@ -202,6 +202,27 @@ pub async fn fail(
     Ok(())
 }
 
+// Insan karari gereken is (ad cakismasi, kapsam disi hesap) beklemeden
+// mudahaleye duser; deneme tuketmez, "tekrar dene" ile kuyruga doner (ADR-022, 052).
+pub async fn intervene(
+    pool: &PgPool,
+    job: &ClaimedJob,
+    worker_id: &str,
+    reason: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE jobs SET status = 'needs_intervention', last_error = $3, \
+         locked_by = NULL, locked_until = NULL \
+         WHERE id = $1 AND locked_by = $2 AND status = 'running'",
+    )
+    .bind(job.id)
+    .bind(worker_id)
+    .bind(reason)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 // ADR-052 madde 3: baglanti duzeyi hata (TCP/TLS, bind, oturum, zaman asimi,
 // 5xx) isin degil hedefin arizasidir; deneme sayisi degismez, is kisa sure sonra
 // yeniden alinabilir. Hedefin diger isleri de o sure alinmaz (main.rs).

@@ -164,6 +164,8 @@ pub fn base_email_local(templates: &Templates, input: &NameInput<'_>) -> Result<
 }
 
 // ADR-022: elle girilen ad ayni normallestirme ve dogrulamadan gecer.
+// Kimlik formundaki istege bagli alan (3b) cagirir.
+#[allow(dead_code)]
 pub fn validate_manual(raw: &str) -> Result<String, String> {
     let normalized = raw
         .split('.')

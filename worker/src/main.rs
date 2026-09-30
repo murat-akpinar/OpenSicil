@@ -1,4 +1,5 @@
 mod ad;
+mod ad_account;
 mod catalog;
 mod common_settings;
 // backend kopyasiyla birebir ayni; worker su an yalnizca cozer, ilk parola (3d) sifreler.
@@ -14,11 +15,7 @@ mod model;
 mod queue;
 #[cfg(test)]
 mod test_support;
-// Hesap acma (3a "tek add") cagirir; su an testler.
-#[allow(dead_code)]
 mod username;
-// Motor farki islemlere cevirince (3a) her hedef yazmasi buradan gecer; su an testler.
-#[allow(dead_code)]
 mod writes;
 
 use std::collections::HashMap;
@@ -231,7 +228,14 @@ fn unreachable_targets(marks: &HashMap<i64, Instant>, now: Instant) -> Vec<i64> 
 
 // Doner: hedef erisilemez isaretlenmeli mi.
 async fn process_job(pool: &PgPool, job: &queue::ClaimedJob, worker_id: &str, env: &Env) -> bool {
-    let run = engine::run_job(pool, job, &env.time_zone, env.write_mode).await;
+    let engine_env = engine::EngineEnv {
+        time_zone: &env.time_zone,
+        mode: env.write_mode,
+        aead_key: &env.aead_key,
+        ad_ca_file: env.ad_ca_file.as_deref(),
+        worker_id,
+    };
+    let run = engine::run_job(pool, job, &engine_env).await;
     let (outcome, unreachable) = match run {
         Ok(result) => (
             queue::complete(pool, job, worker_id, &result)
@@ -249,6 +253,10 @@ async fn process_job(pool: &PgPool, job: &queue::ClaimedJob, worker_id: &str, en
                 queue::defer_unreachable(pool, job, worker_id, &reason, retry).await,
                 true,
             )
+        }
+        Err(engine::JobError::NeedsIntervention(reason)) => {
+            eprintln!("worker: iş {} müdahale gerekiyor: {reason}", job.id);
+            (queue::intervene(pool, job, worker_id, &reason).await, false)
         }
         Err(error) => {
             eprintln!("worker: iş {} başarısız: {error}", job.id);
@@ -286,7 +294,13 @@ mod tests {
     async fn run_processes_queue_then_exits_on_sigterm() {
         let (admin_pool, pool, db_name) = test_support::fresh_migrated_db().await;
         let seed = test_support::seed_example_model(&pool).await;
-        let job_id = test_support::enqueue(&pool, seed.identity, seed.ad, 1).await;
+        // Zimbra hedefi: connector yok, is "hedefe yazilmadi" sonucuyla biter; AD hedefi
+        // yapilandirma ister ve bu testte AD yoktur.
+        let zimbra: i64 = sqlx::query_scalar("SELECT id FROM target_systems WHERE kind = 'zimbra'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let job_id = test_support::enqueue(&pool, seed.identity, zimbra, 1).await;
         let test_url = format!(
             "{}/{db_name}",
             std::env::var("DATABASE_URL")
@@ -332,10 +346,7 @@ mod tests {
         assert_eq!(status, "succeeded", "kuyruktaki iş tek sırada işlenmeli");
         let result = result.unwrap_or_default();
         assert!(result.contains("state: Active"), "{result}");
-        assert!(
-            result.starts_with("kuru çalıştırma"),
-            "DRY_RUN=true: {result}"
-        );
+        assert!(result.contains("connector'ı yok"), "{result}");
 
         drop(pool);
         test_support::drop_temp_db(&admin_pool, &db_name).await;

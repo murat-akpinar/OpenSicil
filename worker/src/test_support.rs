@@ -13,12 +13,15 @@ pub async fn fresh_migrated_db() -> (PgPool, PgPool, String) {
     let admin_pool = crate::db::connect_pool(&admin_url)
         .await
         .expect("admin pool kurulamadı");
+    // Saat çözünürlüğü kaba olabilir; aynı anda başlayan testler aynı damgayı alır.
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let db_name = format!(
-        "opensicil_worker_test_{}",
+        "opensicil_worker_test_{}_{}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_nanos()
+            .as_nanos(),
+        SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     );
     sqlx::query(sqlx::AssertSqlSafe(format!("CREATE DATABASE {db_name}")))
         .execute(&admin_pool)
@@ -181,6 +184,116 @@ async fn seed_org(pool: &PgPool, m: &ExampleModel) -> (i64, i64, i64, i64) {
     .await
     .unwrap();
     (ankara, bt, primary, additional)
+}
+
+// Lab AD baglanti ayarini Yapilandirma sayfasinin yazacagi gibi DB'ye yazar
+// (parola AEAD ile sifreli) ve AdConfig doner.
+pub async fn configure_lab_ad(
+    pool: &PgPool,
+    key: &[u8; crate::crypto::KEY_LEN],
+    url: &str,
+    bind_dn: &str,
+    password: &str,
+    ca_file: &str,
+) -> crate::ad::AdConfig {
+    sqlx::query(
+        "UPDATE app_settings SET ad_host = $1, ad_bind_dn = $2, ad_service_password_enc = $3 WHERE id = TRUE",
+    )
+    .bind(url)
+    .bind(bind_dn)
+    .bind(crate::crypto::encrypt(key, password.as_bytes()))
+    .execute(pool)
+    .await
+    .expect("AD ayarı yazılamadı");
+    crate::ad::AdConfig {
+        urls: crate::ad::parse_urls(url),
+        bind_dn: bind_dn.to_string(),
+        password: password.to_string(),
+        ca_file: ca_file.to_string(),
+    }
+}
+
+// Ornek modeli lab AD'nin gercek katalog GUID'lerine baglar: birincil rolun
+// OU'su SistemUzmanlari (seed.sh'de yok → Personel altina eklenir), grubu GG-VPN.
+pub async fn point_model_at_real_catalog(
+    pool: &PgPool,
+    seed: &ExampleModel,
+    cfg: &crate::ad::AdConfig,
+) {
+    sync_real_catalog(pool, seed.ad, cfg).await;
+    let real = |name: &'static str| {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT id FROM catalog_items WHERE display_name = $1 AND external_id NOT LIKE 'GG-%' \
+             AND external_id NOT IN ('Personel', 'SistemUzmanlari') LIMIT 1",
+        )
+        .bind(name)
+        .fetch_one(pool)
+    };
+    let ou = real("SistemUzmanlari")
+        .await
+        .expect("gerçek OU kataloğa girmeli");
+    let vpn = real("GG-VPN").await.expect("gerçek grup kataloğa girmeli");
+    sqlx::query("UPDATE role_target_settings SET container_item_id = $1")
+        .bind(ou)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::raw_sql(sqlx::AssertSqlSafe(
+        "DELETE FROM role_entitlements; DELETE FROM department_entitlements".to_string(),
+    ))
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO role_entitlements (role_id, catalog_item_id) SELECT id, $1 FROM roles WHERE kind = 'primary'")
+        .bind(vpn)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+// Lab kapsamini (SistemUzmanlari OU'su dahil; seed.sh'de yok, burada eklenir)
+// gercek GUID'leriyle kataloga yazar.
+async fn sync_real_catalog(pool: &PgPool, ad: i64, cfg: &crate::ad::AdConfig) {
+    let scope = crate::ad::ManagedScope {
+        user_ous: vec![
+            "OU=Personel,DC=opensicil,DC=lab".to_string(),
+            "OU=SistemUzmanlari,OU=Personel,DC=opensicil,DC=lab".to_string(),
+        ],
+        passive_ou: Some("OU=Pasif,OU=Personel,DC=opensicil,DC=lab".to_string()),
+        group_ous: vec!["OU=Gruplar,DC=opensicil,DC=lab".to_string()],
+    };
+    let mut ldap = crate::ad::connect(cfg).await.expect("lab AD");
+    let _ = ldap
+        .add(
+            "OU=SistemUzmanlari,OU=Personel,DC=opensicil,DC=lab",
+            vec![(
+                "objectClass",
+                std::collections::HashSet::from(["organizationalUnit"]),
+            )],
+        )
+        .await;
+    let checks = crate::ad::startup_checks(&mut ldap, &scope).await.unwrap();
+    let snapshot = crate::ad::read_catalog(&mut ldap, &scope, &checks)
+        .await
+        .unwrap();
+    crate::catalog::sync_snapshot(pool, ad, &snapshot)
+        .await
+        .unwrap();
+    ldap.unbind().await.ok();
+}
+
+// Onceki (basarisiz) test kosularindan kalan lab hesaplarini temizler.
+pub async fn delete_lab_accounts(cfg: &crate::ad::AdConfig, sam_pattern: &str) {
+    let mut ldap = crate::ad::connect(cfg).await.expect("lab AD");
+    let base = crate::ad::base_dn(&mut ldap).await.unwrap();
+    let filter = format!("(&(objectClass=user)(sAMAccountName={sam_pattern}))");
+    let found = crate::ad::search(&mut ldap, &base, ldap3::Scope::Subtree, &filter, &["cn"])
+        .await
+        .unwrap();
+    for entry in found {
+        let _ = ldap.delete(&entry.dn).await;
+    }
+    ldap.unbind().await.ok();
 }
 
 // Backend'in enqueue'su ayri crate'te; testte sahip roluyle dogrudan yazilir.

@@ -43,4 +43,5 @@
 - AD connector okuma yolu ve katalog (LDAPS, yasaklı gruplar, lab seed)
 - AD açılış kontrolleri: kapsam DN çözümü ve msDS-LogonTimeSyncInterval (ADR-060)
 - Şablonla kullanıcı adı üretimi ve DB/AD çakışma çözümü (ADR-011/022/035)
+- Tek add ile AD hesabı açma, etkinleştirme ve pasifleştirme (ADR-057)
 
