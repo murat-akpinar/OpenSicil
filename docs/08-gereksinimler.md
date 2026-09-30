@@ -31,6 +31,7 @@
 | F-40 | Worker kuru çalıştırma modu: hedefe yazmadan farkı gösterir; ilk kurulum, yükseltme, yedekten dönüş ve bakım penceresi için ([ADR-054](decisions/054-kuru-calistirma-ve-yedekten-donus.md)) |
 | F-37 | Ek role isteğe bağlı bitiş tarihi; tarih dolunca rol kendiliğinden kaldırılır ([ADR-020](decisions/020-sureli-ek-rol.md)) |
 | F-38 | Yönetici ayrılışında astların etkin yöneticisi, ayrılanın kaydındaki devir yöneticisinden bitiş anında türetilir; geri almada kendiliğinden döner; kişi sayfası ast sayısını ve yöneticisiz kalanları gösterir ([ADR-041](decisions/041-astlarin-yoneticisi-turetilir.md)) |
+| F-42 | Gösterge paneli: tarih aralığı filtresi (varsayılan son 30 gün); işe giren/ayrılan/görev değiştiren sayısı; departman ve rol kırılımı (pasta, native CSS `conic-gradient`, kütüphane yok); "ayrılmış ama kapatılamamış" ve onay bekleyen taslak sayısı ([ADR-076](decisions/076-gosterge-paneli-v1-kapsami.md)) |
 
 ### v2
 

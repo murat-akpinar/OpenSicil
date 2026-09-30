@@ -13,6 +13,7 @@
 - Kurulum kararlarını tamamla, todo.md şemasını oluştur
 - Faz 1a dagitim ve migration komutlarini doldur
 - MidPoint denemesi yapıldı, ADR-002 kararı degismedi
+- Gösterge panelini v1 kapsamına ekle (ADR-076)
 
 ### Testler
 

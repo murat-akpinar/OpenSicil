@@ -27,6 +27,7 @@ Uygulamalara erişim AD grupları üzerinden verilir. OpenBerat gibi grup okuyan
 - İlk parolanın bir kez gösterilmesi (İK veya yardım masası), yalnızca hiç giriş yapılmamış hesaba; ilk girişte değiştirme işareti kurulum ayarı
 - Kimlik numarasının şifreli saklanması
 - Kişi sayfası, yaklaşan bitişler listesi, mutabakat raporu, denetim kaydı, izleme için metrik ucu ("ayrılmış ama kapatılamamış" dahil); worker kuru çalıştırma modu ve yedekten dönüş adımları
+- Gösterge paneli: tarih aralığı filtresiyle işe giren/ayrılan/görev değiştiren sayısı, departman ve rol kırılımı (pasta, native CSS), "ayrılmış ama kapatılamamış" ve onay bekleyen taslak sayısı ([ADR-076](decisions/076-gosterge-paneli-v1-kapsami.md))
 - Yönetilen kapsam ve toplu değişiklik freni (eşik yetki farkı üreten kimliği sayar, ekleme dahil, gözlemdekiler hariç; eşiği aşan düzenleme taslak olarak bekler); saatlik yıkıcı, verme ve ilk parola sayaçları, iş sayaçlara karşı bütün; ayrılışı geri alma yıkıcı sayılır; tek yöneticili kurum için onay zaman kilidi
 
 Ayrıntı: [docs/08](08-gereksinimler.md). Kurulum ön koşulları ve ayarlar: [docs/09](09-kurulum.md).
@@ -134,3 +135,4 @@ Lab'da ayrıca Samba AD ve Keycloak (`compose.lab.yaml`, [ADR-027](decisions/027
 - 073-oidc-crate-secimi.md — OIDC istemci crate'i: `openidconnect` (reqwest + rustls-tls/ring); client her istekte yeniden kurulur, PKCE/state/nonce DB'de
 - 074-samba-lab-imaji-digest-sabitleme.md — 069'un lab imajı kısmının yerine geçer: lab Samba AD imajı dijestle sabitlenir (`default-fedora-amd64` kanalı, içerik Samba 4.24.7)
 - 075-midpoint-deneme-sonucu.md — ADR-002'nin altına: midPoint denemesi yapıldı, karar değişmedi (Java ağırlığı ve betiksiz ayar eksikliği somut doğrulandı)
+- 076-gosterge-paneli-v1-kapsami.md — Gösterge paneli v1 kapsamına eklendi: giren/ayrılan/görev değiştiren sayısı, departman/rol kırılımı, native CSS grafik (kütüphane yok)

@@ -158,6 +158,8 @@ Kurallar:
 
 - [ ] Okuma şeridi: mutabakat, katalog yenileme, toplu yönetime alma fark hesabı ayrı görevde, sayaca dokunmaz ([ADR-051](decisions/051-okuma-seridi.md))
 - [ ] Mutabakat raporu: gece ve istendiğinde, "yeniden uygula" ile (F-13)
+- [ ] Gösterge paneli ([ADR-076](decisions/076-gosterge-paneli-v1-kapsami.md)): tarih aralığı filtresi (varsayılan son 30 gün); işe giren/ayrılan/görev değiştiren sayısı; departman ve rol kırılımı (pasta, native CSS `conic-gradient`, kütüphane yok); "ayrılmış ama kapatılamamış" ve onay bekleyen taslak sayısı
+  - Kabul: beş panel de doğru sayıları gösteriyor; tarih aralığı değiştirilince sayılar güncelleniyor; yeni JS/CSS grafik bağımlılığı eklenmedi
 - [ ] Hedef sistem başına saklama + "silinmeyi bekleyenler" listesi ([ADR-024](decisions/024-hedef-sistem-basina-saklama-suresi.md))
 - [ ] Metrik ucu: hedef sistem başına son başarılı bağlantı dahil (F-19)
 - [ ] N-03 yük testi (20.000 kimlik) ve ölçüme göre worker eşzamanlılığı
