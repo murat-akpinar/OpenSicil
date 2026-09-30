@@ -1,5 +1,8 @@
 use sqlx::PgPool;
 
+// ADR-068: migration ile seed edilen tek yerel hesabin adi; denetim kaydinda aktor.
+pub const BOOTSTRAP_USERNAME: &str = "admin";
+
 struct AccountRow {
     username: String,
     password_hash: String,

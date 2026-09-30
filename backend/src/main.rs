@@ -1,3 +1,4 @@
+mod audit;
 mod auth;
 mod bootstrap_account;
 mod cookie;

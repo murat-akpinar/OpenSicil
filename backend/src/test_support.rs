@@ -146,6 +146,41 @@ async fn set_default_container(pool: &PgPool, target: i64, item: i64) {
         .expect("hedef sistem varsayılan konteyneri yazılamadı");
 }
 
+// Bir departman, bir birincil rol ve iki kadrolu kimlik; kimlik gerektiren
+// testler icin en kucuk veri. Sahip roluyle yazilir.
+pub async fn seed_two_identities(pool: &PgPool) -> [i64; 2] {
+    let department: i64 =
+        sqlx::query_scalar("INSERT INTO departments (name) VALUES ('Test Birimi') RETURNING id")
+            .fetch_one(pool)
+            .await
+            .expect("departman açılamadı");
+    let role: i64 = sqlx::query_scalar(
+        "INSERT INTO roles (kind, name) VALUES ('primary', 'Test Rolü') RETURNING id",
+    )
+    .fetch_one(pool)
+    .await
+    .expect("rol açılamadı");
+    let mut ids = [0_i64; 2];
+    for (i, (given, surname)) in [("Ayşe", "Yılmaz"), ("Ali", "Kaya")]
+        .into_iter()
+        .enumerate()
+    {
+        ids[i] = sqlx::query_scalar(
+            "INSERT INTO identities \
+             (given_name, surname, department_id, primary_role_id, employment_type, start_date) \
+             VALUES ($1, $2, $3, $4, 'permanent', current_date) RETURNING id",
+        )
+        .bind(given)
+        .bind(surname)
+        .bind(department)
+        .bind(role)
+        .fetch_one(pool)
+        .await
+        .expect("kimlik açılamadı");
+    }
+    ids
+}
+
 async fn target_id(pool: &PgPool, kind: &str) -> i64 {
     sqlx::query_scalar("SELECT id FROM target_systems WHERE kind = $1")
         .bind(kind)

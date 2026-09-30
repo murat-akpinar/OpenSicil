@@ -281,6 +281,22 @@ async fn establish_operator_session(
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
+    let actor = crate::audit::Actor {
+        subject: Some(&operator.subject),
+        username: &operator.username,
+    };
+    let detail = serde_json::json!({ "authorities": operator.authorities });
+    if let Err(e) = crate::audit::record(
+        &state.pool,
+        &actor,
+        crate::audit::OPERATOR_LOGIN,
+        None,
+        detail,
+    )
+    .await
+    {
+        eprintln!("web: denetim kaydı yazılamadı (operator.login): {e}");
+    }
 
     let mut headers = HeaderMap::new();
     headers.insert(
@@ -333,7 +349,25 @@ async fn change_password_submit(
         eprintln!("web: parola değiştirilemedi: {e}");
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
+    audit_bootstrap(
+        &state.pool,
+        crate::audit::BOOTSTRAP_PASSWORD_CHANGED,
+        serde_json::json!({}),
+    )
+    .await;
     Redirect::to("/config").into_response()
+}
+
+// Denetim satiri yazilamazsa islem geri alinmaz (ayar zaten kaydedildi), yalnizca
+// log'a duser; docs/07 sirasi "once yaz" yalnizca worker'in hedef yazmalari icin.
+async fn audit_bootstrap(pool: &PgPool, event_type: &str, detail: serde_json::Value) {
+    let actor = crate::audit::Actor {
+        subject: None,
+        username: crate::bootstrap_account::BOOTSTRAP_USERNAME,
+    };
+    if let Err(e) = crate::audit::record(pool, &actor, event_type, None, detail).await {
+        eprintln!("web: denetim kaydı yazılamadı ({event_type}): {e}");
+    }
 }
 
 async fn config_form(_session: BootstrapSession, State(state): State<AppState>) -> Response {
@@ -381,6 +415,22 @@ async fn config_submit(
     State(state): State<AppState>,
     Form(form): Form<ConfigForm>,
 ) -> Response {
+    let secrets_updated: Vec<&str> = [
+        ("ad_service_password", &form.ad_service_password),
+        ("zimbra_admin_password", &form.zimbra_admin_password),
+        ("oidc_client_secret", &form.oidc_client_secret),
+    ]
+    .into_iter()
+    .filter(|(_, value)| !value.is_empty())
+    .map(|(name, _)| name)
+    .collect();
+    let before = match crate::settings::load(&state.pool).await {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("web: ayarlar okunamadı: {e}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
     let input = crate::settings::AppSettingsInput {
         ad_host: form.ad_host,
         ad_bind_dn: form.ad_bind_dn,
@@ -394,6 +444,10 @@ async fn config_submit(
     if let Err(e) = crate::settings::save(&state.pool, &state.aead_key, &input).await {
         eprintln!("web: ayarlar kaydedilemedi: {e}");
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+    if let Ok(after) = crate::settings::load(&state.pool).await {
+        let detail = crate::audit::settings_change_detail(&before, &after, &secrets_updated);
+        audit_bootstrap(&state.pool, crate::audit::SETTINGS_CHANGED, detail).await;
     }
     Redirect::to("/config").into_response()
 }

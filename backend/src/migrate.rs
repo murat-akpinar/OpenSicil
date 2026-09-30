@@ -62,7 +62,8 @@ pub async fn run() -> ExitCode {
 // acan her migration buraya satir ekler; GRANT idempotent, her migrate'te yenilenir.
 // - _sqlx_migrations: acilis sema kontrolu (ADR-061 madde 3, db::check_schema_ready)
 // - audit_log: yalnizca ekleme, performed_by ve id kolonlarina deger verilemez,
-//   UPDATE/DELETE yok (ADR-016 sayaclar worker satirlarini sayar)
+//   UPDATE/DELETE yok; niyet sinifi (operation_class) ve sonuc yalnizca worker,
+//   aktor yalnizca backend (ADR-016/050/062: sayac worker niyetlerini sayar)
 // - identities: backend operator alanlarini yazar; username/email/upn ve
 //   silindi temizligi (kisisel veri kolonlari + deleted_at) yalnizca worker
 //   (ADR-015, ADR-038, ADR-077). Kimlik satiri hic silinmez, ic ID kalir.
@@ -74,8 +75,11 @@ const SERVICE_GRANTS: &str = "\
 GRANT SELECT ON _sqlx_migrations TO {backend}, {worker};
 GRANT SELECT, INSERT, UPDATE, DELETE ON bootstrap_account, bootstrap_sessions, app_settings, \
 oidc_auth_requests, operator_sessions TO {backend};
-GRANT SELECT ON audit_log TO {backend}, {worker};
-GRANT INSERT (event_type, detail) ON audit_log TO {backend}, {worker};
+GRANT SELECT ON audit_log, hourly_counter_usage TO {backend}, {worker};
+GRANT INSERT (event_type, detail, actor_subject, actor_username, identity_id, target_system_id) \
+ON audit_log TO {backend};
+GRANT INSERT (event_type, detail, identity_id, target_system_id, operation_class, emergency, \
+intent_id, outcome) ON audit_log TO {worker};
 GRANT SELECT, INSERT, UPDATE, DELETE ON departments, roles, identity_additional_roles TO {backend};
 GRANT SELECT ON departments, roles TO {worker};
 GRANT SELECT, DELETE ON identity_additional_roles TO {worker};
@@ -377,7 +381,42 @@ mod tests {
         for (service_pool, role) in [(&f.backend_pool, &f.backend), (&f.worker_pool, &f.worker)] {
             assert_audit_is_append_only(service_pool, role).await;
         }
+        assert_only_worker_writes_intents(&f.backend_pool, &f.worker_pool).await;
         f.teardown().await;
+    }
+
+    // ADR-016/062: niyet satirini (sayac sinifi) yalnizca worker yazar, backend
+    // sahte niyetle sayaci dolduramaz; aktoru yalnizca backend yazar.
+    async fn assert_only_worker_writes_intents(backend_pool: &PgPool, worker_pool: &PgPool) {
+        assert_rejected(
+            backend_pool,
+            "INSERT INTO audit_log (event_type, operation_class) VALUES ('sahte', 'destructive')",
+            &[],
+            "backend niyet satırı yazamamalı",
+        )
+        .await;
+        let intent: i64 = sqlx::query_scalar(
+            "INSERT INTO audit_log (event_type, operation_class, emergency) \
+             VALUES ('ad.account.disable', 'destructive', TRUE) RETURNING id",
+        )
+        .fetch_one(worker_pool)
+        .await
+        .expect("worker niyet satırı yazabilmeli");
+        sqlx::query(
+            "INSERT INTO audit_log (event_type, intent_id, outcome) \
+             VALUES ('ad.account.disable', $1, 'succeeded')",
+        )
+        .bind(intent)
+        .execute(worker_pool)
+        .await
+        .expect("worker sonuç satırını niyetine bağlayabilmeli");
+        assert_rejected(
+            worker_pool,
+            "INSERT INTO audit_log (event_type, actor_username) VALUES ('x', 'sahte')",
+            &[],
+            "worker aktör uyduramamalı",
+        )
+        .await;
     }
 
     // ADR-077: rol turu kisiti veritabaninda, kimlik kolonlari rol bazli.
