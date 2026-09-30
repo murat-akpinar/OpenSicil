@@ -66,7 +66,7 @@ Sonuç sütunu: **✓** doğrulandı · **✗** yanlış çıktı, docs düzelti
 | S10 | Karmaşıklık kuralı ad parçalarına bakar | **✗** | Samba yalnızca karakter sınıfı sayar (5 sınıftan 3'ü). Ad parçası kontrolü yok; [ADR-055](decisions/055-netlestirmeler-onay-csv-operator-parola.md) 5. madde Samba lab'ında sınanamaz | `genrand_util.c`, `util.c` |
 | S11 | Sayfalı arama ve 1000/1500 sınırları | **~** | Sayfalı arama var; `MaxPageSize` ayrıştırılıyor ama **uygulanmıyor**, 1500 değer kesmesi yok. Windows sınırları Samba lab'ında görülmez | `paged_results.c`, `ranged_results.c` |
 | S12 | ModifyDN ile taşıma ve yeniden adlandırma | ✓ | Tek işlemde; `deleteoldrdn=false` reddedilir ("Old RDN must be deleted") | `ldap_backend.c` |
-| S13 | Sürüm ve lab imajı | ✓ | Kararlı 4.24.7 (2026-09-09). Bakımı süren imaj: `quay.io/samba.org/samba-ad-server` (samba-in-kubernetes/samba-container) | samba.org, GitHub |
+| S13 | Sürüm ve lab imajı | ✓ | Kararlı 4.24.7 (2026-09-09). Bakımı süren imaj: `quay.io/samba.org/samba-ad-server` (samba-in-kubernetes/samba-container). **Düzeltme (Faz 1c):** bu imaj Samba sürüm numarasıyla etiket yayımlamıyor (kendi sürümleri `v0.2`–`v0.9`); registry'de doğrulanıp `default-fedora-amd64` kanalının 4.24.7 içeren dijestine kilitlendi ([ADR-074](decisions/074-samba-lab-imaji-digest-sabitleme.md)) | samba.org, GitHub, quay.io API |
 | S14 | `msDS-LogonTimeSyncInterval = 0` | ✓ | Windows ile aynı: `if (sync_interval_nt == 0) { … return NT_STATUS_OK; }` — `lastLogonTimestamp` yazılmaz; öznitelik yoksa 14 gün. [ADR-060](decisions/060-lastlogontimestamp-on-kosulu-acilista-dogrulanir.md)'ın açılış kontrolü Samba lab'ında sınanabilir | `source4/auth/sam.c` |
 
 ## `ldap3` crate (kaynak: `github.com/inejge/ldap3` master, docs.rs)

@@ -42,7 +42,7 @@ Kurallar:
   - Not: "Ayrılmış/askıdaki operatör reddi" ([ADR-055](decisions/055-netlestirmeler-onay-csv-operator-parola.md), [ADR-059](decisions/059-netlestirmeler-operator-geri-alma-aski-bitisi-accountexpires.md)) buradan Faz 2'nin sonuna taşındı: eşleşme, kimlik tablosu ve durum türetme fonksiyonu (ADR-038) olmadan kurulamıyor. Bu kapanış o kutucuğu beklemez.
 
 ### 1c. Lab kod olarak + midPoint denemesi
-- [ ] `compose.lab.yaml` ile Samba AD ve Keycloak ayağa kalkar ([ADR-027](decisions/027-test-stratejisi-ve-lab.md))
+- [x] `compose.lab.yaml` ile Samba AD ve Keycloak ayağa kalkar ([ADR-027](decisions/027-test-stratejisi-ve-lab.md))
   - Kabul: `docker compose -f compose.yaml -f compose.lab.yaml up -d` sonrası ikisi de `healthy`
 - [ ] midPoint denemesi ([ADR-002](decisions/002-hazir-urun-yerine-gelistirme.md))
   - Kabul: lab AD'ye karşı en fazla 1 gün denenir; sonuç ADR-002'nin altına yeni bir karar dosyası olarak yazılır

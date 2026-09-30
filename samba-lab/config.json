@@ -1,0 +1,17 @@
+{
+  "samba-container-config": "v0",
+  "configs": {
+    "ad": {
+      "instance_features": ["addc"],
+      "domain_settings": "opensicil",
+      "instance_name": "DC1"
+    }
+  },
+  "domain_settings": {
+    "opensicil": {
+      "realm": "OPENSICIL.LAB",
+      "short_domain": "OPENSICIL",
+      "admin_password": "lab-only-not-secret-Aa1"
+    }
+  }
+}

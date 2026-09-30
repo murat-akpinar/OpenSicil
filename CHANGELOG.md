@@ -24,4 +24,5 @@
 - Backend ve worker'a SIGTERM ve şema hazırlık kontrolü ekle
 - Yerel bootstrap hesabı ve Yapılandırma sayfasını ekle
 - OIDC yonetim girisi ve alti yonetim yetkisi
+- Lab compose'una Samba AD ekle
 

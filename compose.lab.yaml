@@ -1,4 +1,4 @@
-# Faz 1b/1c lab: yalnizca Keycloak (Samba AD 1c'de eklenir, ADR-027).
+# Faz 1c lab: Keycloak + Samba AD (ADR-027).
 # ponytail: host portu acarak tarayici/host testleri docker agina girmeden
 # `http://localhost:8081` ile konusabiliyor; gercek docker-network/PUBLIC_URL
 # issuer cozumu (backend container'i icinden erisim) Faz 1c'nin isi.
@@ -17,6 +17,31 @@ services:
       # curl/wget yok (RHEL UBI minimal); /dev/tcp bash'te var, ham HTTP istegiyle
       # /realms/master'a bakiliyor (yonetim portu 9000 dev modda dinlemiyor).
       test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080 && echo -e 'GET /realms/master HTTP/1.1\\r\\nhost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q 'HTTP/1.1 200' <&3"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  # Samba'nin bu projede surum numarasiyla (orn. 4.24.7) etiketi yok, kendi
+  # surumlerini (v0.2-v0.9) etiketliyor ("latest"/"nightly"/"default-*" hareketli
+  # kanal etiketleri) - sabit surum kurali icin "default-fedora-amd64" kanalinin
+  # su anki dijestine kilitlendi; icerik dogrulandi: Samba 4.24.7 (ADR-074,
+  # ADR-069'un lab imaji kismini gunceller).
+  samba-ad:
+    image: quay.io/samba.org/samba-ad-server@sha256:cb7157a1780d1d9c8ccbb5ee67a0f988b4401f35ebe65d71cc8025d9265fe327
+    # ponytail: yonetilen OU / yasakli grup / "mevcut personel" seed verisi
+    # (ADR-027) burada degil, AD connector'ini tuketen Faz 3a'da eklenir -
+    # simdi eklemek baglanti/DN varsayimlarini tahmin etmek olurdu.
+    cap_add:
+      - SYS_ADMIN
+    environment:
+      SAMBACC_CONFIG: /etc/opensicil/config.json
+      SAMBA_CONTAINER_ID: ad
+    volumes:
+      - ./samba-lab/config.json:/etc/opensicil/config.json:ro
+    command: ["run", "--setup=provision", "--setup=populate"]
+    healthcheck:
+      test: ["CMD", "samba-tool", "domain", "info", "127.0.0.1"]
       interval: 5s
       timeout: 3s
       retries: 30

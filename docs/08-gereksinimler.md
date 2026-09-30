@@ -194,7 +194,7 @@ Karar listesi tek yerde tutulur: [PROJECT.md → Kararlar](PROJECT.md#kararlar).
 - [x] Migration'ı şema sahibi rolüyle çalıştıran adım: aynı imajın `migrate` alt komutu, tek seferlik container (compose servisi / Kubernetes Job) — [ADR-061](decisions/061-dagitim-sozlesmesi-compose-ve-kubernetes.md)
 - [x] Metrik ucuna erişim: Bearer token; IP listesi Kubernetes'te çalışmaz — [ADR-061](decisions/061-dagitim-sozlesmesi-compose-ve-kubernetes.md)
 - [x] Test, format, lint, kapsam: `cargo test` / `cargo fmt --check` / `cargo clippy -D warnings` / `cargo llvm-cov` / `cargo audit` ([ADR-069](decisions/069-kurulum-crate-ve-arac-secimleri.md))
-- [x] Lab imajları: Samba `quay.io/samba.org/samba-ad-server:4.24.7`; Keycloak 26.x en güncel kararlı (kesin etiket Faz 1c'de doğrulanır) ([ADR-069](decisions/069-kurulum-crate-ve-arac-secimleri.md), [ADR-027](decisions/027-test-stratejisi-ve-lab.md))
+- [x] Lab imajları: Samba `quay.io/samba.org/samba-ad-server` — proje sürüm numarasıyla etiket yayımlamıyor (`v0.2`–`v0.9`, `latest`/`nightly`/`default-*` kanalları), bu yüzden Faz 1c'de `default-fedora-amd64` kanalının (Samba 4.24.7 içeren) dijestine kilitlendi ([ADR-074](decisions/074-samba-lab-imaji-digest-sabitleme.md), ADR-069'un yerine bu kısmı geçer); Keycloak `26.7.5` ([ADR-069](decisions/069-kurulum-crate-ve-arac-secimleri.md), [ADR-027](decisions/027-test-stratejisi-ve-lab.md))
 
 ### 🟠 İlk commit'ten önce
 
