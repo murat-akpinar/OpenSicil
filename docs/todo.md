@@ -46,7 +46,7 @@ Kurallar:
   - Kabul: `docker compose -f compose.yaml -f compose.lab.yaml up -d` sonrası ikisi de `healthy`
 - [x] midPoint denemesi ([ADR-002](decisions/002-hazir-urun-yerine-gelistirme.md))
   - Kabul: lab AD'ye karşı en fazla 1 gün denenir; sonuç ADR-002'nin altına yeni bir karar dosyası olarak yazılır
-- [ ] Faz kapanışı: güvenlik ve test
+- [x] Faz kapanışı: güvenlik ve test
   - (1a'daki kapanış şablonunun aynısı)
 
 ### 1d. Zimbra keşfi
