@@ -108,6 +108,13 @@ mod tests {
             .await
             .unwrap();
         assert!(request_retry(&pool, job_id).await.unwrap());
+        assert_eq!(
+            enqueue(&pool, ids[0], catalog.ad, Priority::Single)
+                .await
+                .unwrap(),
+            Enqueue::AlreadyOpen(job_id),
+            "müdahaledeki iş açık sayılır, yenisi açılmaz (ADR-052)"
+        );
 
         drop(pool);
         crate::test_support::drop_temp_db(&admin_pool, &db_name).await;

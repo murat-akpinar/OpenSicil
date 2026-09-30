@@ -80,7 +80,7 @@ Kurallar:
 ### 3a. İlk dilim
 - [x] Motor ve kuyruk: tekilleştirme, öncelik, 5 sn yoklama, iş kirası ve niyet satırı ([ADR-062](decisions/062-is-kirasi-ve-yarida-kalan-is.md), [ADR-028](decisions/028-worker-zamanlamasi.md)); worker tek sırada ([ADR-047](decisions/047-worker-tek-sirada.md))
   - Not: zamanlayıcı (sorguya dayalı geçiş yakalama) hesap bağlantısı `applied_state` yazılmaya başlayınca, 3a'nın "hesap aç/etkinleştir/pasifleştir" kutucuğuyla birlikte gelir
-- [ ] Müdahaledeki iş açık sayılır, bağlantı hatası deneme tüketmez ([ADR-052](decisions/052-uygulanamayan-fark.md))
+- [x] Müdahaledeki iş açık sayılır, bağlantı hatası deneme tüketmez ([ADR-052](decisions/052-uygulanamayan-fark.md))
 - [ ] Connector yazma çağrıları tek noktadan geçer + kuru çalıştırma modu ([ADR-054](decisions/054-kuru-calistirma-ve-yedekten-donus.md))
 - [ ] AD connector okuma yolu + katalog (OU, grup, SID, yasaklı grup, iç içe üyelik)
 - [ ] Açılış kontrolleri: kapsam DN'leri, `msDS-LogonTimeSyncInterval` ([ADR-060](decisions/060-lastlogontimestamp-on-kosulu-acilista-dogrulanir.md))

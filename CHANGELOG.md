@@ -38,4 +38,5 @@
 - Olması gereken durum fonksiyonu saf modül olarak (ADR-038)
 - Ayrılmış ve askıdaki operatör her istekte reddedilir (ADR-059)
 - Iş kuyruğu, kira, niyet satırı ve tek sıralı motor döngüsü
+- Bağlantı hatası deneme tüketmez, erişilemeyen hedefin işleri bekletilir (ADR-052)
 

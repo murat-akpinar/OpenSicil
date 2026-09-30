@@ -9,8 +9,29 @@ use sqlx::PgPool;
 use crate::desired_state::desired_state;
 use crate::queue::ClaimedJob;
 
-pub async fn run_job(pool: &PgPool, job: &ClaimedJob, time_zone: &str) -> Result<String, String> {
-    let input = crate::model::load(pool, job.identity_id, job.target_system_id, time_zone).await?;
+// ADR-052: hedefe ulasilamamasi isin degil hedefin arizasidir (deneme tuketmez,
+// hedefin isleri bekletilir); nesne duzeyi hata deneme tuketir.
+#[derive(Debug)]
+pub enum JobError {
+    /// Connector'lar uretir (3a okuma yolu ve yazma noktasi); su an yalnizca testler.
+    #[allow(dead_code)]
+    Unreachable(String),
+    Failed(String),
+}
+
+impl std::fmt::Display for JobError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            JobError::Unreachable(reason) => write!(f, "hedefe ulaşılamıyor: {reason}"),
+            JobError::Failed(reason) => write!(f, "{reason}"),
+        }
+    }
+}
+
+pub async fn run_job(pool: &PgPool, job: &ClaimedJob, time_zone: &str) -> Result<String, JobError> {
+    let input = crate::model::load(pool, job.identity_id, job.target_system_id, time_zone)
+        .await
+        .map_err(JobError::Failed)?;
     let desired = desired_state(
         &input.timeline,
         &input.model,

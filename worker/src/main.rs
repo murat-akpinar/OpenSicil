@@ -10,10 +10,11 @@ mod queue;
 #[cfg(test)]
 mod test_support;
 
+use std::collections::HashMap;
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use sqlx::PgPool;
 use tokio::signal::unix::{signal, SignalKind};
@@ -108,14 +109,19 @@ async fn run() -> ExitCode {
     println!("worker: {worker_id} başladı, {POLL_INTERVAL:?} aralıkla yoklanıyor");
 
     // Yazma seridi tek sirada (ADR-047): bir is bitmeden digeri alinmaz;
-    // kuyruk bosalinca 5 sn beklenir.
+    // kuyruk bosalinca 5 sn beklenir. Erisilemeyen hedefin isleri bir yoklama
+    // suresi boyunca alinmaz, sonra tek isle yeniden yoklanir (ADR-052 madde 3).
+    let mut unreachable: HashMap<i64, Instant> = HashMap::new();
     while !stop.load(Ordering::SeqCst) {
         if let Err(e) = heartbeat::touch() {
             eprintln!("worker: nabız dosyasına yazılamadı: {e}");
         }
-        match queue::claim(&pool, &worker_id).await {
+        let skip = unreachable_targets(&unreachable, Instant::now());
+        match queue::claim(&pool, &worker_id, &skip).await {
             Ok(Some(job)) => {
-                process_job(&pool, &job, &worker_id, &env.time_zone).await;
+                if process_job(&pool, &job, &worker_id, &env.time_zone).await {
+                    unreachable.insert(job.target_system_id, Instant::now() + POLL_INTERVAL);
+                }
                 continue;
             }
             Ok(None) => {}
@@ -126,24 +132,66 @@ async fn run() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-async fn process_job(pool: &PgPool, job: &queue::ClaimedJob, worker_id: &str, time_zone: &str) {
-    let outcome = match engine::run_job(pool, job, time_zone).await {
-        Ok(result) => queue::complete(pool, job, worker_id, &result)
-            .await
-            .map(|_| ()),
+fn unreachable_targets(marks: &HashMap<i64, Instant>, now: Instant) -> Vec<i64> {
+    marks
+        .iter()
+        .filter(|(_, until)| **until > now)
+        .map(|(target, _)| *target)
+        .collect()
+}
+
+// Doner: hedef erisilemez isaretlenmeli mi.
+async fn process_job(
+    pool: &PgPool,
+    job: &queue::ClaimedJob,
+    worker_id: &str,
+    time_zone: &str,
+) -> bool {
+    let (outcome, unreachable) = match engine::run_job(pool, job, time_zone).await {
+        Ok(result) => (
+            queue::complete(pool, job, worker_id, &result)
+                .await
+                .map(|_| ()),
+            false,
+        ),
+        Err(engine::JobError::Unreachable(reason)) => {
+            eprintln!(
+                "worker: iş {} ertelendi, hedefe ulaşılamıyor: {reason}",
+                job.id
+            );
+            let retry = POLL_INTERVAL.as_secs() as i64;
+            (
+                queue::defer_unreachable(pool, job, worker_id, &reason, retry).await,
+                true,
+            )
+        }
         Err(error) => {
             eprintln!("worker: iş {} başarısız: {error}", job.id);
-            queue::fail(pool, job, worker_id, &error).await
+            (
+                queue::fail(pool, job, worker_id, &error.to_string()).await,
+                false,
+            )
         }
     };
     if let Err(e) = outcome {
         eprintln!("worker: iş {} sonucu yazılamadı: {e}", job.id);
     }
+    unreachable
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unreachable_marks_expire() {
+        let now = Instant::now();
+        let marks = HashMap::from([
+            (1_i64, now + POLL_INTERVAL),
+            (2_i64, now - Duration::from_secs(1)),
+        ]);
+        assert_eq!(unreachable_targets(&marks, now), vec![1]);
+    }
 
     // Gercek Postgres gerektirir (ADR-070): DATABASE_URL, testler icin
     // ayrilmis bir veritabanina isaret etmeli (proje .env'i degil). POLL_INTERVAL

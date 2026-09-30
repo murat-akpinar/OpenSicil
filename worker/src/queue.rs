@@ -24,21 +24,28 @@ pub struct ClaimedJob {
 
 // Oncelik sirasi, ayni oncelikte ilk acilan. Alinabilir: kuyrukta ve zamani gelmis;
 // kirasi dolmus (olen worker'in isi); mudahalede ve "tekrar dene" istenmis.
+// Erisilemeyen hedeflerin isleri alinmaz (ADR-052 madde 3).
 const CLAIM_SQL: &str = "WITH candidate AS ( \
     SELECT id FROM jobs \
-    WHERE (status = 'queued' AND next_attempt_at <= now()) \
+    WHERE ((status = 'queued' AND next_attempt_at <= now()) \
        OR (status = 'running' AND locked_until < now()) \
-       OR (status = 'needs_intervention' AND retry_requested) \
+       OR (status = 'needs_intervention' AND retry_requested)) \
+      AND target_system_id <> ALL($3) \
     ORDER BY priority, created_at LIMIT 1 FOR UPDATE SKIP LOCKED) \
     UPDATE jobs j SET status = 'running', locked_by = $1, \
         locked_until = now() + make_interval(mins => $2), retry_requested = FALSE \
     FROM candidate WHERE j.id = candidate.id \
     RETURNING j.id, j.identity_id, j.target_system_id, j.priority, j.attempts";
 
-pub async fn claim(pool: &PgPool, worker_id: &str) -> Result<Option<ClaimedJob>, sqlx::Error> {
+pub async fn claim(
+    pool: &PgPool,
+    worker_id: &str,
+    unreachable_targets: &[i64],
+) -> Result<Option<ClaimedJob>, sqlx::Error> {
     let row: Option<(i64, i64, i64, i16, i32)> = sqlx::query_as(CLAIM_SQL)
         .bind(worker_id)
         .bind(LEASE_MINUTES)
+        .bind(unreachable_targets)
         .fetch_optional(pool)
         .await?;
     Ok(row.map(
@@ -195,6 +202,30 @@ pub async fn fail(
     Ok(())
 }
 
+// ADR-052 madde 3: baglanti duzeyi hata (TCP/TLS, bind, oturum, zaman asimi,
+// 5xx) isin degil hedefin arizasidir; deneme sayisi degismez, is kisa sure sonra
+// yeniden alinabilir. Hedefin diger isleri de o sure alinmaz (main.rs).
+pub async fn defer_unreachable(
+    pool: &PgPool,
+    job: &ClaimedJob,
+    worker_id: &str,
+    reason: &str,
+    retry_after_seconds: i64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE jobs SET status = 'queued', last_error = $3, \
+         next_attempt_at = now() + make_interval(secs => $4), locked_by = NULL, locked_until = NULL \
+         WHERE id = $1 AND locked_by = $2 AND status = 'running'",
+    )
+    .bind(job.id)
+    .bind(worker_id)
+    .bind(reason)
+    .bind(retry_after_seconds as f64)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 // 1, 2, 4, 8, 16 dk; ustel ama sinirli.
 fn backoff_seconds(attempts: i32) -> i64 {
     let exponent = (attempts.max(1) - 1).min(BACKOFF_MAX_EXPONENT as i32) as u32;
@@ -223,11 +254,34 @@ mod tests {
         let bulk = test_support::enqueue(&pool, seed.identity, seed.ad, 2).await;
         let emergency = test_support::enqueue(&pool, seed.other_identity, seed.ad, 0).await;
 
-        let first = claim(&pool, "w1").await.unwrap().expect("iş alınmalı");
+        assert!(
+            claim(&pool, "w1", &[seed.ad]).await.unwrap().is_none(),
+            "erişilemeyen hedefin işi alınmaz"
+        );
+        let first = claim(&pool, "w1", &[]).await.unwrap().expect("iş alınmalı");
         assert_eq!(first.id, emergency, "acil ayrılış önce");
-        let second = claim(&pool, "w1").await.unwrap().expect("ikinci iş");
+
+        // baglanti hatasi: deneme sayisi degismez, kisa sure sonra yeniden alinir
+        defer_unreachable(&pool, &first, "w1", "LDAP erişilemiyor", 0)
+            .await
+            .unwrap();
+        let again = claim(&pool, "w1", &[])
+            .await
+            .unwrap()
+            .expect("ertelenen iş yeniden alınmalı");
+        assert_eq!(
+            (again.id, again.attempts),
+            (first.id, 0),
+            "bağlantı hatası deneme tüketmez"
+        );
+        let first = again;
+
+        let second = claim(&pool, "w1", &[]).await.unwrap().expect("ikinci iş");
         assert_eq!(second.id, bulk);
-        assert!(claim(&pool, "w1").await.unwrap().is_none(), "kuyruk boş");
+        assert!(
+            claim(&pool, "w1", &[]).await.unwrap().is_none(),
+            "kuyruk boş"
+        );
 
         // olen worker: kira doldu, deneme sayisi degismeden yeniden alinir (ADR-062)
         sqlx::query("UPDATE jobs SET locked_until = now() - interval '1 second' WHERE id = $1")
@@ -235,7 +289,7 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        let reclaimed = claim(&pool, "w2")
+        let reclaimed = claim(&pool, "w2", &[])
             .await
             .unwrap()
             .expect("kirası dolan iş yeniden alınmalı");
@@ -267,7 +321,7 @@ mod tests {
         // basarisizlik: geri cekilme, sonra mudahale
         fail(&pool, &second, "w1", "nesne hatası").await.unwrap();
         assert!(
-            claim(&pool, "w1").await.unwrap().is_none(),
+            claim(&pool, "w1", &[]).await.unwrap().is_none(),
             "geri çekilme süresi dolmadan alınmaz"
         );
         sqlx::query("UPDATE jobs SET next_attempt_at = now(), attempts = $2 WHERE id = $1")
@@ -276,7 +330,7 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        let last_try = claim(&pool, "w1")
+        let last_try = claim(&pool, "w1", &[])
             .await
             .unwrap()
             .expect("süresi gelen iş alınır");
@@ -288,7 +342,7 @@ mod tests {
             .unwrap();
         assert_eq!(status, "needs_intervention");
         assert!(
-            claim(&pool, "w1").await.unwrap().is_none(),
+            claim(&pool, "w1", &[]).await.unwrap().is_none(),
             "müdahaledeki iş kendiliğinden alınmaz"
         );
         sqlx::query("UPDATE jobs SET retry_requested = TRUE WHERE id = $1")
@@ -297,7 +351,7 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            claim(&pool, "w1").await.unwrap().is_some(),
+            claim(&pool, "w1", &[]).await.unwrap().is_some(),
             "tekrar dene ile alınır"
         );
 
