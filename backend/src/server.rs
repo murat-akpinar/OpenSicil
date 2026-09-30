@@ -8,11 +8,19 @@ use crate::health;
 use crate::logging;
 use crate::web::{self, AppState};
 
+// Operator reddi (ADR-059) web rotalarinin tamamini sarar: her istekte kimlik durumu.
 fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/api/health", get(health::health))
         .with_state(state.pool.clone())
-        .merge(web::routes().with_state(state))
+        .merge(
+            web::routes()
+                .layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    crate::operator_guard::enforce,
+                ))
+                .with_state(state),
+        )
         .layer(axum::middleware::from_fn(logging::log_requests))
 }
 
@@ -21,6 +29,7 @@ struct Config {
     aead_key: [u8; crate::crypto::KEY_LEN],
     blind_index_key: [u8; crate::crypto::KEY_LEN],
     public_url: String,
+    time_zone: String,
 }
 
 // Butun ortam degiskenleri acilista dogrulanir: eksik anahtar ya da bozuk ortak
@@ -37,6 +46,7 @@ fn load_config() -> Result<Config, String> {
         aead_key,
         blind_index_key,
         public_url,
+        time_zone: common.time_zone,
     })
 }
 
@@ -50,6 +60,7 @@ pub async fn run() -> ExitCode {
         aead_key,
         blind_index_key,
         public_url,
+        time_zone,
     } = match load_config() {
         Ok(c) => c,
         Err(e) => {
@@ -70,12 +81,17 @@ pub async fn run() -> ExitCode {
         eprintln!("backend: şema hazır değil: {e}");
         return ExitCode::FAILURE;
     }
+    if let Err(e) = crate::db::check_time_zone(&pool, &time_zone).await {
+        eprintln!("backend: {e}");
+        return ExitCode::FAILURE;
+    }
 
     let app = build_router(AppState {
         pool,
         aead_key,
         blind_index_key,
         public_url,
+        time_zone,
     });
 
     let listener = match tokio::net::TcpListener::bind("0.0.0.0:8000").await {
@@ -134,8 +150,80 @@ mod tests {
             aead_key: [0u8; crate::crypto::KEY_LEN],
             blind_index_key: [0u8; crate::crypto::KEY_LEN],
             public_url: "https://localhost".to_string(),
+            time_zone: "Europe/Istanbul".to_string(),
         }
     }
+
+    // ADR-059 madde 1: her istekte kontrol; ayrilmis operatorun oturumu duser, 403.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn departed_operator_is_rejected_on_any_request_and_session_is_dropped() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        let ids = crate::test_support::seed_two_identities(&pool).await;
+        sqlx::query(
+            "UPDATE identities SET username = 'ayse.yilmaz', end_at = now() - interval '1 hour' \
+             WHERE id = $1",
+        )
+        .bind(ids[0])
+        .execute(&pool)
+        .await
+        .unwrap();
+        let operator = |username: &str| crate::operator_session::Operator {
+            subject: format!("sub-{username}"),
+            username: username.to_string(),
+            email: format!("{username}@example.com"),
+            authorities: vec!["hr".to_string()],
+        };
+        let departed_token =
+            crate::operator_session::create_session(&pool, &operator("ayse.yilmaz"))
+                .await
+                .unwrap();
+        let active_token = crate::operator_session::create_session(&pool, &operator("break.glass"))
+            .await
+            .unwrap();
+        let app = build_router(AppState {
+            pool: pool.clone(),
+            ..test_state()
+        });
+        let request = |token: &str| {
+            Request::builder()
+                .uri("/login")
+                .header("cookie", format!("{OPERATOR_COOKIE}={token}"))
+                .body(Body::empty())
+                .unwrap()
+        };
+
+        let response = app.clone().oneshot(request(&departed_token)).await.unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert!(
+            response
+                .headers()
+                .get("set-cookie")
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .contains("Max-Age=0"),
+            "çerez temizlenmeli"
+        );
+        assert!(
+            crate::operator_session::validate_session(&pool, &departed_token)
+                .await
+                .unwrap()
+                .is_none(),
+            "oturum silinmeli"
+        );
+        let response = app.oneshot(request(&active_token)).await.unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "eşleşen kimliği olmayan operatör serbest"
+        );
+
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
+    const OPERATOR_COOKIE: &str = crate::cookie::OPERATOR_SESSION_COOKIE_NAME;
 
     #[tokio::test]
     async fn health_route_is_wired_through_router() {

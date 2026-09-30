@@ -31,6 +31,17 @@ pub async fn check_schema_ready(pool: &PgPool) -> Result<(), String> {
     schema_readiness(failed_migrations)
 }
 
+// Kurulum saat dilimi Postgres'in tzdata'siyla cevrilir (Rust'ta tz kutuphanesi
+// yok); bilinmeyen ad ilk istekte degil acilista yakalanir (ADR-039 TZ).
+pub async fn check_time_zone(pool: &PgPool, time_zone: &str) -> Result<(), String> {
+    sqlx::query("SELECT now() AT TIME ZONE $1")
+        .bind(time_zone)
+        .execute(pool)
+        .await
+        .map(|_| ())
+        .map_err(|e| format!("TZ '{time_zone}' Postgres tarafından tanınmıyor: {e}"))
+}
+
 fn schema_readiness(failed_migrations: i64) -> Result<(), String> {
     if failed_migrations > 0 {
         Err(format!("{failed_migrations} başarısız migration var"))

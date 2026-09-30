@@ -22,6 +22,18 @@ pub struct Date {
     pub day: u8,
 }
 
+impl Date {
+    /// "YYYY-MM-DD" (Postgres `to_char` ciktisi); baska bicim kabul edilmez.
+    pub fn from_iso(text: &str) -> Option<Date> {
+        let mut parts = text.split('-');
+        let year = parts.next()?.parse().ok()?;
+        let month = parts.next()?.parse().ok()?;
+        let day = parts.next()?.parse().ok()?;
+        let in_range = (1..=12).contains(&month) && (1..=31).contains(&day);
+        (parts.next().is_none() && in_range).then_some(Date { year, month, day })
+    }
+}
+
 /// `now` Unix saniyesi, `today` ayni anin kurulum dilimindeki gunu.
 #[derive(Debug, Clone, Copy)]
 pub struct Clock {
@@ -409,6 +421,14 @@ mod tests {
             verified_unused: None,
             deletion_approved: false,
         }
+    }
+
+    #[test]
+    fn date_from_iso_accepts_only_well_formed_dates() {
+        assert_eq!(Date::from_iso("2026-03-10"), Some(d(3, 10)));
+        assert_eq!(Date::from_iso("2026-13-01"), None);
+        assert_eq!(Date::from_iso("2026-03-10-1"), None);
+        assert_eq!(Date::from_iso("bugün"), None);
     }
 
     #[test]

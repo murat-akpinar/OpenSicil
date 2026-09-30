@@ -70,7 +70,7 @@ Kurallar:
 - [x] Olması gereken durum fonksiyonu saf modül olarak yazılır, tablo testleriyle gelir ([ADR-038](decisions/038-kimlik-durumu-turetilir.md))
   - Kabul: 3a, 3f ve Faz 5 aynı fonksiyonu çağırır; ikinci bir fark hesabı yok
   - Not: bu fazın sonunda ekranda çalışan bir şey yoktur, demo yapılmaz
-- [ ] Ayrılmış/askıdaki operatör reddi ([ADR-055](decisions/055-netlestirmeler-onay-csv-operator-parola.md), [ADR-059](decisions/059-netlestirmeler-operator-geri-alma-aski-bitisi-accountexpires.md)) — Faz 1b'den taşındı, bağımlılık burada çözülüyor
+- [x] Ayrılmış/askıdaki operatör reddi ([ADR-055](decisions/055-netlestirmeler-onay-csv-operator-parola.md), [ADR-059](decisions/059-netlestirmeler-operator-geri-alma-aski-bitisi-accountexpires.md)) — Faz 1b'den taşındı, bağımlılık burada çözülüyor
   - Kabul: oturum açılışında ve her istekte kontrol edilen bir test var; ayrılmış/askıdaki operatörün isteği 403 dönüyor
 - [ ] Faz kapanışı: güvenlik ve test
   - (1a'daki kapanış şablonunun aynısı)

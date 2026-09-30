@@ -15,6 +15,7 @@ mod migrate;
 #[allow(dead_code)]
 mod national_id;
 mod oidc;
+mod operator_guard;
 mod operator_session;
 mod server;
 mod session;

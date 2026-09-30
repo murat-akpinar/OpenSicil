@@ -25,6 +25,8 @@ pub struct AppState {
     #[allow(dead_code)]
     pub blind_index_key: [u8; crate::crypto::KEY_LEN],
     pub public_url: String,
+    // kurulum saat dilimi (ADR-039); operator reddi kimlik durumunu bununla turetir
+    pub time_zone: String,
 }
 
 // --- START FEATURE: bootstrap-admin ---
@@ -278,6 +280,19 @@ async fn establish_operator_session(
         email: result.email,
         authorities: result.authorities.clone(),
     };
+    // ADR-059 madde 1: ayrilmis/askidaki operator oturum acamaz
+    match crate::operator_guard::check_operator(&state.pool, &state.time_zone, &operator.username)
+        .await
+    {
+        Ok(crate::operator_guard::Verdict::Allowed) => {}
+        Ok(crate::operator_guard::Verdict::Rejected(reason)) => {
+            return crate::operator_guard::rejection_response(state, &operator, reason).await;
+        }
+        Err(e) => {
+            eprintln!("web: operatör kimlik durumu okunamadı: {e}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    }
     let token = match crate::operator_session::create_session(&state.pool, &operator).await {
         Ok(t) => t,
         Err(e) => {
@@ -489,12 +504,60 @@ mod tests {
     }
 
     fn test_app_with_public_url(pool: PgPool, public_url: &str) -> Router {
-        routes().with_state(AppState {
+        routes().with_state(test_state(pool, public_url))
+    }
+
+    fn test_state(pool: PgPool, public_url: &str) -> AppState {
+        AppState {
             pool,
             aead_key: [3u8; crate::crypto::KEY_LEN],
             blind_index_key: [4u8; crate::crypto::KEY_LEN],
             public_url: public_url.to_string(),
-        })
+            time_zone: "Europe/Istanbul".to_string(),
+        }
+    }
+
+    // ADR-059 madde 1: oturum acilisinda da kontrol; ayrilmis operatore oturum acilmaz.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn departed_operator_cannot_establish_session() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        let ids = crate::test_support::seed_two_identities(&pool).await;
+        sqlx::query(
+            "UPDATE identities SET username = 'ayse.yilmaz', end_at = now() - interval '1 hour' \
+             WHERE id = $1",
+        )
+        .bind(ids[0])
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let state = test_state(pool.clone(), "https://localhost");
+        let result = crate::oidc::LoginResult {
+            subject: "sub-ayse".to_string(),
+            username: "ayse.yilmaz".to_string(),
+            email: "ayse@example.com".to_string(),
+            authorities: vec!["hr".to_string()],
+        };
+        let response = establish_operator_session(&state, result).await;
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+        let sessions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM operator_sessions")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(sessions, 0, "oturum açılmamalı");
+        let rejected: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM audit_log WHERE event_type = $1")
+                .bind(crate::audit::OPERATOR_REJECTED)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(rejected, 1, "red denetim kaydına girmeli");
+
+        drop(state);
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
     }
 
     fn form_request(method: &str, uri: &str, body: &str, cookie: Option<&str>) -> Request<Body> {

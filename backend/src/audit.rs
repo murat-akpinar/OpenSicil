@@ -8,6 +8,7 @@ use sqlx::PgPool;
 pub const SETTINGS_CHANGED: &str = "settings.changed";
 pub const BOOTSTRAP_PASSWORD_CHANGED: &str = "bootstrap.password_changed";
 pub const OPERATOR_LOGIN: &str = "operator.login";
+pub const OPERATOR_REJECTED: &str = "operator.rejected";
 
 pub struct Actor<'a> {
     pub subject: Option<&'a str>,
