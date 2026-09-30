@@ -33,4 +33,5 @@
 - Katalog tabloları ve hedef sistem kaydı
 - Denetim kaydı alanları ve worker işlem türleri
 - Kimlik numarası AEAD ve blind index ile şifrelenir
+- Ortak ayarlar iki serviste de .env'den okunur (ADR-039)
 

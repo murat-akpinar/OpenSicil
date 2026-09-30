@@ -1,3 +1,4 @@
+mod common_settings;
 mod db;
 mod heartbeat;
 
@@ -33,6 +34,17 @@ async fn run() -> ExitCode {
         eprintln!("worker: ortam değişkeni eksik: DATABASE_URL");
         return ExitCode::FAILURE;
     };
+
+    // Ortak ayarlar acilista dogrulanir ve loglanir; backend'in satiriyla yan
+    // yana konunca iki servisin sapmasi gorulur (ADR-039). Sayac ve sahiplenme
+    // kararlari Faz 3'te bu degerlerle verilir.
+    match common_settings::CommonSettings::from_env() {
+        Ok(common) => println!("worker: ortak ayarlar: {common}"),
+        Err(e) => {
+            eprintln!("worker: {e}");
+            return ExitCode::FAILURE;
+        }
+    }
 
     let pool = match prepare_pool(&database_url).await {
         Ok(p) => p,
@@ -87,6 +99,13 @@ mod tests {
     #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
     async fn run_completes_one_tick_then_exits_on_sigterm() {
         std::env::var("DATABASE_URL").expect("DATABASE_URL testler için ayarlanmalı");
+        // SAFETY: tek is parcacikli, ayni degiskenleri eszamanli degistiren
+        // baska test yok (backend migrate testindeki desenle ayni).
+        unsafe {
+            for (name, value) in common_settings::tests::ENV_EXAMPLE_DEFAULTS {
+                std::env::set_var(name, value);
+            }
+        }
 
         let handle = tokio::spawn(run());
         tokio::time::sleep(Duration::from_millis(200)).await;

@@ -1,6 +1,7 @@
 mod audit;
 mod auth;
 mod bootstrap_account;
+mod common_settings;
 mod cookie;
 mod crypto;
 mod db;

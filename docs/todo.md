@@ -66,7 +66,7 @@ Kurallar:
 - [x] Katalog tabloları (test verisiyle dolu; AD'den gerçek dolum 3a'da)
 - [x] Denetim kaydı + worker işlem türleri sabitlenir (yıkıcı, verme, ilk parola, öznitelik — [ADR-050](decisions/050-verme-sayaci-ve-is-butunlugu.md))
 - [x] Kimlik numarası AEAD + blind index ile şifrelenir ([ADR-010](decisions/010-kisisel-veri-kimlik-no-telefon.md))
-- [ ] Ortak ayarlar iki serviste de `.env`'den okunur ([ADR-039](decisions/039-ortak-ayarlar-env.md))
+- [x] Ortak ayarlar iki serviste de `.env`'den okunur ([ADR-039](decisions/039-ortak-ayarlar-env.md))
 - [ ] Olması gereken durum fonksiyonu saf modül olarak yazılır, tablo testleriyle gelir ([ADR-038](decisions/038-kimlik-durumu-turetilir.md))
   - Kabul: 3a, 3f ve Faz 5 aynı fonksiyonu çağırır; ikinci bir fark hesabı yok
   - Not: bu fazın sonunda ekranda çalışan bir şey yoktur, demo yapılmaz

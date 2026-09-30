@@ -16,32 +16,44 @@ fn build_router(state: AppState) -> Router {
         .layer(axum::middleware::from_fn(logging::log_requests))
 }
 
+struct Config {
+    database_url: String,
+    aead_key: [u8; crate::crypto::KEY_LEN],
+    blind_index_key: [u8; crate::crypto::KEY_LEN],
+    public_url: String,
+}
+
+// Butun ortam degiskenleri acilista dogrulanir: eksik anahtar ya da bozuk ortak
+// ayar ilk istekte degil kurulumda goze carpar (ADR-010, ADR-039).
+fn load_config() -> Result<Config, String> {
+    let database_url = env_required("DATABASE_URL")?;
+    let aead_key = key_from_env("AEAD_MASTER_KEY")?;
+    let blind_index_key = key_from_env("BLIND_INDEX_KEY")?;
+    let public_url = env_required("PUBLIC_URL")?;
+    let common = crate::common_settings::CommonSettings::from_env()?;
+    println!("backend: ortak ayarlar: {common}");
+    Ok(Config {
+        database_url,
+        aead_key,
+        blind_index_key,
+        public_url,
+    })
+}
+
+fn env_required(var: &str) -> Result<String, String> {
+    std::env::var(var).map_err(|_| format!("{var} ortam değişkeni eksik"))
+}
+
 pub async fn run() -> ExitCode {
-    let database_url = match std::env::var("DATABASE_URL") {
-        Ok(v) => v,
-        Err(_) => {
-            eprintln!("backend: DATABASE_URL ortam değişkeni eksik");
-            return ExitCode::FAILURE;
-        }
-    };
-
-    // Iki anahtar da acilista dogrulanir: eksik ya da bozuk anahtar ilk kimlik
-    // kaydinda degil, kurulumda goze carpar (ADR-010).
-    let (aead_key, blind_index_key) = match (
-        key_from_env("AEAD_MASTER_KEY"),
-        key_from_env("BLIND_INDEX_KEY"),
-    ) {
-        (Ok(a), Ok(b)) => (a, b),
-        (Err(e), _) | (_, Err(e)) => {
+    let Config {
+        database_url,
+        aead_key,
+        blind_index_key,
+        public_url,
+    } = match load_config() {
+        Ok(c) => c,
+        Err(e) => {
             eprintln!("backend: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-
-    let public_url = match std::env::var("PUBLIC_URL") {
-        Ok(v) => v,
-        Err(_) => {
-            eprintln!("backend: PUBLIC_URL ortam değişkeni eksik");
             return ExitCode::FAILURE;
         }
     };
@@ -86,8 +98,7 @@ pub async fn run() -> ExitCode {
 }
 
 fn key_from_env(var: &str) -> Result<[u8; crate::crypto::KEY_LEN], String> {
-    let value = std::env::var(var).map_err(|_| format!("{var} ortam değişkeni eksik"))?;
-    crate::crypto::parse_key(var, &value)
+    crate::crypto::parse_key(var, &env_required(var)?)
 }
 
 // SIGTERM'de yeni baglanti almayi durdurur, acik istekler biter (ADR-061 madde 1).
