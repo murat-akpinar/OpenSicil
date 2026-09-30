@@ -30,6 +30,31 @@ pub async fn create_temp_db(admin_pool: &PgPool, admin_url: &str) -> (PgPool, St
     (pool, db_name)
 }
 
+// Gecici veritabanina verilen servis rolüyle baglanir; host:port DATABASE_URL'den alinir.
+pub async fn connect_as(admin_url: &str, db_name: &str, user: &str, pass: &str) -> PgPool {
+    let host = admin_url
+        .rsplit_once('/')
+        .map(|(head, _)| head)
+        .unwrap_or(admin_url)
+        .rsplit_once('@')
+        .map(|(_, host)| host)
+        .unwrap_or(admin_url);
+    crate::db::connect_pool(&format!("postgres://{user}:{pass}@{host}/{db_name}"))
+        .await
+        .expect("servis rolüyle bağlanılamadı")
+}
+
+// DROP ROLE, role verilmis izin durdukca reddedilir; once bu veritabanindaki
+// izinler (DROP OWNED BY) kaldirilir.
+pub async fn drop_role(pool: &PgPool, role: &str) {
+    sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
+        "DROP OWNED BY {role}; DROP ROLE {role}"
+    )))
+    .execute(pool)
+    .await
+    .expect("test rolü silinemedi");
+}
+
 pub async fn drop_temp_db(admin_pool: &PgPool, db_name: &str) {
     sqlx::query(sqlx::AssertSqlSafe(format!("DROP DATABASE {db_name}")))
         .execute(admin_pool)

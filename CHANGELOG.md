@@ -28,4 +28,5 @@
 - Yerel bootstrap hesabı ve Yapılandırma sayfasını ekle
 - OIDC yonetim girisi ve alti yonetim yetkisi
 - Lab compose'una Samba AD ekle
+- Veritabanı rolleri ve denetim tablosu (current_user kolonu)
 

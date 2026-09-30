@@ -23,10 +23,13 @@ pub async fn run() -> ExitCode {
         }
     };
 
-    if let Err(e) = prepare_roles(&pool).await {
-        eprintln!("{e}");
-        return ExitCode::FAILURE;
-    }
+    let (backend_user, worker_user) = match prepare_roles(&pool).await {
+        Ok(names) => names,
+        Err(e) => {
+            eprintln!("{e}");
+            return ExitCode::FAILURE;
+        }
+    };
 
     let migrator = match sqlx::migrate::Migrator::new(Path::new("./migrations")).await {
         Ok(m) => m,
@@ -45,23 +48,48 @@ pub async fn run() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    // backend ve worker acilista _sqlx_migrations'a bakarak semanin hazir
-    // olup olmadigini kontrol eder (ADR-061 madde 3, crate::db::check_schema_ready)
-    for user_var in ["POSTGRES_BACKEND_USER", "POSTGRES_WORKER_USER"] {
-        let Some(user) = require_env(user_var) else {
-            eprintln!(
-                "migrate: migration tablosu izni verilemedi: ortam değişkeni eksik: {user_var}"
-            );
-            return ExitCode::FAILURE;
-        };
-        if let Err(e) = grant_migrations_read(&pool, &user).await {
-            eprintln!("migrate: migration tablosu izni verilemedi ({user_var}): {e}");
-            return ExitCode::FAILURE;
-        }
+    if let Err(e) = grant_service_privileges(&pool, &backend_user, &worker_user).await {
+        eprintln!("migrate: servis rollerine tablo izni verilemedi: {e}");
+        return ExitCode::FAILURE;
     }
 
     println!("migrate: tamamlandı");
     ExitCode::SUCCESS
+}
+
+// Servis rollerinin tablo izinleri (ADR-015): semanin sahibi migrate'i calistiran
+// roldur, backend ve worker yalnizca burada verilenleri yapabilir. Yeni tablo
+// acan her migration buraya satir ekler; GRANT idempotent, her migrate'te yenilenir.
+// - _sqlx_migrations: acilis sema kontrolu (ADR-061 madde 3, db::check_schema_ready)
+// - audit_log: yalnizca ekleme, performed_by ve id kolonlarina deger verilemez,
+//   UPDATE/DELETE yok (ADR-016 sayaclar worker satirlarini sayar)
+const SERVICE_GRANTS: &str = "\
+GRANT SELECT ON _sqlx_migrations TO {backend}, {worker};
+GRANT SELECT, INSERT, UPDATE, DELETE ON bootstrap_account, bootstrap_sessions, app_settings, \
+oidc_auth_requests, operator_sessions TO {backend};
+GRANT SELECT ON audit_log TO {backend}, {worker};
+GRANT INSERT (event_type, detail) ON audit_log TO {backend}, {worker};
+";
+
+async fn grant_service_privileges(
+    pool: &PgPool,
+    backend: &str,
+    worker: &str,
+) -> Result<(), RoleError> {
+    validate_role_name(backend)?;
+    validate_role_name(worker)?;
+
+    // Denetlendi: rol adlari validate_role_name ile sinirlandi; GRANT bind
+    // parametresi desteklemez (ensure_role'daki gibi). raw_sql: birden fazla
+    // ifade tek gidiste, biri hata verirse tumu geri alinir.
+    let stmt = SERVICE_GRANTS
+        .replace("{backend}", backend)
+        .replace("{worker}", worker);
+    sqlx::raw_sql(sqlx::AssertSqlSafe(stmt))
+        .execute(pool)
+        .await
+        .map_err(RoleError::Db)?;
+    Ok(())
 }
 
 // ADR-068: admin/admin parolasi SQL migration'a duz metin gomulmez, hash burada
@@ -89,26 +117,28 @@ pub(crate) async fn seed_bootstrap_account(pool: &PgPool) -> Result<(), String> 
     Ok(())
 }
 
-async fn prepare_roles(pool: &PgPool) -> Result<(), String> {
-    for (user_var, pass_var) in [
-        ("POSTGRES_BACKEND_USER", "POSTGRES_BACKEND_PASSWORD"),
-        ("POSTGRES_WORKER_USER", "POSTGRES_WORKER_PASSWORD"),
-    ] {
-        let Some(user) = require_env(user_var) else {
-            return Err(format!(
-                "migrate: rol hazırlanamadı: ortam değişkeni eksik: {user_var}"
-            ));
-        };
-        let Some(pass) = require_env(pass_var) else {
-            return Err(format!(
-                "migrate: rol hazırlanamadı: ortam değişkeni eksik: {pass_var}"
-            ));
-        };
-        ensure_role(pool, &user, &pass)
-            .await
-            .map_err(|e| format!("migrate: rol hazırlanamadı ({user_var}): {e}"))?;
-    }
-    Ok(())
+// (backend, worker) rol adlarini doner; izinler migration sonrasi bu adlara verilir.
+async fn prepare_roles(pool: &PgPool) -> Result<(String, String), String> {
+    let backend = prepare_role(pool, "POSTGRES_BACKEND_USER", "POSTGRES_BACKEND_PASSWORD").await?;
+    let worker = prepare_role(pool, "POSTGRES_WORKER_USER", "POSTGRES_WORKER_PASSWORD").await?;
+    Ok((backend, worker))
+}
+
+async fn prepare_role(pool: &PgPool, user_var: &str, pass_var: &str) -> Result<String, String> {
+    let Some(user) = require_env(user_var) else {
+        return Err(format!(
+            "migrate: rol hazırlanamadı: ortam değişkeni eksik: {user_var}"
+        ));
+    };
+    let Some(pass) = require_env(pass_var) else {
+        return Err(format!(
+            "migrate: rol hazırlanamadı: ortam değişkeni eksik: {pass_var}"
+        ));
+    };
+    ensure_role(pool, &user, &pass)
+        .await
+        .map_err(|e| format!("migrate: rol hazırlanamadı ({user_var}): {e}"))?;
+    Ok(user)
 }
 
 #[derive(Debug)]
@@ -171,19 +201,6 @@ async fn ensure_role(pool: &PgPool, user: &str, pass: &str) -> Result<(), RoleEr
     Ok(())
 }
 
-async fn grant_migrations_read(pool: &PgPool, user: &str) -> Result<(), RoleError> {
-    validate_role_name(user)?;
-
-    // Denetlendi: kullanici adi validate_role_name ile sinirlandi, bind parametresi
-    // GRANT'te desteklenmez (ensure_role'daki gibi).
-    let stmt = format!("GRANT SELECT ON _sqlx_migrations TO {user}");
-    sqlx::query(sqlx::AssertSqlSafe(stmt))
-        .execute(pool)
-        .await
-        .map_err(RoleError::Db)?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -223,10 +240,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn grant_migrations_read_rejects_invalid_username_before_querying() {
+    async fn grant_service_privileges_rejects_invalid_usernames_before_querying() {
         let pool = lazy_unreachable_pool();
-        let result = grant_migrations_read(&pool, "1invalid").await;
-        assert!(matches!(result, Err(RoleError::InvalidUsername(_))));
+        let bad_backend = grant_service_privileges(&pool, "1invalid", "worker").await;
+        assert!(matches!(bad_backend, Err(RoleError::InvalidUsername(_))));
+        let bad_worker =
+            grant_service_privileges(&pool, "backend", "x; DROP TABLE audit_log").await;
+        assert!(matches!(bad_worker, Err(RoleError::InvalidUsername(_))));
     }
 
     // Gercek Postgres gerektirir (ADR-070): DATABASE_URL, testler icin
@@ -278,7 +298,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
-    async fn ensure_role_creates_then_alters_and_grants_migrations_read() {
+    async fn ensure_role_creates_then_alters() {
         let database_url =
             std::env::var("DATABASE_URL").expect("DATABASE_URL testler için ayarlanmalı");
         let admin_pool = crate::db::connect_pool(&database_url)
@@ -287,12 +307,10 @@ mod tests {
         let (pool, db_name) = crate::test_support::create_temp_db(&admin_pool, &database_url).await;
 
         let role = format!("opensicil_test_role_{}", std::process::id());
-        let cleanup = || async {
-            let _ = sqlx::query(sqlx::AssertSqlSafe(format!("DROP ROLE IF EXISTS {role}")))
-                .execute(&pool)
-                .await;
-        };
-        cleanup().await;
+        sqlx::query(sqlx::AssertSqlSafe(format!("DROP ROLE IF EXISTS {role}")))
+            .execute(&pool)
+            .await
+            .expect("eski test rolü temizlenemedi");
 
         ensure_role(&pool, &role, "ilk-parola")
             .await
@@ -301,21 +319,85 @@ mod tests {
             .await
             .expect("rol ikinci kez (ALTER) güncellenemedi");
 
-        sqlx::query("CREATE TABLE IF NOT EXISTS _sqlx_migrations (version BIGINT)")
-            .execute(&pool)
-            .await
-            .expect("migrations tablosu oluşturulamadı");
-
-        grant_migrations_read(&pool, &role)
-            .await
-            .expect("migration okuma izni verilemedi");
-
-        cleanup().await;
+        crate::test_support::drop_role(&pool, &role).await;
         drop(pool);
-        sqlx::query(sqlx::AssertSqlSafe(format!("DROP DATABASE {db_name}")))
-            .execute(&admin_pool)
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
+    // ADR-015 "izinler testle dogrulanir": servis rolleri gercek Postgres'te
+    // yalnizca SERVICE_GRANTS'in verdigini yapabilmeli.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn service_roles_can_only_do_what_is_granted() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        let admin_url = std::env::var("DATABASE_URL").expect("DATABASE_URL ayarlanmalı");
+        let pid = std::process::id();
+        let backend = format!("opensicil_test_grant_backend_{pid}");
+        let worker = format!("opensicil_test_grant_worker_{pid}");
+        ensure_role(&pool, &backend, "pw-b")
             .await
-            .expect("test veritabanı silinemedi");
+            .expect("backend rolü");
+        ensure_role(&pool, &worker, "pw-w")
+            .await
+            .expect("worker rolü");
+        grant_service_privileges(&pool, &backend, &worker)
+            .await
+            .expect("GRANT başarısız");
+        grant_service_privileges(&pool, &backend, &worker)
+            .await
+            .expect("ikinci migrate: GRANT idempotent olmalı");
+
+        let backend_pool =
+            crate::test_support::connect_as(&admin_url, &db_name, &backend, "pw-b").await;
+        let worker_pool =
+            crate::test_support::connect_as(&admin_url, &db_name, &worker, "pw-w").await;
+
+        sqlx::query("UPDATE app_settings SET ad_host = 'dc1' WHERE id = TRUE")
+            .execute(&backend_pool)
+            .await
+            .expect("backend kendi ayar tablosuna yazabilmeli");
+        assert!(
+            sqlx::query("SELECT username FROM bootstrap_account")
+                .execute(&worker_pool)
+                .await
+                .is_err(),
+            "worker backend tablolarını okuyamamalı"
+        );
+
+        for (service_pool, role) in [(&backend_pool, &backend), (&worker_pool, &worker)] {
+            assert_audit_is_append_only(service_pool, role).await;
+        }
+
+        backend_pool.close().await;
+        worker_pool.close().await;
+        for role in [&backend, &worker] {
+            crate::test_support::drop_role(&pool, role).await;
+        }
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
+    async fn assert_audit_is_append_only(pool: &PgPool, role: &str) {
+        let performed_by: String = sqlx::query_scalar(
+            "INSERT INTO audit_log (event_type) VALUES ('test') RETURNING performed_by::text",
+        )
+        .fetch_one(pool)
+        .await
+        .expect("servis rolü denetim satırı ekleyebilmeli");
+        assert_eq!(performed_by, role, "performed_by current_user'dan gelmeli");
+
+        let forbidden = [
+            "INSERT INTO audit_log (event_type, performed_by) VALUES ('test', 'sahte')",
+            "INSERT INTO audit_log (event_type, occurred_at) VALUES ('test', now() - interval '2 hours')",
+            "UPDATE audit_log SET event_type = 'x'",
+            "DELETE FROM audit_log",
+        ];
+        for sql in forbidden {
+            assert!(
+                sqlx::query(sql).execute(pool).await.is_err(),
+                "{role} için reddedilmeliydi: {sql}"
+            );
+        }
     }
 
     // Gercek Postgres gerektirir (ADR-070): run()'un tum akisini (rol olustur,
@@ -350,10 +432,7 @@ mod tests {
             .expect("migrate sonrası şema hazır olmalı");
 
         for user in [&backend_user, &worker_user] {
-            sqlx::query(sqlx::AssertSqlSafe(format!("DROP ROLE IF EXISTS {user}")))
-                .execute(&pool)
-                .await
-                .ok();
+            crate::test_support::drop_role(&pool, user).await;
         }
     }
 }
