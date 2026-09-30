@@ -15,4 +15,5 @@
 ### Özellikler
 
 - Backend, worker ve nginx iskeletini ayağa kaldır
+- Backend ve worker'a SIGTERM ve şema hazırlık kontrolü ekle
 

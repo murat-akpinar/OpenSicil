@@ -14,7 +14,7 @@ Kurallar:
   - Kabul: `docker compose up -d` sonrası tüm servisler `healthy`
   - Kabul: `curl -s -o /dev/null -w "%{http_code}" localhost/api/health` → `200`
   - Kabul: nginx dışında hiçbir serviste `ports:` yok
-- [ ] Süreç sözleşmesi ([ADR-061](decisions/061-dagitim-sozlesmesi-compose-ve-kubernetes.md))
+- [x] Süreç sözleşmesi ([ADR-061](decisions/061-dagitim-sozlesmesi-compose-ve-kubernetes.md))
   - Kabul: backend/worker SIGTERM alınca `stop_grace_period` içinde düzgün kapanıyor
   - Kabul: aynı imajın `migrate` alt komutu şema sahibi rolüyle tek seferlik container olarak çalışıyor
   - Kabul: `worker-health` alt komutu ve eski şema sürümünde açılışta çıkma davranışı çalışıyor

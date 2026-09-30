@@ -42,6 +42,15 @@ pub async fn run() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
+    // backend ve worker acilista _sqlx_migrations'a bakarak semanin hazir
+    // olup olmadigini kontrol eder (ADR-061 madde 3, crate::db::check_schema_ready)
+    for user_var in ["POSTGRES_BACKEND_USER", "POSTGRES_WORKER_USER"] {
+        if let Err(e) = grant_migrations_read(&pool, user_var).await {
+            eprintln!("migrate: migration tablosu izni verilemedi ({user_var}): {e}");
+            return ExitCode::FAILURE;
+        }
+    }
+
     println!("migrate: tamamlandı");
     ExitCode::SUCCESS
 }
@@ -103,6 +112,20 @@ async fn ensure_role(pool: &PgPool, user_var: &str, pass_var: &str) -> Result<()
     // Denetlendi: kullanıcı adı validate_role_name ile sınırlandı, parola tek
     // tırnak kaçışıyla eklendi; Postgres CREATE/ALTER ROLE bind parametresi
     // desteklemez (ADR-015).
+    sqlx::query(sqlx::AssertSqlSafe(stmt))
+        .execute(pool)
+        .await
+        .map_err(RoleError::Db)?;
+    Ok(())
+}
+
+async fn grant_migrations_read(pool: &PgPool, user_var: &str) -> Result<(), RoleError> {
+    let user = std::env::var(user_var).map_err(|_| RoleError::MissingEnv(user_var.to_string()))?;
+    validate_role_name(&user)?;
+
+    // Denetlendi: kullanici adi validate_role_name ile sinirlandi, bind parametresi
+    // GRANT'te desteklenmez (ensure_role'daki gibi).
+    let stmt = format!("GRANT SELECT ON _sqlx_migrations TO {user}");
     sqlx::query(sqlx::AssertSqlSafe(stmt))
         .execute(pool)
         .await

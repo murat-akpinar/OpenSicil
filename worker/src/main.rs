@@ -4,6 +4,8 @@ mod heartbeat;
 use std::process::ExitCode;
 use std::time::Duration;
 
+use tokio::signal::unix::{signal, SignalKind};
+
 const POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 #[tokio::main]
@@ -28,6 +30,19 @@ async fn main() -> ExitCode {
         }
     };
 
+    if let Err(e) = db::check_schema_ready(&pool).await {
+        eprintln!("worker: şema hazır değil: {e}");
+        return ExitCode::FAILURE;
+    }
+
+    let mut sigterm = match signal(SignalKind::terminate()) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("worker: SIGTERM işleyicisi kurulamadı: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+
     println!("worker: başladı, {POLL_INTERVAL:?} aralıkla yoklanıyor");
 
     loop {
@@ -41,6 +56,15 @@ async fn main() -> ExitCode {
             eprintln!("worker: veritabanı kontrolü başarısız: {e}");
         }
 
-        tokio::time::sleep(POLL_INTERVAL).await;
+        // SIGTERM'de dongu elindeki turu bitirip cikar; yeni tur almaz (ADR-061 madde 1).
+        tokio::select! {
+            _ = tokio::time::sleep(POLL_INTERVAL) => {}
+            _ = sigterm.recv() => {
+                println!("worker: SIGTERM alındı, kapanıyor");
+                break;
+            }
+        }
     }
+
+    ExitCode::SUCCESS
 }
