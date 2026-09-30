@@ -18,7 +18,7 @@ Kurallar:
   - Kabul: backend/worker SIGTERM alınca `stop_grace_period` içinde düzgün kapanıyor
   - Kabul: aynı imajın `migrate` alt komutu şema sahibi rolüyle tek seferlik container olarak çalışıyor
   - Kabul: `worker-health` alt komutu ve eski şema sürümünde açılışta çıkma davranışı çalışıyor
-- [ ] `docs/09-kurulum.md` açılır, bu fazdaki ön koşullar eklenir
+- [x] `docs/09-kurulum.md` açılır, bu fazdaki ön koşullar eklenir
   - Kabul: dosya var, bu faza ait `<...>` yer tutucuları dolduruldu
 - [ ] Faz kapanışı: güvenlik ve test
   - Kabul: testler geçiyor → `cargo test --workspace`

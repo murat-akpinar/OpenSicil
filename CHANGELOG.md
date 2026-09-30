@@ -11,6 +11,7 @@
 
 - Readme rozetlerini yenile, lisans kaydını sadeleştir
 - Kurulum kararlarını tamamla, todo.md şemasını oluştur
+- Faz 1a dagitim ve migration komutlarini doldur
 
 ### Özellikler
 
