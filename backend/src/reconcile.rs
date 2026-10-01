@@ -232,6 +232,34 @@ async fn scan(
 // --- END FEATURE: reconcile ---
 
 // --- START FEATURE: bulk-adoption ---
+/// Sahiplenmeyi bekleyen hesaplar: hedef basina "yonetilmeyen" bulgu sayisi.
+/// ADR-103 madde 3 — panel seridi ve bos personel listesi ayni yerden okur;
+/// operatorun mutabakat ekranini kendi bulmasi gerekmesin.
+pub struct Unadopted {
+    pub target_id: i64,
+    pub target_name: String,
+    pub count: i64,
+}
+
+pub async fn unadopted(pool: &PgPool) -> Result<Vec<Unadopted>, sqlx::Error> {
+    let rows: Vec<(i64, String, i64)> = sqlx::query_as(
+        "SELECT f.target_system_id, t.name, count(*) FROM reconcile_findings f \
+         JOIN target_systems t ON t.id = f.target_system_id \
+         WHERE f.kind = 'unmanaged' \
+         GROUP BY f.target_system_id, t.name ORDER BY count(*) DESC, t.name",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(target_id, target_name, count)| Unadopted {
+            target_id,
+            target_name,
+            count,
+        })
+        .collect())
+}
+
 /// Secilen "yonetilmeyen" hesaplari kimlige cevirir (ADR-102). Hedefe yazma
 /// yok: baglantiyi worker `observed` modunda kurar.
 async fn adopt(
@@ -452,6 +480,96 @@ mod tests {
         crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
     }
 
+    /// ADR-103 madde 3: panel ve bos personel listesi "sirada ne var" diyor.
+    /// Serit sahiplenilmemis hesap kalmayinca kendiliginden kayboluyor mu?
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn the_panel_and_the_empty_list_point_at_the_unadopted_accounts() {
+        use axum::body::Body;
+        use axum::http::{header, Request};
+        use tower::ServiceExt;
+
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        let app = crate::web::routes()
+            .with_state(crate::web::test_state(pool.clone(), "https://localhost"));
+        let target: i64 = sqlx::query_scalar("SELECT id FROM target_systems WHERE kind = 'ad'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let read_job: i64 = sqlx::query_scalar(
+            "INSERT INTO read_jobs (kind, target_system_id, requested_by) \
+             VALUES ('reconcile', $1, 'test') RETURNING id",
+        )
+        .bind(target)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO reconcile_findings (target_system_id, read_job_id, kind, external_id, \
+             account_name) VALUES ($1, $2, 'unmanaged', 'g1', 'harry.potter')",
+        )
+        .bind(target)
+        .bind(read_job)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let operator = crate::operator_session::Operator {
+            subject: "sub-x".to_string(),
+            username: "ik.operatoru".to_string(),
+            email: "ik@example.org".to_string(),
+            authorities: vec!["hr".to_string()],
+            auth_source: crate::operator_session::AuthSource::Oidc,
+            lang: crate::i18n::DEFAULT,
+        };
+        let token = crate::operator_session::create_session(&pool, &operator)
+            .await
+            .unwrap();
+        let cookie = format!("{}={token}", crate::cookie::OPERATOR_SESSION_COOKIE_NAME);
+        let body_of = |path: &'static str| {
+            let (app, cookie) = (app.clone(), cookie.clone());
+            async move {
+                let r = app
+                    .oneshot(
+                        Request::builder()
+                            .uri(path)
+                            .header(header::COOKIE, cookie)
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                let bytes = axum::body::to_bytes(r.into_body(), usize::MAX)
+                    .await
+                    .unwrap();
+                String::from_utf8(bytes.to_vec()).unwrap()
+            }
+        };
+
+        let link = format!("/targets/{target}/reconcile");
+        for path in ["/", "/identities"] {
+            let body = body_of(path).await;
+            assert!(body.contains(&link), "{path}: mutabakat bağlantısı yok");
+            assert!(body.contains("Active Directory"), "{path}: hedef adı yok");
+        }
+
+        // Hesap sahiplenilince (artik "yonetiliyor") yonlendirme susar
+        sqlx::query("UPDATE reconcile_findings SET kind = 'managed'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        for path in ["/", "/identities"] {
+            assert!(
+                !body_of(path).await.contains(&link),
+                "{path}: şerit kalmamalı"
+            );
+        }
+
+        drop(app);
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
     #[tokio::test]
     #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
     async fn lists_findings_with_counts_and_deduplicates_open_scan_requests() {
@@ -513,6 +631,22 @@ mod tests {
         assert_eq!(v.status, "succeeded");
         assert_eq!(v.result, "3 hesap tarandı");
         assert_ne!(v.scanned_at, "");
+
+        // ADR-103 madde 3: yonlendirme yalnizca "yonetilmeyen" bulguyu sayar;
+        // `missing` serit yazdirmaz
+        let waiting = unadopted(&pool).await.unwrap();
+        assert_eq!(waiting.len(), 1, "tek hedefte bulgu var");
+        assert_eq!(waiting[0].target_id, target);
+        assert_eq!(waiting[0].count, 2);
+        assert_ne!(waiting[0].target_name, "");
+        sqlx::query("UPDATE reconcile_findings SET kind = 'managed' WHERE kind = 'unmanaged'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(
+            unadopted(&pool).await.unwrap().is_empty(),
+            "hepsi yönetiliyorsa şerit yok"
+        );
 
         drop(pool);
         crate::test_support::drop_temp_db(&admin_pool, &db_name).await;

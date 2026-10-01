@@ -329,6 +329,30 @@ Kurallar:
   - (1a'daki kapanış şablonunun aynısı)
   - Kabul: `docs/09-kurulum.md` "İlk giriş" akışı OIDC'yi ön koşul olmaktan çıkarır; `docs/06-guvenlik.md`, `README.md` ve `README_ENG.md` kimlik doğrulama bölümleri ADR-095'e göre güncellenir
 
+## Devreye alma ([ADR-103](decisions/103-devreye-alma.md))
+
+> Fazlar arası iş, "Faz" olarak numaralanmaz. Kullanıcı isteği (2026-10-01): "kişiler sonuçta AD'deki hesaplar olmalı; bu uygulamayı bir firmada kurdum, hiçbir kullanıcı görünmezse nasıl kullanacaklar?" Ardından ayrımı kendisi koydu: kurum ya **ürünle başlar** ya da **sonradan kurar**. [ADR-103](decisions/103-devreye-alma.md) iki tabloyu birleştirme yolunu reddetti (dört NOT NULL kolon AD'de yok, drift kaynağa dönerdi, bir kişinin çok hesabı var) ve bunun yerine ilk doluşu birinci sınıf akış yaptı. Mutabakat (ADR-099) ve toplu sahiplenme (ADR-102) yapı taşları hazır; buradaki iş onları akışa bağlamak.
+
+- [x] Yönlendirme: panelde "yönetilmeyen AD hesabı" şeridi, boş personel listesinde aynı bağlantı ([ADR-103](decisions/103-devreye-alma.md) madde 3)
+  - Kabul: hedef başına "N yönetilmeyen AD hesabı — personeli al" şeridi mutabakat ekranına bağlanır; sayı sıfırsa şerit hiç çıkmaz
+  - Kabul: `/identities` boş durumunda (arama boşken) aynı bağlantı; sayı sıfırsa yalnızca bugünkü "Yeni kimlik" kalır
+  - Kabul: tek sorgu, yeni tablo/migration yok; sayım `reconcile_findings`'ten gelir ve panel ile liste aynı yardımcıyı kullanır
+  - Not (2026-10-01): `reconcile::unadopted` tek yardımcı, iki çağrı yeri. Personel listesinde sorgu **yalnızca liste boş ve arama boşken** çalışıyor; dolu listede fazladan gidiş dönüş yok. Metin iki anahtar: `adopt.pending` (sayı) + `adopt.cta` ("Personeli al"); hedef adı şablonda önüne geliyor, böylece iki hedefli kurulumda şeritler ayırt edilir
+  - Doğrulama (2026-10-01, çalışan yığın + gerçek Hogwarts AD'si): backend **162 test** (gerçek Postgres `--include-ignored` + lab Keycloak), fmt + clippy iki crate'te temiz; `sh scripts/build-css.sh` (44752 bayt) ve `sh scripts/check-glyphs.sh` geçti. Yeni test `the_panel_and_the_empty_list_point_at_the_unadopted_accounts`: `/` ve `/identities` ikisi de mutabakat bağlantısını basıyor, bulgu `managed`'a çevrilince ikisinde de kayboluyor. Çalışan yığında geçici bir operatör oturumuyla ölçüldü (sonra silindi) → panelde ve boş personel listesinde **"Active Directory: 29 hesabın OpenSicil kaydı yok. Personeli al"** → `/targets/1/reconcile`
+- [ ] Devreye alma kartı: dört adım tek sorgudan türetilir, bitince kaybolur ([ADR-103](decisions/103-devreye-alma.md) madde 2)
+  - Kabul: adımlar — AD bağlantısı · katalog taraması · departman + rol · personel; her adım kendi ekranına bağlanır
+  - Kabul: dördü de tamamsa kart hiç basılmaz; "kurulum bitti" bayrağı için kolon açılmaz
+  - Kabul: son adım iki yol gösterir — CSV (Faz 5, henüz yok) ve toplu sahiplenme
+- [ ] Toplu sahiplenmede "tümünü seç" ([ADR-103](decisions/103-devreye-alma.md) madde 3)
+  - Kabul: parti tablosunun başlığındaki kutu o sayfadaki bütün adayları seçer/bırakır; `app.js`'te satır içi `onclick` olmadan (CSP)
+- [ ] `Tanımsız` rol, "rolü atanmamış" sayacı ve yönetime alma kapısı ([ADR-103](decisions/103-devreye-alma.md) madde 4, 5)
+  - Kabul: migration yetki öğesi olmayan `Tanımsız` birincil rolü seed'ler; toplu sahiplenme formunun varsayılanı o
+  - Kabul: panelde ve personel listesinde "rolü atanmamış N kişi" görünür ve listeye filtre olarak bağlanır
+  - Kabul: rolü `Tanımsız` olan kimlikte "Yönetime al" reddedilir (gerekçe operatörün dilinde); gözlem modunda kalmaya devam eder
+- [ ] Başlangıç tarihi AD `whenCreated`'dan gelir ([ADR-103](decisions/103-devreye-alma.md) madde 6)
+  - Kabul: tarama `whenCreated` okur ve bulguya yazar; toplu sahiplenme `start_date` olarak kullanır, boşsa bugüne düşer
+  - Kabul: gerçek Hogwarts AD'sinde 29 hesapta ölçülür — kaç tanesinde dolu geldiği nota yazılır
+
 ## Faz 4: İşletme
 
 > Zimbra v1'den sonra geldiği için ([ADR-090](decisions/090-zimbra-v1-sonrasina-alindi.md)) mutabakat raporu ve metrik ucu v1'de yalnızca AD'yi kapsar; eksik kapsam ekranda/raporda belirtilir.

@@ -26,6 +26,11 @@
   {% if can_register && q.is_empty() %}
   <a class="btn btn-primary" href="/identities/new"><i class="ico ico-plus" aria-hidden="true"></i>{{ lang.t("home.new_identity") }}</a>
   {% endif %}
+  {# ADR-103 madde 3: AD'de hesap var ama kimse kayitli degilse sirada bu var #}
+  {% for u in unadopted %}
+  <p class="empty-hint">{{ u.target_name }}: {{ lang.t1("adopt.pending", u.count) }}</p>
+  <a class="btn" href="/targets/{{ u.target_id }}/reconcile"><i class="ico ico-user-plus" aria-hidden="true"></i>{{ lang.t("adopt.cta") }}</a>
+  {% endfor %}
 </div>
 {% else %}
 <div class="card overflow-x-auto p-0">

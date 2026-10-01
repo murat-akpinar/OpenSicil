@@ -26,6 +26,11 @@
   {% if dash.totals.pending_approvals > 0 %}
   <p class="alert alert-info">{{ lang.t1("dash.pending_approvals", dash.totals.pending_approvals) }}</p>
   {% endif %}
+  {# ADR-103 madde 3: sahiplenmeyi bekleyen AD hesaplari. Sayi sifirsa serit yok #}
+  {% for u in dash.unadopted %}
+  <p class="alert alert-info">{{ u.target_name }}: {{ lang.t1("adopt.pending", u.count) }}
+    <a class="link" href="/targets/{{ u.target_id }}/reconcile">{{ lang.t("adopt.cta") }}</a></p>
+  {% endfor %}
 
   <section class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
     <div class="stat">

@@ -106,6 +106,9 @@ struct IdentitiesTemplate {
     prev_offset: Option<i64>,
     next_offset: Option<i64>,
     can_register: bool,
+    /// Liste bosken "AD'de sahiplenilmeyi bekleyen hesap var" yonlendirmesi
+    /// (ADR-103 madde 3); dolu listede sorgu hic calismaz
+    unadopted: Vec<crate::reconcile::Unadopted>,
 }
 
 /// Personel listesi: okuma her operatorde (auditor dahil), "Yeni kimlik"
@@ -121,6 +124,14 @@ async fn list_page(
         Ok((rows, total)) => {
             let shown = rows.len() as i64;
             let from = if shown == 0 { 0 } else { offset + 1 };
+            // Yalnizca bos listede sorulur: dolu listede yonlendirme basilmiyor
+            let unadopted = match rows.is_empty() && query.is_empty() {
+                true => match crate::reconcile::unadopted(&state.pool).await {
+                    Ok(rows) => rows,
+                    Err(e) => return internal("sahiplenme bekleyen hesaplar okunamadı", e),
+                },
+                false => Vec::new(),
+            };
             render(&IdentitiesTemplate {
                 lang: op.lang,
                 can_register: allowed(&op, REGISTER_AUTHORITIES),
@@ -137,6 +148,7 @@ async fn list_page(
                 ),
                 prev_offset: (offset > 0).then(|| (offset - PAGE_SIZE).max(0)),
                 next_offset: (offset + shown < total).then_some(offset + PAGE_SIZE),
+                unadopted,
                 rows,
             })
         }

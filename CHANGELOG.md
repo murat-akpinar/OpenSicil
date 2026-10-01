@@ -100,4 +100,5 @@
 - Arayüz mockup düzenine geçti — gösterge paneli ana sayfası ve üst bar araması
 - Mutabakat taraması ve ekranı — AD'deki hesaplar artık görünüyor
 - Menü yapısı, panel düzeni ve toplu sahiplenme
+- Sahiplenilmeyen AD hesapları için panel ve liste yönlendirmesi
 

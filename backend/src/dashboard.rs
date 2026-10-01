@@ -31,6 +31,10 @@ pub struct Dashboard {
     pub departments: Vec<DistRow>,
     /// Calisma tipine gore personel dagilimi (halka grafik)
     pub employment: Donut,
+    /// Sahiplenmeyi bekleyen AD hesaplari (ADR-103 madde 3): panel sirada ne
+    /// yapilacagini soyler, operator mutabakat ekranini aramaz. Bos liste =
+    /// serit hic basilmaz.
+    pub unadopted: Vec<crate::reconcile::Unadopted>,
 }
 
 /// Halka grafik: dilimler SVG `stroke-dasharray` ile cizilir. `conic-gradient`
@@ -114,6 +118,7 @@ pub async fn load(pool: &PgPool, time_zone: &str) -> Result<Dashboard, sqlx::Err
         trend_peak,
         departments: departments(pool).await?,
         employment: employment(pool).await?,
+        unadopted: crate::reconcile::unadopted(pool).await?,
     })
 }
 
@@ -469,6 +474,9 @@ mod tests {
         assert_eq!(dash.departments[0].name, "Test Birimi");
         assert_eq!(dash.departments[0].count, 2);
         assert_eq!(dash.departments[0].pct, 100);
+
+        // Mutabakat hic taranmadiysa yonlendirme seridi de yok (ADR-103)
+        assert!(dash.unadopted.is_empty());
 
         drop(pool);
         crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
