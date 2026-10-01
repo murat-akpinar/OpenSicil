@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use crate::ad;
 use crate::ad_account::{self, AdWriter};
 use crate::adoption;
+use crate::counters;
 use crate::desired_state::{
     desired_state, effective_manager, AccountPresence, Container, DesiredState, LifecycleState,
 };
@@ -37,6 +38,8 @@ pub struct EngineEnv<'a> {
     pub first_login_change_required: bool,
     /// ADR-018: sahiplenme; kapaliyken ipuculu kayit mudahaleye duser
     pub ownership_mode_enabled: bool,
+    /// ADR-016/050: saatlik fren sayaclari ve acil kota
+    pub limits: counters::Limits,
 }
 
 // ADR-052: hedefe ulasilamamasi deneme tuketmez; nesne duzeyi hata tuketir;
@@ -46,6 +49,8 @@ pub enum JobError {
     Unreachable(String),
     Failed(String),
     NeedsIntervention(String),
+    /// ADR-050: sayac dolu; is hicbir islem uygulamadan pencerenin acilisini bekler
+    Throttled(counters::Blocked),
 }
 
 impl std::fmt::Display for JobError {
@@ -54,6 +59,7 @@ impl std::fmt::Display for JobError {
             JobError::Unreachable(reason) => write!(f, "hedefe ulaşılamıyor: {reason}"),
             JobError::Failed(reason) => write!(f, "{reason}"),
             JobError::NeedsIntervention(reason) => write!(f, "müdahale gerekiyor: {reason}"),
+            JobError::Throttled(blocked) => write!(f, "{blocked}"),
         }
     }
 }
@@ -209,6 +215,28 @@ async fn resolve_link(c: &AdJob<'_>) -> Result<Option<LinkRow>, JobError> {
         manage_requested: !taken,
         ..link.clone()
     }))
+}
+
+// ADR-050: is sayaclara karsi butundur — hedefe ilk yazmadan once isin uretecegi
+// butun sayac siniflari sinanir, biri doluysa hicbir islem uygulanmaz. Kuru
+// calistirma ve gozlem modu hedefe yazmadigi icin sayaclara da girmez (ADR-054/087).
+async fn gate(c: &AdJob<'_>, classes: &[OperationClass]) -> Result<(), JobError> {
+    if c.env.mode.dry_run || classes.is_empty() {
+        return Ok(());
+    }
+    let blocked = counters::blocked(
+        c.pool,
+        classes,
+        c.job.identity_id,
+        c.input.timeline.emergency_departure,
+        &c.env.limits,
+    )
+    .await
+    .map_err(JobError::Failed)?;
+    match blocked {
+        Some(blocked) => Err(JobError::Throttled(blocked)),
+        None => Ok(()),
+    }
 }
 
 async fn apply(
@@ -467,6 +495,13 @@ async fn provision(c: &AdJob<'_>, ldap: &mut Ldap, enabled: bool) -> Result<Stri
     let mut attributes = fixed_attributes(&names, &cn);
     let s = sources(c, ldap, Some(&names)).await?;
     attributes.extend(mapping::initial_attributes(c.mappings, &s));
+    // Hesap acma ve ilk uyelikler "verme"dir (ADR-050); etkinlestirme oznitelik.
+    let first_request = pending_first_password(c).await?;
+    gate(
+        c,
+        &counters::needed_classes(true, false, first_request.is_some()),
+    )
+    .await?;
     let create = WriteOp::CreateAccount {
         dn: dn.clone(),
         attributes,
@@ -492,7 +527,7 @@ async fn provision(c: &AdJob<'_>, ldap: &mut Ldap, enabled: bool) -> Result<Stri
     }
     set_applied_state(c, state_name(c.desired.state)).await?;
     // ADR-056: "kaydet ve ilk parolayi ver" istegi ayni iste, hesap acilir acilmaz
-    let first = issue_first_password(c, ldap, &dn, &link).await?;
+    let first = issue_first_password(c, ldap, &dn, &link, first_request).await?;
     Ok(format!(
         "hesap açıldı: {dn} (objectGUID {guid}), {added} grup, {}{first}",
         if enabled { "etkin" } else { "pasif" }
@@ -684,6 +719,42 @@ async fn set_applied_state(c: &AdJob<'_>, state: &str) -> Result<(), JobError> {
     .map_err(|e| JobError::Failed(format!("applied_state yazılamadı: {e}")))
 }
 
+struct ExistingPlan {
+    enabled: EnabledPlan,
+    groups: GroupPlan,
+    first_request: Option<i64>,
+}
+
+// ADR-050/091: once plan (yalnizca okuma), sonra fren. Buradan donuldugunde isin
+// uretecegi butun sayac siniflari sinanmistir; sonrasi hedefe yazar.
+async fn plan_existing(
+    c: &AdJob<'_>,
+    ldap: &mut Ldap,
+    link: &LinkRow,
+    account: &ad_account::DirectoryAccount,
+    enabled: bool,
+) -> Result<ExistingPlan, JobError> {
+    let transition = link.applied_state.as_deref() != Some(state_name(c.desired.state));
+    let enabled_plan = plan_enabled(link, account, enabled, transition);
+    let groups = plan_groups(c, ldap, account).await?;
+    let first_request = pending_first_password(c).await?;
+    gate(
+        c,
+        &counters::needed_classes(
+            !groups.to_add.is_empty(),
+            !groups.to_remove.is_empty()
+                || enabled_plan.class() == Some(OperationClass::Destructive),
+            first_request.is_some(),
+        ),
+    )
+    .await?;
+    Ok(ExistingPlan {
+        enabled: enabled_plan,
+        groups,
+        first_request,
+    })
+}
+
 // ADR-032: etkinlestirme yalnizca durum gecisinde; elle pasiflestirilmis hesap
 // korunur. Pasiflestirme her iste. ADR-030: ayrildidan donus yikici sayilir.
 async fn reconcile_existing(
@@ -700,13 +771,14 @@ async fn reconcile_existing(
     };
     let state = state_name(c.desired.state);
     let transition = link.applied_state.as_deref() != Some(state);
-    let (applied, note) = reconcile_enabled(c, ldap, link, &account, enabled, transition).await?;
+    let plan = plan_existing(c, ldap, link, &account, enabled).await?;
+    let (applied, note) = apply_enabled(c, ldap, plan.enabled).await?;
     // ADR-050 sirasi: pasiflestirme → ekleme → OU tasima → cikarma → oznitelikler
-    let (dn, groups) = sync_groups_and_ou(c, ldap, &account).await?;
+    let (dn, groups) = apply_groups_and_ou(c, ldap, &account, &plan.groups).await?;
     let attrs = sync_attributes(c, ldap, &dn).await?;
     let expires = sync_account_expires(c, ldap, &dn).await?;
     let reset = reset_password_if_due(c, ldap, &dn, link).await?;
-    let first = issue_first_password(c, ldap, &dn, link).await?;
+    let first = issue_first_password(c, ldap, &dn, link, plan.first_request).await?;
     let expires = format!("{expires}{reset}{first}");
     if applied == Applied::DryRun || c.env.mode.dry_run {
         return Ok(format!(
@@ -756,16 +828,20 @@ async fn reset_password_if_due(
 // --- START FEATURE: first-password ---
 // ADR-046/085: bekleyen istek varsa hesap "kullanilmamis" kuralindan gecer, okunabilir
 // parola yazilir ve sifreli olarak istege birakilir; red nedeni istege yazilir.
+async fn pending_first_password(c: &AdJob<'_>) -> Result<Option<i64>, JobError> {
+    first_password::pending(c.pool, c.job.identity_id, c.job.target_system_id)
+        .await
+        .map_err(JobError::Failed)
+}
+
 async fn issue_first_password(
     c: &AdJob<'_>,
     ldap: &mut Ldap,
     dn: &str,
     link: &LinkRow,
+    request: Option<i64>,
 ) -> Result<String, JobError> {
-    let Some(request) = first_password::pending(c.pool, c.job.identity_id, c.job.target_system_id)
-        .await
-        .map_err(JobError::Failed)?
-    else {
+    let Some(request) = request else {
         return Ok(String::new());
     };
     let logon_attrs = ["lastLogonTimestamp", "pwdLastSet"];
@@ -890,6 +966,7 @@ async fn delete_account(
 ) -> Result<String, JobError> {
     let note = match ad_account::dn_by_guid(ldap, &link.external_id).await? {
         Some(dn) => {
+            gate(c, &counters::needed_classes(false, true, false)).await?;
             let op = WriteOp::DeleteAccount { dn: dn.clone() };
             if apply(c, ldap, op, OperationClass::Destructive).await? == Applied::DryRun {
                 return Ok(format!(
@@ -1043,18 +1120,34 @@ async fn catalog_group_guids(c: &AdJob<'_>) -> Result<Vec<String>, JobError> {
     .map_err(|e| JobError::Failed(format!("katalog grupları okunamadı: {e}")))
 }
 
-// Doner: hesabin guncel DN'i (tasindiysa yenisi) ve ozet notu.
-async fn sync_groups_and_ou(
+struct GroupPlan {
+    to_add: Vec<String>,
+    to_remove: Vec<String>,
+}
+
+// Yalnizca okuma: katalog ve hedef uyelikleri okunur, fark hesaplanir (ADR-050 freni
+// bunun sonucuna bakar). OU tasimasi oznitelik sinifidir, sayaca girmez.
+async fn plan_groups(
     c: &AdJob<'_>,
     ldap: &mut Ldap,
     account: &ad_account::DirectoryAccount,
-) -> Result<(String, String), JobError> {
+) -> Result<GroupPlan, JobError> {
     let desired = desired_group_guids(c).await?;
     let catalog = catalog_group_guids(c).await?;
     let current = ad_account::member_group_guids(ldap, c.base_dn, &account.dn).await?;
     let (to_add, to_remove) = membership_diff(&current, &desired, &catalog);
+    Ok(GroupPlan { to_add, to_remove })
+}
+
+// Doner: hesabin guncel DN'i (tasindiysa yenisi) ve ozet notu.
+async fn apply_groups_and_ou(
+    c: &AdJob<'_>,
+    ldap: &mut Ldap,
+    account: &ad_account::DirectoryAccount,
+    plan: &GroupPlan,
+) -> Result<(String, String), JobError> {
     let mut notes = Vec::new();
-    let added = change_memberships(c, ldap, &account.dn, &to_add, true).await?;
+    let added = change_memberships(c, ldap, &account.dn, &plan.to_add, true).await?;
     if added > 0 {
         notes.push(format!("{added} grup eklendi"));
     }
@@ -1062,7 +1155,7 @@ async fn sync_groups_and_ou(
     if moved {
         notes.push("OU taşındı".to_string());
     }
-    let removed = change_memberships(c, ldap, &dn, &to_remove, false).await?;
+    let removed = change_memberships(c, ldap, &dn, &plan.to_remove, false).await?;
     if removed > 0 {
         notes.push(format!("{removed} grup çıkarıldı"));
     }
@@ -1160,37 +1253,63 @@ fn passive_ou() -> Option<String> {
         .filter(|v| !v.trim().is_empty())
 }
 
-async fn reconcile_enabled(
-    c: &AdJob<'_>,
-    ldap: &mut Ldap,
+struct EnabledPlan {
+    op: Option<(WriteOp, OperationClass)>,
+    note: &'static str,
+}
+
+impl EnabledPlan {
+    fn class(&self) -> Option<OperationClass> {
+        self.op.as_ref().map(|(_, class)| *class)
+    }
+}
+
+fn plan_enabled(
     link: &LinkRow,
     account: &ad_account::DirectoryAccount,
     enabled: bool,
     transition: bool,
-) -> Result<(Applied, &'static str), JobError> {
+) -> EnabledPlan {
     let set = |enabled: bool| WriteOp::SetEnabled {
         dn: account.dn.clone(),
         enabled,
     };
-    Ok(match (enabled, account.enabled) {
+    let plan = |op: WriteOp, class: OperationClass, note: &'static str| EnabledPlan {
+        op: Some((op, class)),
+        note,
+    };
+    match (enabled, account.enabled) {
         (true, false) if transition => {
+            // ADR-030: `ayrildi`dan donus yikici sayilir
             let class = if link.applied_state.as_deref() == Some("departed") {
                 OperationClass::Destructive
             } else {
                 OperationClass::Attribute
             };
-            (apply(c, ldap, set(true), class).await?, "etkinleştirildi")
+            plan(set(true), class, "etkinleştirildi")
         }
-        (true, false) => (
-            Applied::Applied,
-            "hedefte elle pasifleştirilmiş, korunuyor (ADR-032)",
-        ),
-        (false, true) => (
-            apply(c, ldap, set(false), OperationClass::Destructive).await?,
-            "pasifleştirildi",
-        ),
-        _ => (Applied::Applied, "hesap durumu zaten uyumlu"),
-    })
+        (true, false) => EnabledPlan {
+            op: None,
+            note: "hedefte elle pasifleştirilmiş, korunuyor (ADR-032)",
+        },
+        (false, true) => plan(set(false), OperationClass::Destructive, "pasifleştirildi"),
+        _ => EnabledPlan {
+            op: None,
+            note: "hesap durumu zaten uyumlu",
+        },
+    }
+}
+
+async fn apply_enabled(
+    c: &AdJob<'_>,
+    ldap: &mut Ldap,
+    plan: EnabledPlan,
+) -> Result<(Applied, &'static str), JobError> {
+    let applied = match plan.op {
+        Some((op, class)) => apply(c, ldap, op, class).await?,
+        None => Applied::Applied,
+    };
+    Ok((applied, plan.note))
 }
 
 // docs/05 Oznitelik guncelleme: eslenen oznitelikler okunur, fark tek modify ile
@@ -1220,6 +1339,14 @@ async fn sync_attributes(c: &AdJob<'_>, ldap: &mut Ldap, dn: &str) -> Result<Str
 mod tests {
     use super::*;
     use crate::test_support;
+
+    // Lab senaryolari freni sinamaz; sayaclar bol tutulur (fren testi counters.rs'te).
+    const LAB_LIMITS: counters::Limits = counters::Limits {
+        destructive: 1000,
+        grant: 1000,
+        first_password: 1000,
+        emergency_quota: 1000,
+    };
 
     // ADR-018/086: ipuclu kayit hesap acmaz; retler mudahale (kapali, kuru, yok, kapsam disi,
     // yasakli grup, sicil, baska kimlige bagli); kabulde gozlem baglantisi + ad uyarisi;
@@ -1327,6 +1454,7 @@ mod tests {
             sensitive_mapping_enabled: false,
             first_login_change_required: true,
             ownership_mode_enabled: ownership,
+            limits: LAB_LIMITS,
         };
         let intervention = |run: Result<String, JobError>| match run {
             Err(JobError::NeedsIntervention(reason)) => reason,
@@ -1612,6 +1740,7 @@ mod tests {
             sensitive_mapping_enabled: false,
             first_login_change_required: change_required,
             ownership_mode_enabled: false,
+            limits: LAB_LIMITS,
         };
         // ADR-056: kayitla acilan istek hesap acilir acilmaz ayni iste karsilanir
         let at_provision: i64 = sqlx::query_scalar(
@@ -1881,6 +2010,7 @@ mod tests {
             sensitive_mapping_enabled: false,
             first_login_change_required: true,
             ownership_mode_enabled: false,
+            limits: LAB_LIMITS,
         };
 
         let dry = run_job(&pool, &job, &env(true)).await.unwrap();
@@ -2051,6 +2181,65 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
+
+        // ADR-050 kapanis testi: verme sayaci doluyken gorev degisikligi isi eski
+        // gruplari CIKARMIYOR — hicbir islem uygulamadan bekliyor; pencere acilinca
+        // ekleme ve cikarmayi birlikte uyguluyor.
+        let narrow = counters::Limits {
+            grant: 1,
+            ..LAB_LIMITS
+        };
+        let open_window = |pool: sqlx::PgPool| async move {
+            sqlx::query("UPDATE audit_log SET occurred_at = now() - interval '2 hours'")
+                .execute(&pool)
+                .await
+                .unwrap();
+        };
+        let fill_grant = |pool: sqlx::PgPool, identity: i64, target: i64| async move {
+            sqlx::query(
+                "INSERT INTO audit_log (event_type, identity_id, target_system_id, \
+                 operation_class, detail) VALUES ('t', $1, $2, 'grant', '{}'::jsonb)",
+            )
+            .bind(identity)
+            .bind(target)
+            .execute(&pool)
+            .await
+            .unwrap();
+        };
+        open_window(pool.clone()).await;
+        fill_grant(pool.clone(), seed.other_identity, seed.ad).await;
+        let throttled = run_job(
+            &pool,
+            &job,
+            &EngineEnv {
+                limits: narrow,
+                ..env(false)
+            },
+        )
+        .await;
+        assert!(
+            matches!(&throttled, Err(JobError::Throttled(b)) if b.class == OperationClass::Grant),
+            "{throttled:?}"
+        );
+        let untouched = ad_account::find_by_guid(&mut ldap, &guid)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            untouched.member_of.iter().any(|g| g.contains("GG-VPN")),
+            "fren: eski grup çıkarılmadı {:?}",
+            untouched.member_of
+        );
+        assert!(
+            untouched
+                .dn
+                .to_ascii_lowercase()
+                .contains("ou=sistemuzmanlari"),
+            "fren: OU taşınmadı {}",
+            untouched.dn
+        );
+        open_window(pool.clone()).await;
+
         let moved = run_job(&pool, &job, &env(false)).await.unwrap();
         for expected in ["1 grup eklendi", "OU taşındı", "1 grup çıkarıldı"] {
             assert!(moved.contains(expected), "{moved}");
@@ -2131,7 +2320,20 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        let departed = run_job(&pool, &job, &env(false)).await.unwrap();
+        // ADR-050: yalnizca yikici is verme sayacindan etkilenmez — ayrilis dolu
+        // verme penceresinde de uygulanir.
+        open_window(pool.clone()).await;
+        fill_grant(pool.clone(), seed.other_identity, seed.ad).await;
+        let departed = run_job(
+            &pool,
+            &job,
+            &EngineEnv {
+                limits: narrow,
+                ..env(false)
+            },
+        )
+        .await
+        .unwrap();
         assert!(departed.contains("pasifleştirildi"), "{departed}");
         let subordinate_jobs: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM jobs WHERE identity_id = $1 AND status = 'queued' AND priority = 1",

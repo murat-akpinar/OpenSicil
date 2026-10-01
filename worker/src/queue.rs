@@ -223,10 +223,11 @@ pub async fn intervene(
     Ok(())
 }
 
-// ADR-052 madde 3: baglanti duzeyi hata (TCP/TLS, bind, oturum, zaman asimi,
-// 5xx) isin degil hedefin arizasidir; deneme sayisi degismez, is kisa sure sonra
-// yeniden alinabilir. Hedefin diger isleri de o sure alinmaz (main.rs).
-pub async fn defer_unreachable(
+// Isin kendi hatasi olmayan bekleme: deneme sayisi degismez, is verilen sure
+// sonra yeniden alinabilir. Iki cagiran var — ADR-052 madde 3 baglanti duzeyi
+// hata (TCP/TLS, bind, oturum, zaman asimi, 5xx; hedefin diger isleri de o sure
+// alinmaz, main.rs) ve ADR-050 dolu fren sayaci (pencerenin acilisi beklenir).
+pub async fn defer(
     pool: &PgPool,
     job: &ClaimedJob,
     worker_id: &str,
@@ -283,7 +284,7 @@ mod tests {
         assert_eq!(first.id, emergency, "acil ayrılış önce");
 
         // baglanti hatasi: deneme sayisi degismez, kisa sure sonra yeniden alinir
-        defer_unreachable(&pool, &first, "w1", "LDAP erişilemiyor", 0)
+        defer(&pool, &first, "w1", "LDAP erişilemiyor", 0)
             .await
             .unwrap();
         let again = claim(&pool, "w1", &[])

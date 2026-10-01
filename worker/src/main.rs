@@ -3,6 +3,7 @@ mod ad_account;
 mod adoption;
 mod catalog;
 mod common_settings;
+mod counters;
 // backend kopyasiyla birebir ayni; worker su an yalnizca cozer, ilk parola (3d) sifreler.
 #[allow(dead_code)]
 mod crypto;
@@ -71,6 +72,8 @@ struct Env {
     first_login_change_required: bool,
     // ADR-018: sahiplenme (ortak ayar, varsayilan kapali)
     ownership_mode_enabled: bool,
+    // ADR-016/050: saatlik fren sayaclari ve acil kota
+    limits: counters::Limits,
 }
 
 fn parse_bool_env(name: &str) -> Result<Option<bool>, String> {
@@ -108,13 +111,19 @@ fn load_env() -> Result<Env, String> {
     }
     Ok(Env {
         database_url,
-        time_zone: common.time_zone,
         write_mode: writes::Mode { dry_run },
         aead_key,
         ad_ca_file: std::env::var("AD_CA_FILE").ok(),
         sensitive_mapping_enabled: common.sensitive_mapping_enabled,
         first_login_change_required,
         ownership_mode_enabled: common.ownership_mode_enabled,
+        limits: counters::Limits {
+            destructive: common.hourly_destructive_limit,
+            grant: common.hourly_grant_limit,
+            first_password: common.hourly_first_password_limit,
+            emergency_quota: common.emergency_quota,
+        },
+        time_zone: common.time_zone,
     })
 }
 
@@ -271,6 +280,7 @@ async fn process_job(pool: &PgPool, job: &queue::ClaimedJob, worker_id: &str, en
         sensitive_mapping_enabled: env.sensitive_mapping_enabled,
         first_login_change_required: env.first_login_change_required,
         ownership_mode_enabled: env.ownership_mode_enabled,
+        limits: env.limits,
     };
     let run = engine::run_job(pool, job, &engine_env).await;
     let (outcome, unreachable) = match run {
@@ -287,8 +297,17 @@ async fn process_job(pool: &PgPool, job: &queue::ClaimedJob, worker_id: &str, en
             );
             let retry = POLL_INTERVAL.as_secs() as i64;
             (
-                queue::defer_unreachable(pool, job, worker_id, &reason, retry).await,
+                queue::defer(pool, job, worker_id, &reason, retry).await,
                 true,
+            )
+        }
+        // ADR-050: fren; hedefe hicbir sey yazilmadi, is pencerenin acilisini bekler
+        Err(engine::JobError::Throttled(blocked)) => {
+            println!("worker: iş {} fren nedeniyle bekliyor: {blocked}", job.id);
+            let retry = blocked.retry_after_seconds;
+            (
+                queue::defer(pool, job, worker_id, &blocked.to_string(), retry).await,
+                false,
             )
         }
         Err(engine::JobError::NeedsIntervention(reason)) => {
