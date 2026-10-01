@@ -73,6 +73,15 @@
     <a class="link" href="/targets/{{ u.target_id }}/reconcile">{{ lang.t("adopt.cta") }}</a></p>
   {% endfor %}
 
+  {# ADR-076: tarih araligi filtresi — sayaclar secilen pencereyi okur; secenek
+     listesi Rust'ta (`dashboard::WINDOWS`), sablon karsilastirma yapmaz #}
+  <nav class="flex flex-wrap items-center gap-2" aria-label="{{ lang.t("dash.window_pick") }}">
+    <span class="meta">{{ lang.t("dash.window_pick") }}</span>
+    {% for w in dash.windows %}
+    <a class="chip{% if w.active %} chip-active{% endif %}" href="/?days={{ w.days }}"{% if w.active %} aria-current="true"{% endif %}>{{ lang.t1("dash.window_n", w.days) }}</a>
+    {% endfor %}
+  </nav>
+
   <section class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
     <div class="stat">
       <div class="stat-head">
@@ -90,7 +99,7 @@
         <div class="min-w-0 flex-1">
           <p class="stat-label">{{ lang.t("dash.joined") }}</p>
           <p class="stat-value">{{ dash.totals.joined }}</p>
-          <p class="stat-foot">{{ lang.t("dash.window_30") }}</p>
+          <p class="stat-foot">{{ lang.t1("dash.window_n", dash.window_days) }}</p>
         </div>
       </div>
     </div>
@@ -100,7 +109,7 @@
         <div class="min-w-0 flex-1">
           <p class="stat-label">{{ lang.t("dash.departed") }}</p>
           <p class="stat-value">{{ dash.totals.departed }}</p>
-          <p class="stat-foot">{{ lang.t("dash.window_30") }}</p>
+          <p class="stat-foot">{{ lang.t1("dash.window_n", dash.window_days) }}</p>
         </div>
       </div>
     </div>
@@ -110,7 +119,7 @@
         <div class="min-w-0 flex-1">
           <p class="stat-label">{{ lang.t("dash.changed") }}</p>
           <p class="stat-value">{{ dash.totals.changed }}</p>
-          <p class="stat-foot">{{ lang.t("dash.window_30") }}</p>
+          <p class="stat-foot">{{ lang.t1("dash.window_n", dash.window_days) }}</p>
         </div>
       </div>
     </div>
@@ -171,6 +180,43 @@
             <div class="donut-legend-row">
               <span class="dot dot-{{ s.tone }}" aria-hidden="true"></span>
               <span class="min-w-0 flex-1 truncate">{{ lang.key("employment", s.key) }}</span>
+              <span class="tabular-nums">{{ s.count }}</span>
+              <span class="meta w-10 text-right tabular-nums">%{{ s.pct }}</span>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+      </div>
+
+      {# ADR-076 madde 3: rol kirilimi — ayni halka bileseni, rol adi veridir #}
+      <div class="card">
+        <div class="card-head">
+          <i class="ico ico-key card-icon" aria-hidden="true"></i>
+          <h2 class="h2">{{ lang.t("dash.roles") }}</h2>
+        </div>
+        {% if dash.roles.total == 0 %}
+        <p class="muted text-sm">{{ lang.t("dash.roles_empty") }}</p>
+        {% else %}
+        <div class="flex flex-wrap items-center gap-5">
+          <span class="donut">
+            <svg class="donut-svg" viewBox="0 0 42 42" role="img" aria-label="{{ lang.t("dash.roles") }}">
+              <circle class="donut-ring" cx="21" cy="21" r="15.9155"></circle>
+              {% for s in dash.roles.slices %}
+              <circle class="donut-seg seg-{{ s.tone }}" cx="21" cy="21" r="15.9155"
+                      stroke-dasharray="{{ s.dash }}" stroke-dashoffset="{{ s.offset }}"></circle>
+              {% endfor %}
+            </svg>
+            <span class="donut-center">
+              <span class="meta block">{{ lang.t("dash.total") }}</span>
+              <span class="donut-total">{{ dash.roles.total }}</span>
+            </span>
+          </span>
+          <div class="donut-legend">
+            {% for s in dash.roles.slices %}
+            <div class="donut-legend-row">
+              <span class="dot dot-{{ s.tone }}" aria-hidden="true"></span>
+              <span class="min-w-0 flex-1 truncate">{% if s.key.is_empty() %}{{ lang.t("dash.other") }}{% else %}{{ s.key }}{% endif %}</span>
               <span class="tabular-nums">{{ s.count }}</span>
               <span class="meta w-10 text-right tabular-nums">%{{ s.pct }}</span>
             </div>

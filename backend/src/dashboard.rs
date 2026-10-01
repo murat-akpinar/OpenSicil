@@ -10,15 +10,37 @@ use sqlx::PgPool;
 use crate::audit;
 
 /// Panelin pencereleri; "son 30 gun" ADR-076'nin varsayilani.
-const WINDOW_DAYS: i32 = 30;
+pub const WINDOW_DAYS: i32 = 30;
+/// Secilebilir pencereler (ADR-076 tarih araligi filtresi); listede olmayan
+/// deger varsayilana duser — sorguya keyfi sayi girmez.
+pub const WINDOWS: [i32; 4] = [7, 30, 90, 365];
 const TREND_DAYS: i32 = 7;
 const ACTIVITY_LIMIT: i64 = 8;
 const DISTRIBUTION_LIMIT: i64 = 5;
+/// Rol halkasinda ayri dilim olan en kalabalik rol sayisi; kalani "diger"
+const ROLE_SLICES: usize = 4;
+
+/// `?days=` degeri: yalnizca `WINDOWS`'tan biri, aksi halde varsayilan.
+pub fn window(requested: Option<i32>) -> i32 {
+    requested
+        .filter(|d| WINDOWS.contains(d))
+        .unwrap_or(WINDOW_DAYS)
+}
+
+pub struct WindowChip {
+    pub days: i32,
+    pub active: bool,
+}
 
 pub struct Dashboard {
     /// Hos geldiniz kartindaki tarih, kurulum saat diliminde (ADR-039)
     pub today: String,
+    /// Sayac penceresi (gun) ve ekrandaki secenekler; sablon karsilastirma yapmaz
+    pub window_days: i32,
+    pub windows: Vec<WindowChip>,
     pub totals: Totals,
+    /// Birincil role gore dagilim (halka): en kalabalik dort rol + "diger"
+    pub roles: Donut,
     pub activity: Vec<Event>,
     pub trend: Vec<TrendDay>,
     /// Grafigin y ekseninin tepesi: en kalabalik gunun toplami. Sablon ekseni
@@ -151,12 +173,21 @@ pub struct DistRow {
     pub pct: i64,
 }
 
-pub async fn load(pool: &PgPool, time_zone: &str) -> Result<Dashboard, sqlx::Error> {
-    let (totals, today) = totals(pool, time_zone).await?;
+pub async fn load(pool: &PgPool, time_zone: &str, days: i32) -> Result<Dashboard, sqlx::Error> {
+    let (totals, today) = totals(pool, time_zone, days).await?;
     let (trend, trend_peak) = trend(pool, time_zone).await?;
     Ok(Dashboard {
         today,
+        window_days: days,
+        windows: WINDOWS
+            .iter()
+            .map(|&d| WindowChip {
+                days: d,
+                active: d == days,
+            })
+            .collect(),
         totals,
+        roles: roles(pool).await?,
         activity: activity(pool, time_zone).await?,
         trend,
         trend_mid: if trend_peak >= 2 && trend_peak % 2 == 0 {
@@ -261,8 +292,12 @@ fn link(key: &'static str, href: &str) -> SetupLink {
 }
 
 /// Alti sayi, serit kisa yolunun kimligi ve bugunun tarihi tek sorguda: panel
-/// acilirken sekiz ayri gidis donus olmasin.
-async fn totals(pool: &PgPool, time_zone: &str) -> Result<(Totals, String), sqlx::Error> {
+/// acilirken sekiz ayri gidis donus olmasin. `days`: giris/ayrilis/degisiklik penceresi.
+async fn totals(
+    pool: &PgPool,
+    time_zone: &str,
+    days: i32,
+) -> Result<(Totals, String), sqlx::Error> {
     let row: (i64, i64, i64, i64, i64, Option<i64>, i64, String) = sqlx::query_as(
         "SELECT \
            (SELECT count(*) FROM identities WHERE deleted_at IS NULL), \
@@ -280,7 +315,7 @@ async fn totals(pool: &PgPool, time_zone: &str) -> Result<(Totals, String), sqlx
            to_char(now() AT TIME ZONE $1, 'DD.MM.YYYY')",
     )
     .bind(time_zone)
-    .bind(WINDOW_DAYS)
+    .bind(days)
     .bind(audit::IDENTITY_CHANGED)
     .bind(crate::identity::INTERVENTION_STATUS)
     .fetch_one(pool)
@@ -412,6 +447,36 @@ async fn employment(pool: &PgPool) -> Result<Donut, sqlx::Error> {
     })
 }
 
+/// Rol dagilimi (ADR-076 madde 3): birincil role gore, en kalabalik dort rol
+/// ayri dilim, kalani "diger" (bos anahtar; sablon `dash.other` yazar).
+/// Rol adi veridir, i18n'e girmez.
+async fn roles(pool: &PgPool) -> Result<Donut, sqlx::Error> {
+    let rows: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT r.name, count(i.id) FROM roles r \
+         JOIN identities i ON i.primary_role_id = r.id AND i.deleted_at IS NULL \
+         GROUP BY r.id, r.name ORDER BY count(i.id) DESC, r.name",
+    )
+    .fetch_all(pool)
+    .await?;
+    let total: i64 = rows.iter().map(|(_, count)| *count).sum();
+    Ok(Donut {
+        slices: slices(fold_others(rows, ROLE_SLICES), total),
+        total,
+    })
+}
+
+/// Ilk `keep` satir kalir, gerisi tek "diger" satirinda (bos anahtar) toplanir.
+/// Saf — DB olmadan sinanir. Dort ton var (`SLICE_TONES`), bes dilim bes renk eder.
+fn fold_others(rows: Vec<(String, i64)>, keep: usize) -> Vec<(String, i64)> {
+    if rows.len() <= keep + 1 {
+        return rows;
+    }
+    let mut kept: Vec<(String, i64)> = rows.iter().take(keep).cloned().collect();
+    let rest: i64 = rows.iter().skip(keep).map(|(_, n)| *n).sum();
+    kept.push((String::new(), rest));
+    kept
+}
+
 /// Halkanin dilimleri: yuzde, `stroke-dasharray` ve `stroke-dashoffset`.
 /// Saf — DB olmadan sinanir.
 fn slices(rows: Vec<(String, i64)>, total: i64) -> Vec<Slice> {
@@ -528,6 +593,39 @@ mod tests {
         }
     }
 
+    /// ADR-076 tarih araligi: yalnizca listedeki pencereler; keyfi sayi varsayilana duser.
+    #[test]
+    fn the_window_accepts_only_listed_values() {
+        assert_eq!(window(None), WINDOW_DAYS);
+        assert_eq!(window(Some(7)), 7);
+        assert_eq!(window(Some(365)), 365);
+        assert_eq!(window(Some(5)), WINDOW_DAYS);
+        assert_eq!(window(Some(-30)), WINDOW_DAYS);
+    }
+
+    /// Rol halkasi: ilk dort rol ayri, gerisi "diger"; bes ve altinda katlama yok.
+    #[test]
+    fn roles_beyond_the_fourth_fold_into_other() {
+        let rows = |n: usize| {
+            (1..=n)
+                .map(|i| (format!("Rol {i}"), (10 - i) as i64))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            fold_others(rows(5), 4).len(),
+            5,
+            "beş rol beş dilim, 'diğer' gerekmez"
+        );
+        let folded = fold_others(rows(7), 4);
+        assert_eq!(folded.len(), 5);
+        assert_eq!(
+            folded[4],
+            (String::new(), 5 + 4 + 3),
+            "5., 6., 7. rol toplandı"
+        );
+        assert_eq!(folded[0].0, "Rol 1");
+    }
+
     #[test]
     fn a_stacked_column_never_overflows_the_plot() {
         // Iki seri ayni sutunda yigiliyor ve olcek gunluk toplamin zirvesi.
@@ -586,13 +684,24 @@ mod tests {
         .await
         .unwrap();
 
-        let dash = load(&pool, "Europe/Istanbul").await.unwrap();
+        let dash = load(&pool, "Europe/Istanbul", WINDOW_DAYS).await.unwrap();
 
         assert_eq!(dash.totals.identities, 2, "silinmemis kimlik");
         assert_eq!(
             dash.totals.joined, 1,
             "40 gun onceki giris pencereye girmez"
         );
+        // ADR-076 tarih araligi: pencere buyuyunce 40 gun onceki giris de sayilir
+        let wide = load(&pool, "Europe/Istanbul", 365).await.unwrap();
+        assert_eq!(wide.totals.joined, 2);
+        assert_eq!(wide.window_days, 365);
+        assert!(wide.windows.iter().any(|w| w.days == 365 && w.active));
+        assert_eq!(wide.windows.iter().filter(|w| w.active).count(), 1);
+        // Rol halkasi: iki kimlik ayni birincil rolde → tek dilim %100
+        assert_eq!(dash.roles.total, 2);
+        assert_eq!(dash.roles.slices.len(), 1);
+        assert_eq!(dash.roles.slices[0].key, "Test Rolü");
+        assert_eq!(dash.roles.slices[0].pct, 100);
         assert_eq!(dash.totals.departed, 1);
         assert_eq!(dash.totals.changed, 1);
         assert_eq!(dash.totals.needs_intervention, 1);
@@ -709,6 +818,89 @@ mod tests {
         assert!(!lost.steps[1].done, "kayıp katalog adımı tamam saymaz");
         assert!(catalog.gg_vpn > 0, "seed katalog öğesi döndürür");
 
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
+    /// ADR-076 tarih araligi: `?days=` sayaclari ve "Son N gun" etiketini degistirir,
+    /// listede olmayan deger varsayilana duser, secili cip isaretli.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn the_home_window_filter_changes_the_counts_and_marks_the_chip() {
+        use axum::body::Body;
+        use axum::http::{header, Request};
+        use tower::ServiceExt;
+
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        let ids = crate::test_support::seed_two_identities(&pool).await;
+        sqlx::query("UPDATE identities SET start_date = current_date - 40 WHERE id = $1")
+            .bind(ids[1])
+            .execute(&pool)
+            .await
+            .unwrap();
+        let app = crate::web::routes()
+            .with_state(crate::web::test_state(pool.clone(), "https://localhost"));
+        let operator = crate::operator_session::Operator {
+            subject: "sub-x".to_string(),
+            username: "ik.operatoru".to_string(),
+            email: "ik@example.org".to_string(),
+            authorities: vec!["hr".to_string()],
+            auth_source: crate::operator_session::AuthSource::Oidc,
+            lang: crate::i18n::DEFAULT,
+        };
+        let token = crate::operator_session::create_session(&pool, &operator)
+            .await
+            .unwrap();
+        let cookie = format!("{}={token}", crate::cookie::OPERATOR_SESSION_COOKIE_NAME);
+        let page = |path: &'static str| {
+            let (app, cookie) = (app.clone(), cookie.clone());
+            async move {
+                let r = app
+                    .oneshot(
+                        Request::builder()
+                            .uri(path)
+                            .header(header::COOKIE, cookie)
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                let bytes = axum::body::to_bytes(r.into_body(), usize::MAX)
+                    .await
+                    .unwrap();
+                String::from_utf8(bytes.to_vec()).unwrap()
+            }
+        };
+        let lang = crate::i18n::DEFAULT;
+        let label = |days: i32| lang.t1("dash.window_n", days);
+
+        // Varsayilan 30: 40 gun onceki giris sayilmaz; cip 30 secili
+        let home = page("/").await;
+        assert!(
+            home.contains(&label(30)) && !home.contains(&label(5)),
+            "{home}"
+        );
+        assert!(
+            home.contains(r#"chip chip-active" href="/?days=30""#),
+            "{home}"
+        );
+        // 365: giris sayilir; cip 365 secili, 30 degil
+        let wide = page("/?days=365").await;
+        assert!(
+            wide.contains(r#"chip chip-active" href="/?days=365""#),
+            "{wide}"
+        );
+        assert!(!wide.contains(r#"chip chip-active" href="/?days=30""#));
+        // Listede olmayan deger varsayilana duser
+        let odd = page("/?days=5").await;
+        assert!(
+            odd.contains(r#"chip chip-active" href="/?days=30""#),
+            "{odd}"
+        );
+        // Rol halkasi ekranda: seed rolu ve toplam
+        assert!(home.contains(lang.t("dash.roles")) && home.contains("Test Rolü"));
+
+        drop(app);
         drop(pool);
         crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
     }

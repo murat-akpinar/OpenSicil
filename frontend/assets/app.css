@@ -487,6 +487,10 @@
   .chip {
     @apply inline-flex items-center gap-1.5 rounded-lg bg-bg px-2.5 py-1 text-sm;
   }
+  /* Seçili pencere (panel tarih aralığı, ADR-076): nav-link-active ile aynı ton */
+  .chip-active {
+    @apply bg-accent font-bold text-on-accent;
+  }
 
   /* Boş durum: ikon karesi + başlık + ipucu + eylem */
   .empty {

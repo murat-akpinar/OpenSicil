@@ -56,14 +56,23 @@ struct OperatorHomeTemplate {
     identities: Vec<crate::identity::Listed>,
 }
 
+/// `?days=` panel penceresi (ADR-076); listede olmayan ya da sayi olmayan deger
+/// varsayilana duser (metin alinir: `?days=abc` 400 degil varsayilan verir).
+#[derive(Deserialize, Default)]
+pub(crate) struct HomeQuery {
+    days: Option<String>,
+}
+
 async fn render_operator_home(
     state: &AppState,
     lang: Lang,
     username: String,
     authorities: Vec<String>,
+    query: HomeQuery,
 ) -> Response {
+    let days = crate::dashboard::window(query.days.and_then(|d| d.trim().parse().ok()));
     let loaded = tokio::try_join!(
-        crate::dashboard::load(&state.pool, &state.time_zone),
+        crate::dashboard::load(&state.pool, &state.time_zone, days),
         crate::identity::recent(&state.pool, &state.time_zone),
     );
     match loaded {
@@ -177,7 +186,11 @@ async fn render_login(pool: &PgPool, lang: Lang, error: String) -> Response {
 
 // Operator oturumu zaten gecerliyse (cerez var ve DB'de suresi gecmemis),
 // giris formunu degil dogrudan giris sonrasi sayfayi goster.
-async fn login_form(State(state): State<AppState>, headers: HeaderMap) -> Response {
+async fn login_form(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<HomeQuery>,
+) -> Response {
     if let Some(token) = get_cookie(&headers, OPERATOR_SESSION_COOKIE_NAME) {
         if let Ok(Some(operator)) =
             crate::operator_session::validate_session(&state.pool, &token).await
@@ -187,6 +200,7 @@ async fn login_form(State(state): State<AppState>, headers: HeaderMap) -> Respon
                 operator.lang,
                 operator.username,
                 operator.authorities,
+                query,
             )
             .await;
         }
@@ -450,7 +464,7 @@ async fn operator_home_with_cookie(
     );
     (
         headers,
-        render_operator_home(state, lang, username, authorities).await,
+        render_operator_home(state, lang, username, authorities, HomeQuery::default()).await,
     )
         .into_response()
 }
