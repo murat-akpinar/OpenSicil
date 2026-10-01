@@ -20,6 +20,7 @@ mod mapping;
 mod mapping_rules;
 mod model;
 mod queue;
+mod read_lane;
 mod scheduler;
 #[cfg(test)]
 mod test_support;
@@ -127,56 +128,83 @@ fn load_env() -> Result<Env, String> {
     })
 }
 
-// Acilista katalog yenileme (docs/03 katalog; ADR-051: okuma seridi Faz 5'e kadar
-// burada). AD yapilandirilmamissa atlanir; DC'ye ulasilamiyorsa surec cikmaz,
-// loglar ve devam eder (ADR-061); kapsam hatasi da AD connector'ini baslatmaz.
-async fn refresh_catalog_at_startup(pool: &PgPool, env: &Env) {
-    let cfg = match ad::load_config(pool, &env.aead_key, env.ad_ca_file.as_deref()).await {
-        Ok(Some(cfg)) => cfg,
-        Ok(None) => {
-            println!("worker: AD yapılandırılmamış, katalog yenileme atlandı");
-            return;
+// Katalog yenileme artik OKUMA SERIDINDE calisir (ADR-051): acilista yalnizca
+// istek yazilir, taramayi ayri gorev yapar; yazma seridi uzun bir LDAP okumasini
+// beklemez. AD yapilandirilmamissa istek de yazilmaz.
+async fn request_catalog_refresh_at_startup(pool: &PgPool) {
+    match read_lane::ad_target(pool).await {
+        Ok(Some(target)) => {
+            match read_lane::request(pool, read_lane::CATALOG_REFRESH, target).await {
+                Ok(true) => {
+                    println!("worker: açılışta katalog yenileme isteği okuma şeridine yazıldı")
+                }
+                Ok(false) => println!("worker: katalog yenileme isteği zaten açık"),
+                Err(e) => eprintln!("worker: katalog yenileme isteği yazılamadı: {e}"),
+            }
         }
-        Err(e) => {
-            eprintln!("worker: AD ayarları okunamadı, katalog yenileme atlandı: {e}");
-            return;
-        }
-    };
-    let scope = match ad::parse_scope(|name| std::env::var(name).ok()) {
-        Ok(scope) => scope,
-        Err(e) => {
-            eprintln!("worker: yönetilen kapsam geçersiz, AD connector'ı başlamadı: {e}");
-            return;
-        }
-    };
-    let target: Result<i64, sqlx::Error> =
-        sqlx::query_scalar("SELECT id FROM target_systems WHERE kind = 'ad'")
-            .fetch_one(pool)
-            .await;
-    let outcome = async {
-        let target = target.map_err(|e| format!("hedef sistem okunamadı: {e}"))?;
-        let mut ldap = ad::connect(&cfg).await.map_err(|e| e.to_string())?;
-        // docs/05 acilis kontrolleri (kapsam DN → GUID, ADR-060); gecmezse AD connector'i baslamaz
-        let checks = ad::startup_checks(&mut ldap, &scope)
-            .await
-            .map_err(|e| e.to_string())?;
-        let snapshot = ad::read_catalog(&mut ldap, &scope, &checks)
-            .await
-            .map_err(|e| e.to_string())?;
-        ldap.unbind().await.ok();
-        let counts = catalog::sync_snapshot(pool, target, &snapshot)
-            .await
-            .map_err(|e| format!("katalog yazılamadı: {e}"))?;
-        Ok::<_, String>((counts, snapshot.forbidden.len()))
+        Ok(None) => eprintln!("worker: AD hedef sistemi bulunamadı, katalog yenileme atlandı"),
+        Err(e) => eprintln!("worker: hedef sistem okunamadı: {e}"),
     }
-    .await;
-    match outcome {
-        Ok((counts, forbidden)) => println!(
-            "worker: AD kataloğu yenilendi: {} OU, {} grup, {} kayıp; {forbidden} yasaklı grup kataloğa alınmadı",
-            counts.ous, counts.groups, counts.marked_missing
-        ),
-        Err(e) => eprintln!("worker: AD kataloğu yenilenemedi: {e}"),
+}
+
+// Okuma seridi gorevi (ADR-051): kendi dongusu, kendi LDAP baglantisi; hedefe
+// hicbir sey yazmaz, sayac okumaz. Ayni anda tek is.
+async fn run_read_lane(pool: PgPool, env: Arc<Env>, stop: Arc<AtomicBool>) {
+    while !stop.load(Ordering::SeqCst) {
+        let job = match read_lane::claim(&pool).await {
+            Ok(Some(job)) => job,
+            Ok(None) => {
+                tokio::time::sleep(POLL_INTERVAL).await;
+                continue;
+            }
+            Err(e) => {
+                eprintln!("worker: okuma şeridi kuyruğu okunamadı: {e}");
+                tokio::time::sleep(POLL_INTERVAL).await;
+                continue;
+            }
+        };
+        let outcome = match job.kind.as_str() {
+            read_lane::CATALOG_REFRESH => refresh_catalog(&pool, &env, job.target_system_id).await,
+            other => Err(format!("bilinmeyen okuma işi türü: {other}")),
+        };
+        match &outcome {
+            Ok(text) => println!("worker: okuma şeridi {} bitti: {text}", job.kind),
+            Err(e) => eprintln!("worker: okuma şeridi {} başarısız: {e}", job.kind),
+        }
+        if let Err(e) = read_lane::finish(&pool, job.id, outcome).await {
+            eprintln!("worker: okuma işi sonucu yazılamadı: {e}");
+        }
     }
+}
+
+// docs/03 katalog; ADR-061: DC'ye ulasilamiyorsa surec cikmaz, is basarisiz olur
+// ve bir sonraki istekte yeniden denenir. Kapsam hatasi da AD connector'ini baslatmaz.
+async fn refresh_catalog(pool: &PgPool, env: &Env, target: i64) -> Result<String, String> {
+    let cfg = ad::load_config(pool, &env.aead_key, env.ad_ca_file.as_deref())
+        .await
+        .map_err(|e| format!("AD ayarları okunamadı: {e}"))?
+        .ok_or_else(|| "AD yapılandırılmamış".to_string())?;
+    let scope = ad::parse_scope(|name| std::env::var(name).ok())
+        .map_err(|e| format!("yönetilen kapsam geçersiz: {e}"))?;
+    let mut ldap = ad::connect(&cfg).await.map_err(|e| e.to_string())?;
+    // docs/05 acilis kontrolleri (kapsam DN → GUID, ADR-060); gecmezse katalog okunmaz
+    let checks = ad::startup_checks(&mut ldap, &scope)
+        .await
+        .map_err(|e| e.to_string())?;
+    let snapshot = ad::read_catalog(&mut ldap, &scope, &checks)
+        .await
+        .map_err(|e| e.to_string())?;
+    ldap.unbind().await.ok();
+    let counts = catalog::sync_snapshot(pool, target, &snapshot)
+        .await
+        .map_err(|e| format!("katalog yazılamadı: {e}"))?;
+    Ok(format!(
+        "{} OU, {} grup, {} kayıp; {} yasaklı grup kataloğa alınmadı",
+        counts.ous,
+        counts.groups,
+        counts.marked_missing,
+        snapshot.forbidden.len()
+    ))
 }
 
 // SIGTERM'de eldeki is bitirilir, yeni is alinmaz (ADR-061 madde 1): bayrak +
@@ -220,7 +248,13 @@ async fn run() -> ExitCode {
     };
     let worker_id = worker_id();
     println!("worker: {worker_id} başladı, {POLL_INTERVAL:?} aralıkla yoklanıyor");
-    refresh_catalog_at_startup(&pool, &env).await;
+    let env = Arc::new(env);
+    request_catalog_refresh_at_startup(&pool).await;
+    tokio::spawn(run_read_lane(
+        pool.clone(),
+        Arc::clone(&env),
+        Arc::clone(&stop),
+    ));
 
     // Yazma seridi tek sirada (ADR-047): bir is bitmeden digeri alinmaz;
     // kuyruk bosalinca 5 sn beklenir. Erisilemeyen hedefin isleri bir yoklama

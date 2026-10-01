@@ -61,6 +61,7 @@ pub fn routes() -> Router<AppState> {
         .route("/departments/{id}/reject", post(reject_department))
         .route("/targets", get(targets_page))
         .route("/targets/{id}", post(save_target))
+        .route("/targets/{id}/catalog-refresh", post(refresh_catalog))
 }
 
 // Tekrar eden alanlar (entitlement) ve hedef basina ayar alanlari (pa.<hedef> ...).
@@ -347,6 +348,10 @@ fn parent_options(dept: &org::DepartmentDetail, all: &[org::DepartmentRow]) -> V
 struct TargetFormView {
     target: org::TargetRow,
     containers: Vec<ItemView>,
+    /// Son katalog yenileme (okuma şeridi, ADR-051): durum anahtarı + zaman + sonuç
+    refresh_status: String,
+    refresh_at: String,
+    refresh_result: String,
 }
 
 #[derive(Template)]
@@ -355,6 +360,7 @@ struct TargetsTemplate {
     lang: Lang,
     targets: Vec<TargetFormView>,
     error: String,
+    info: String,
     can_edit: bool,
 }
 
@@ -840,43 +846,87 @@ async fn reject_department(
     decide(&state, &op, Owner::Department, id, false).await
 }
 
-async fn render_targets(state: &AppState, op: &Operator, error: String) -> Response {
-    let (targets, options) = match (
+async fn render_targets(state: &AppState, op: &Operator, notice: Notice) -> Response {
+    let (targets, options, refreshes) = match (
         org::list_targets(&state.pool).await,
         org::catalog_options(&state.pool).await,
+        org::last_catalog_refresh(&state.pool, &state.time_zone).await,
     ) {
-        (Ok(t), Ok(o)) => (t, o),
-        (Err(e), _) | (_, Err(e)) => return internal("hedef sistemler okunamadı", e),
+        (Ok(t), Ok(o), Ok(r)) => (t, o, r),
+        (Err(e), _, _) | (_, Err(e), _) | (_, _, Err(e)) => {
+            return internal("hedef sistemler okunamadı", e)
+        }
     };
     let views = targets
         .into_iter()
-        .map(|target| TargetFormView {
-            containers: options
-                .containers
-                .iter()
-                .filter(|c| c.target_id == target.id)
-                .map(|c| ItemView {
-                    id: c.id,
-                    label: item_label(c, op.lang),
-                    selected: target.default_container_item_id == Some(c.id),
-                })
-                .collect(),
-            target,
-        })
+        .map(|target| target_form_view(target, &options, &refreshes, op.lang))
         .collect();
     render(&TargetsTemplate {
         lang: op.lang,
         targets: views,
-        error,
+        error: notice.error,
+        info: notice.info,
         can_edit: allowed(op, WRITE_AUTHORITIES),
     })
+}
+
+type RefreshRow = (i64, String, String, String);
+
+fn target_form_view(
+    target: org::TargetRow,
+    options: &CatalogOptions,
+    refreshes: &[RefreshRow],
+    lang: Lang,
+) -> TargetFormView {
+    let last = refreshes.iter().find(|(id, ..)| *id == target.id);
+    TargetFormView {
+        containers: options
+            .containers
+            .iter()
+            .filter(|c| c.target_id == target.id)
+            .map(|c| ItemView {
+                id: c.id,
+                label: item_label(c, lang),
+                selected: target.default_container_item_id == Some(c.id),
+            })
+            .collect(),
+        refresh_status: last.map(|(_, s, ..)| s.clone()).unwrap_or_default(),
+        refresh_at: last.map(|(_, _, at, _)| at.clone()).unwrap_or_default(),
+        refresh_result: last.map(|(.., r)| r.clone()).unwrap_or_default(),
+        target,
+    }
+}
+
+// ADR-051: ekrandan "yenile" okuma seridine istek yazar; tarama orada calisir,
+// yazma seridi ve fren sayaclari etkilenmez.
+async fn refresh_catalog(
+    OperatorSession(op): OperatorSession,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Response {
+    if !allowed(&op, WRITE_AUTHORITIES) {
+        return forbidden(op.lang);
+    }
+    let opened = match org::request_catalog_refresh(&state.pool, id, &op.username).await {
+        Ok(opened) => opened,
+        Err(e) => return internal("katalog yenileme isteği yazılamadı", e),
+    };
+    let key = match opened {
+        true => "catalog.refresh_requested",
+        false => "catalog.refresh_already_open",
+    };
+    if opened {
+        let detail = serde_json::json!({ "action": "catalog_refresh", "target_id": id });
+        audit_operator(&state, &op, crate::audit::TARGET_CHANGED, None, detail).await;
+    }
+    render_targets(&state, &op, Notice::info(op.lang.t(key).into())).await
 }
 
 async fn targets_page(
     OperatorSession(op): OperatorSession,
     State(state): State<AppState>,
 ) -> Response {
-    render_targets(&state, &op, String::new()).await
+    render_targets(&state, &op, Notice::default()).await
 }
 
 async fn save_target(
@@ -903,13 +953,18 @@ async fn save_target(
         f.get("retention_days").trim().parse().ok(),
         f.get("password_reset_delay_days").trim().parse().ok(),
     ) else {
-        return render_targets(&state, &op, op.lang.t("err.day_numbers").to_string()).await;
+        return render_targets(
+            &state,
+            &op,
+            Notice::err(op.lang.t("err.day_numbers").into()),
+        )
+        .await;
     };
     target.retention_days = retention;
     target.password_reset_delay_days = delay;
     if let Err(e) = org::save_target(&state.pool, &target).await {
         return match save_error(e, "hedef sistem kaydedilemedi") {
-            Ok(key) => render_targets(&state, &op, op.lang.t(key).to_string()).await,
+            Ok(key) => render_targets(&state, &op, Notice::err(op.lang.t(key).into())).await,
             Err(response) => *response,
         };
     }
@@ -1079,6 +1134,46 @@ mod tests {
             "{page}"
         );
 
+        // ADR-051: "yenile" okuma seridine istek yazar, tarama orada calisir.
+        let r = send(
+            "POST",
+            format!("/targets/{}/catalog-refresh", catalog.ad),
+            String::new(),
+            admin.clone(),
+        )
+        .await;
+        let page = body_string(r).await;
+        assert!(page.contains("okuma şeridine yazıldı"), "{page}");
+        let (kind, requested): (String, Option<String>) =
+            sqlx::query_as("SELECT kind, requested_by FROM read_jobs WHERE target_system_id = $1")
+                .bind(catalog.ad)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            (kind.as_str(), requested.as_deref()),
+            ("catalog_refresh", Some("rol.yoneticisi"))
+        );
+        let page = body_string(
+            send(
+                "POST",
+                format!("/targets/{}/catalog-refresh", catalog.ad),
+                String::new(),
+                admin.clone(),
+            )
+            .await,
+        )
+        .await;
+        assert!(page.contains("zaten açık"), "{page}");
+        let r = send(
+            "POST",
+            format!("/targets/{}/catalog-refresh", catalog.ad),
+            String::new(),
+            auditor.clone(),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::FORBIDDEN, "auditor yenileyemez");
+
         // Hedef sistem varsayilanlari.
         let r = send(
             "POST",
@@ -1097,7 +1192,7 @@ mod tests {
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(events, 5);
+        assert_eq!(events, 6, "katalog yenileme isteği de denetlenir");
 
         drop(app);
         drop(pool);

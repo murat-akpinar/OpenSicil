@@ -188,7 +188,9 @@ Kurallar:
 
 > Zimbra v1'den sonra geldiği için ([ADR-090](decisions/090-zimbra-v1-sonrasina-alindi.md)) mutabakat raporu ve metrik ucu v1'de yalnızca AD'yi kapsar; eksik kapsam ekranda/raporda belirtilir.
 
-- [ ] Okuma şeridi: mutabakat, katalog yenileme, toplu yönetime alma fark hesabı ayrı görevde, sayaca dokunmaz ([ADR-051](decisions/051-okuma-seridi.md))
+- [x] Okuma şeridi: mutabakat, katalog yenileme, toplu yönetime alma fark hesabı ayrı görevde, sayaca dokunmaz ([ADR-051](decisions/051-okuma-seridi.md))
+  - Not (2026-10-01): [ADR-094](decisions/094-okuma-seridi-uygulamasi.md) — `0016_read_jobs.sql` (tür/hedef/durum/isteyen/sonuç; açık iş için kısmi tekil indeks, durumu yalnızca worker yazar) + `worker/src/read_lane.rs` + `main.rs::run_read_lane` ayrı tokio görevi: kendi LDAP bağlantısı, aynı anda tek iş, hedefe hiçbir şey yazmaz, fren sayacı okumaz. Katalog yenileme yazma şeridinden çıktı: açılışta yalnızca istek yazılıyor, taramayı okuma şeridi yapıyor — yazma şeridi ilk saniyeden iş alabiliyor. `/targets` ekranı hedef başına son yenilemenin durumunu/zamanını/sonucunu gösteriyor ve `role_admin`/`admin` için "Kataloğu yenile" düğmesi var (açık iş varken ikinci tarama açılmıyor, denetim satırı yazılıyor). Mutabakat (`kind = 'reconcile'`) ve toplu yönetime alma aynı şeride sıradaki kutucuklarda girer
+  - Kabul: `worker/src/read_lane.rs` testi — tek iş, tekilleştirme (açık iş varken ikinci istek yok), sonuç/başarısızlık kaydı; `org_web` HTTP testi — düğme istek yazıyor, ikincisi "zaten açık", auditor 403
 - [ ] Mutabakat raporu: gece ve istendiğinde, "yeniden uygula" ile (F-13)
 - [ ] Gösterge paneli ([ADR-076](decisions/076-gosterge-paneli-v1-kapsami.md)): tarih aralığı filtresi (varsayılan son 30 gün); işe giren/ayrılan/görev değiştiren sayısı; departman ve rol kırılımı (pasta, native CSS `conic-gradient`, kütüphane yok); "ayrılmış ama kapatılamamış" ve onay bekleyen taslak sayısı
   - Kabul: beş panel de doğru sayıları gösteriyor; tarih aralığı değiştirilince sayılar güncelleniyor; yeni JS/CSS grafik bağımlılığı eklenmedi

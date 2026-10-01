@@ -5,9 +5,23 @@
   <h1 class="h1">{{ lang.t("targets.title") }}</h1>
 </div>
 {% if !error.is_empty() %}<p class="alert alert-err">{{ error }}</p>{% endif %}
+{% if !info.is_empty() %}<p class="alert alert-info">{{ info }}</p>{% endif %}
 {% for v in targets %}
-<form method="post" action="/targets/{{ v.target.id }}" class="card mb-6 space-y-3">
+<div class="card mb-6 space-y-3">
   <h2 class="h2">{{ v.target.name }} <a class="link ml-2 text-sm" href="/targets/{{ v.target.id }}/mappings">{{ lang.t("targets.mappings_link") }}</a></h2>
+  <div class="kv">
+    <span>{{ lang.t("catalog.last_refresh") }}</span>
+    <span>
+      {% if v.refresh_status.is_empty() %}{{ lang.t("common.none") }}
+      {% else %}<span class="badge badge-{{ lang.key("readjobkind", v.refresh_status) }}">{{ lang.key("readjob", v.refresh_status) }}</span> {{ v.refresh_at }} {{ v.refresh_result }}{% endif %}
+    </span>
+  </div>
+  {% if can_edit %}
+  <form method="post" action="/targets/{{ v.target.id }}/catalog-refresh">
+    <button class="btn btn-sm" type="submit">{{ lang.t("catalog.refresh") }}</button>
+  </form>
+  {% endif %}
+<form method="post" action="/targets/{{ v.target.id }}" class="space-y-3">
   <label class="check"><input type="checkbox" name="provision_account_default" value="1"{% if v.target.provision_account_default %} checked{% endif %}> {{ lang.t("targets.provision_default") }}</label>
   <div>
     <label class="label" for="ct-{{ v.target.id }}">{{ lang.t("targets.default_container") }}</label>
@@ -31,5 +45,6 @@
   <button class="btn btn-primary w-full" type="submit">{{ lang.t("common.save") }}</button>
   {% endif %}
 </form>
+</div>
 {% endfor %}
 {% endblock %}

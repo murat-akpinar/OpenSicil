@@ -601,6 +601,39 @@ pub async fn list_targets(pool: &PgPool) -> Result<Vec<TargetRow>, sqlx::Error> 
         .collect())
 }
 
+/// Okuma seridi (ADR-051): katalog yenileme istegi; acik is varsa yenisi acilmaz.
+pub async fn request_catalog_refresh(
+    pool: &PgPool,
+    target: i64,
+    by: &str,
+) -> Result<bool, sqlx::Error> {
+    let done = sqlx::query(
+        "INSERT INTO read_jobs (kind, target_system_id, requested_by) \
+         VALUES ('catalog_refresh', $1, $2) ON CONFLICT DO NOTHING",
+    )
+    .bind(target)
+    .bind(by)
+    .execute(pool)
+    .await?;
+    Ok(done.rows_affected() == 1)
+}
+
+/// Hedef basina son katalog yenileme isi: durum anahtari + zaman + sonuc.
+pub async fn last_catalog_refresh(
+    pool: &PgPool,
+    time_zone: &str,
+) -> Result<Vec<(i64, String, String, String)>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT DISTINCT ON (target_system_id) target_system_id, status, \
+         to_char(COALESCE(finished_at, started_at, created_at) AT TIME ZONE $1, 'YYYY-MM-DD HH24:MI'), \
+         COALESCE(result, '') FROM read_jobs WHERE kind = 'catalog_refresh' \
+         ORDER BY target_system_id, created_at DESC",
+    )
+    .bind(time_zone)
+    .fetch_all(pool)
+    .await
+}
+
 // ADR-024: saklama ve silme onayi hedef basina; konteyner ayni hedefin OU/COS'u (FK).
 pub async fn save_target(pool: &PgPool, t: &TargetRow) -> Result<(), SaveError> {
     if t.retention_days < 0 || t.password_reset_delay_days < 0 {

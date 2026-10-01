@@ -125,6 +125,10 @@ GRANT UPDATE (password_enc, issued_at, error) ON first_passwords TO {worker};
 GRANT SELECT ON used_names TO {backend}, {worker};
 GRANT INSERT (name, kind, former_identity_id) ON used_names TO {worker};
 GRANT UPDATE (released_at, release_reason) ON used_names TO {backend};
+GRANT SELECT ON read_jobs TO {backend}, {worker};
+GRANT INSERT (kind, target_system_id, requested_by) ON read_jobs TO {backend};
+GRANT UPDATE (status, started_at, finished_at, result) ON read_jobs TO {worker};
+GRANT INSERT (kind, target_system_id) ON read_jobs TO {worker};
 ";
 
 const IDENTITY_OPERATOR_COLUMNS: &str = "given_name, surname, employee_number, mobile_phone, \
