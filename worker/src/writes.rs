@@ -16,8 +16,7 @@ use crate::queue::{self, ClaimedJob, Intent, IntentError};
 pub enum OperationClass {
     Destructive,
     Grant,
-    /// Ilk parola teslimi (3d) uretir
-    #[allow(dead_code)]
+    /// Ilk parola teslimi (ADR-085)
     FirstPassword,
     Attribute,
 }
@@ -75,6 +74,12 @@ pub enum WriteOp {
     ResetPassword {
         dn: String,
     },
+    /// Ilk parola (ADR-019/085): okunabilir parola; isaret acikken pwdLastSet 0. Detaya girmez.
+    SetFirstPassword {
+        dn: String,
+        password: String,
+        change_required: bool,
+    },
 }
 
 impl WriteOp {
@@ -89,6 +94,7 @@ impl WriteOp {
             WriteOp::MoveAccount { .. } => "ad.account.move",
             WriteOp::DeleteAccount { .. } => "ad.account.delete",
             WriteOp::ResetPassword { .. } => "ad.account.password_reset",
+            WriteOp::SetFirstPassword { .. } => "ad.account.first_password",
         }
     }
 
@@ -104,7 +110,9 @@ impl WriteOp {
             WriteOp::SetEnabled { dn, enabled } => {
                 format!("{{\"dn\":\"{}\",\"enabled\":{enabled}}}", q(dn))
             }
-            WriteOp::DeleteAccount { dn } | WriteOp::ResetPassword { dn } => {
+            WriteOp::DeleteAccount { dn }
+            | WriteOp::ResetPassword { dn }
+            | WriteOp::SetFirstPassword { dn, .. } => {
                 format!("{{\"dn\":\"{}\"}}", q(dn))
             }
             // Degerler yazilmaz: hassas kaynak (kimlik no) denetim kaydina girmez (docs/07)
@@ -303,6 +311,13 @@ mod tests {
         assert!(detail.contains("\\\"Ayşe\\\""), "{detail}");
         assert!(detail.contains("\"givenName\""), "{detail}");
         assert_eq!(op.event_type(), "ad.account.create");
+        let first = WriteOp::SetFirstPassword {
+            dn: "CN=x,DC=x".to_string(),
+            password: "Kf7m-Rq2x-Wn8d-Tz4p".to_string(),
+            change_required: true,
+        };
+        assert_eq!(first.detail_json(), "{\"dn\":\"CN=x,DC=x\"}");
+        assert_eq!(first.event_type(), "ad.account.first_password");
     }
 
     async fn audit_rows(pool: &PgPool) -> (i64, i64) {

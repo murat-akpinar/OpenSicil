@@ -47,9 +47,40 @@ pub fn decrypt(key: &[u8; KEY_LEN], data: &[u8]) -> Result<Vec<u8>, String> {
         .map_err(|_| "şifre çözme başarısız (yanlış anahtar ya da bozulmuş veri)".to_string())
 }
 
+// ADR-036/085: ilk parola gibi anahtar donusumune acik degerler basta surum baytiyla saklanir.
+pub const KEY_VERSION: u8 = 1;
+
+// Ikiz dosya: ilk parolayi yalnizca worker sifreler, backend cozer (ADR-085).
+#[allow(dead_code)]
+pub fn encrypt_versioned(key: &[u8; KEY_LEN], plaintext: &[u8]) -> Vec<u8> {
+    let mut out = vec![KEY_VERSION];
+    out.extend(encrypt(key, plaintext));
+    out
+}
+
+pub fn decrypt_versioned(key: &[u8; KEY_LEN], data: &[u8]) -> Result<Vec<u8>, String> {
+    match data.split_first() {
+        Some((&KEY_VERSION, rest)) => decrypt(key, rest),
+        Some((version, _)) => Err(format!("bilinmeyen anahtar sürümü: {version}")),
+        None => Err("şifreli veri boş".to_string()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn versioned_round_trips_and_rejects_unknown_version() {
+        let key = test_key();
+        let data = encrypt_versioned(&key, b"Kf7m-Rq2x");
+        assert_eq!(data[0], KEY_VERSION);
+        assert_eq!(decrypt_versioned(&key, &data).unwrap(), b"Kf7m-Rq2x");
+        let mut other = data.clone();
+        other[0] = 9;
+        assert!(decrypt_versioned(&key, &other).is_err());
+        assert!(decrypt_versioned(&key, b"").is_err());
+    }
 
     fn key_from_byte(fill: u8) -> [u8; KEY_LEN] {
         parse_key("AEAD_MASTER_KEY", &BASE64.encode([fill; KEY_LEN])).unwrap()

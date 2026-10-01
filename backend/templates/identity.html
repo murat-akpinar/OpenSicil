@@ -125,7 +125,14 @@
 </form>
 {% endif %}
 
-<h2 class="font-medium mb-2">Hesaplar ve hedefteki fark</h2>
+<div class="flex justify-between items-center mb-2">
+  <h2 class="font-medium">Hesaplar ve hedefteki fark</h2>
+  {% if can_first_password && !page.lifecycle.deleted %}
+  <form method="post" action="/identities/{{ page.person.id }}/first-password">
+    <button class="rounded px-3 py-1 text-sm" style="background:#a6e3a1; color:#1e1e2e;" type="submit" title="Yalnızca kullanılmamış hesaba verilir (ADR-046); bir kez gösterilir (ADR-036)">İlk parolayı ver</button>
+  </form>
+  {% endif %}
+</div>
 <table class="w-full text-sm mb-6">
   <thead><tr class="text-left" style="color:#a6adc8;"><th>Hedef</th><th>Hesap</th><th>Köken / mod</th><th>Uygulanan</th><th>Fark</th></tr></thead>
   <tbody>

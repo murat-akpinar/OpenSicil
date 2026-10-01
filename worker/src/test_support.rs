@@ -9,7 +9,14 @@ use std::path::Path;
 use sqlx::PgPool;
 
 pub async fn fresh_migrated_db() -> (PgPool, PgPool, String) {
-    let admin_url = std::env::var("DATABASE_URL").expect("DATABASE_URL testler için ayarlanmalı");
+    // Ilk okunan deger kalir: main.rs'nin run() testi DATABASE_URL'yi gecici DB'sine
+    // cevirir, sonra onu siler; es zamanli testler o anda yanlis DB'ye baglanmasin.
+    static ADMIN_URL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    let admin_url = ADMIN_URL
+        .get_or_init(|| {
+            std::env::var("DATABASE_URL").expect("DATABASE_URL testler için ayarlanmalı")
+        })
+        .clone();
     let admin_pool = crate::db::connect_pool(&admin_url)
         .await
         .expect("admin pool kurulamadı");

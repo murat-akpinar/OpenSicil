@@ -10,6 +10,7 @@ mod db;
 #[allow(dead_code)]
 mod desired_state;
 mod engine;
+mod first_password;
 mod heartbeat;
 mod mapping;
 // Ikiz dosya (backend ile birebir ayni); ekran etiketleri yalnizca backend'de kullanilir.
@@ -65,6 +66,19 @@ struct Env {
     ad_ca_file: Option<String>,
     // ADR-029: hassas kaynak (kimlik no, cep) eslemesi; kapaliyken satir reddedilir
     sensitive_mapping_enabled: bool,
+    // ADR-019: ilk paroladan sonra pwdLastSet 0; varsayilan acik
+    first_login_change_required: bool,
+}
+
+fn parse_bool_env(name: &str) -> Result<Option<bool>, String> {
+    match std::env::var(name).as_deref().map(str::trim) {
+        Ok("true") | Ok("1") => Ok(Some(true)),
+        Ok("false") | Ok("0") => Ok(Some(false)),
+        Ok(other) => Err(format!(
+            "worker: {name} true ya da false olmalı, '{other}' geldi"
+        )),
+        Err(_) => Ok(None),
+    }
 }
 
 // Ortak ayarlar acilista dogrulanir ve loglanir; backend'in satiriyla yan
@@ -74,22 +88,18 @@ fn load_env() -> Result<Env, String> {
     let database_url = std::env::var("DATABASE_URL")
         .map_err(|_| "worker: ortam değişkeni eksik: DATABASE_URL".to_string())?;
     let common = common_settings::CommonSettings::from_env().map_err(|e| format!("worker: {e}"))?;
-    let dry_run = match std::env::var("DRY_RUN").as_deref().map(str::trim) {
-        Ok("true") | Ok("1") => true,
-        Ok("false") | Ok("0") => false,
-        Ok(other) => {
-            return Err(format!(
-                "worker: DRY_RUN true ya da false olmalı, '{other}' geldi"
-            ))
-        }
-        Err(_) => return Err("worker: ortam değişkeni eksik: DRY_RUN".to_string()),
-    };
+    let dry_run = parse_bool_env("DRY_RUN")?
+        .ok_or_else(|| "worker: ortam değişkeni eksik: DRY_RUN".to_string())?;
+    let first_login_change_required =
+        parse_bool_env("FIRST_LOGIN_CHANGE_REQUIRED")?.unwrap_or(true);
     let aead_key = std::env::var("AEAD_MASTER_KEY")
         .map_err(|_| "worker: ortam değişkeni eksik: AEAD_MASTER_KEY".to_string())
         .and_then(|v| {
             crypto::parse_key("AEAD_MASTER_KEY", &v).map_err(|e| format!("worker: {e}"))
         })?;
-    println!("worker: ortak ayarlar: {common}");
+    println!(
+        "worker: ortak ayarlar: {common}; FIRST_LOGIN_CHANGE_REQUIRED={first_login_change_required}"
+    );
     if dry_run {
         println!("worker: KURU ÇALIŞTIRMA açık — hedefe hiçbir şey yazılmaz (ADR-054)");
     }
@@ -100,6 +110,7 @@ fn load_env() -> Result<Env, String> {
         aead_key,
         ad_ca_file: std::env::var("AD_CA_FILE").ok(),
         sensitive_mapping_enabled: common.sensitive_mapping_enabled,
+        first_login_change_required,
     })
 }
 
@@ -260,6 +271,7 @@ async fn process_job(pool: &PgPool, job: &queue::ClaimedJob, worker_id: &str, en
         ad_ca_file: env.ad_ca_file.as_deref(),
         worker_id,
         sensitive_mapping_enabled: env.sensitive_mapping_enabled,
+        first_login_change_required: env.first_login_change_required,
     };
     let run = engine::run_job(pool, job, &engine_env).await;
     let (outcome, unreachable) = match run {

@@ -1,6 +1,7 @@
 // --- START FEATURE: identity-registration ---
 // Kimlik kayit formu, kisi sayfasi ve "tekrar dene" rotalari (F-12, ADR-078).
-// Yetki: kayit hr/admin, tekrar dene hr/helpdesk/admin, sayfa her operator.
+// Yetki: kayit ve tekrar dene hr/admin, sayfa her operator; yardim masasi yalnizca
+// ilk parola ister (ADR-019/085, first_password.rs).
 
 use askama::Template;
 use axum::extract::{Form, FromRequestParts, Path, State};
@@ -17,7 +18,7 @@ use crate::operator_session::Operator;
 use crate::web::{render, AppState};
 
 const REGISTER_AUTHORITIES: &[&str] = &["hr", "admin"];
-const RETRY_AUTHORITIES: &[&str] = &["hr", "helpdesk", "admin"];
+const RETRY_AUTHORITIES: &[&str] = &["hr", "admin"];
 
 pub struct OperatorSession(pub Operator);
 
@@ -549,6 +550,7 @@ struct PersonTemplate {
     page: PersonPage,
     can_retry: bool,
     can_edit_names: bool,
+    can_first_password: bool,
 }
 
 async fn new_form(OperatorSession(op): OperatorSession, State(state): State<AppState>) -> Response {
@@ -653,6 +655,7 @@ async fn show(
             page,
             can_retry: allowed(&op, RETRY_AUTHORITIES),
             can_edit_names: allowed(&op, REGISTER_AUTHORITIES),
+            can_first_password: allowed(&op, crate::first_password::AUTHORITIES),
         }),
         Ok(None) => (StatusCode::NOT_FOUND, "Kimlik bulunamadı.").into_response(),
         Err(e) => internal("kişi sayfası okunamadı", e),

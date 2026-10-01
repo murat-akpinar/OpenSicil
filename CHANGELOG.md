@@ -59,4 +59,5 @@
 - Süreli ek rol tarih dolunca zamanlayıcıyla kalkar (ADR-020, F-37)
 - Ayrılışta gecikmeli parola sıfırlama, zamanlayıcı penceresi (ADR-033)
 - Yaklaşan bitişler listesi (F-36)
+- Ilk parola teslimi — AEAD ile şifreli, bir kez gösterim, yardım masası yetkisi, ilk girişte değiştirme ayarı (ADR-019/036/046/085)
 

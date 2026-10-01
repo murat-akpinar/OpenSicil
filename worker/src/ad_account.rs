@@ -22,6 +22,9 @@ const PASSWORD_LEN: usize = 20;
 // 1601-01-01 ile 1970-01-01 arasi saniye; accountExpires 100 ns birimli FILETIME
 const FILETIME_EPOCH_OFFSET: i64 = 11_644_473_600;
 const FILETIME_PER_SECOND: i64 = 10_000_000;
+const READABLE_PASSWORD_LEN: usize = 16;
+const READABLE_GROUP_LEN: usize = 4;
+const READABLE_ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
 const PASSWORD_CLASSES: [&[u8]; 4] = [
     b"ABCDEFGHJKLMNPQRSTUVWXYZ",
     b"abcdefghjkmnpqrstuvwxyz",
@@ -60,6 +63,32 @@ pub fn random_password() -> String {
         })
         .collect()
 }
+
+// --- START FEATURE: first-password ---
+// ADR-056/085: okunabilir ilk parola `Kf7m-Rq2x-Wn8d-Tz4p` — 16 karakter, dort dortlu;
+// 0/O/o/1/l/I yok; her siniftan (buyuk, kucuk, rakam) en az bir karakter.
+pub fn readable_password() -> String {
+    loop {
+        let mut bytes = [0u8; READABLE_PASSWORD_LEN];
+        OsRng.fill_bytes(&mut bytes);
+        let chars: Vec<char> = bytes
+            .iter()
+            .map(|b| READABLE_ALPHABET[*b as usize % READABLE_ALPHABET.len()] as char)
+            .collect();
+        let has = |f: fn(&char) -> bool| chars.iter().any(f);
+        if has(char::is_ascii_uppercase)
+            && has(char::is_ascii_lowercase)
+            && has(char::is_ascii_digit)
+        {
+            return chars
+                .chunks(READABLE_GROUP_LEN)
+                .map(|g| g.iter().collect::<String>())
+                .collect::<Vec<_>>()
+                .join("-");
+        }
+    }
+}
+// --- END FEATURE: first-password ---
 
 // docs/05 CN kurali: "{given} {surname}", OU'da cakisirsa "{given} {surname} ({username})";
 // 64'u asarsa ad-soyad kesilir, parantez korunur.
@@ -210,21 +239,37 @@ impl TargetWriter for AdWriter<'_> {
                 .success()
                 .map(|_| ())
                 .map_err(ad::classify),
-            WriteOp::ResetPassword { dn } => reset_password(self.ldap, dn).await,
+            // ADR-033: kimsenin bilmedigi rastgele parola + pwdLastSet 0; parola hic saklanmaz
+            WriteOp::ResetPassword { dn } => {
+                set_password(self.ldap, dn, &random_password(), true).await
+            }
+            WriteOp::SetFirstPassword {
+                dn,
+                password,
+                change_required,
+            } => set_password(self.ldap, dn, password, *change_required).await,
         }
     }
 }
 
-// ADR-033: kimsenin bilmedigi rastgele parola + pwdLastSet 0; parola hic saklanmaz.
-async fn reset_password(ldap: &mut Ldap, dn: &str) -> Result<(), WriteError> {
-    let password = random_password();
-    let mods = vec![
-        Mod::Replace(
-            b"unicodePwd".to_vec(),
-            HashSet::from([unicode_pwd(&password)]),
-        ),
-        Mod::Replace(b"pwdLastSet".to_vec(), HashSet::from([b"0".to_vec()])),
-    ];
+// Parola yazilir; `change_required` ise pwdLastSet 0 (ilk giriste degistir, ADR-009/019),
+// degilse AD'nin verdigi zaman damgasi kalir.
+async fn set_password(
+    ldap: &mut Ldap,
+    dn: &str,
+    password: &str,
+    change_required: bool,
+) -> Result<(), WriteError> {
+    let mut mods = vec![Mod::Replace(
+        b"unicodePwd".to_vec(),
+        HashSet::from([unicode_pwd(password)]),
+    )];
+    if change_required {
+        mods.push(Mod::Replace(
+            b"pwdLastSet".to_vec(),
+            HashSet::from([b"0".to_vec()]),
+        ));
+    }
     ldap.modify(dn, mods)
         .await
         .map_err(ad::classify)?
@@ -401,6 +446,20 @@ async fn change_member(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn readable_password_is_four_groups_without_confusable_chars() {
+        for _ in 0..50 {
+            let p = readable_password();
+            let groups: Vec<&str> = p.split('-').collect();
+            assert_eq!(groups.len(), 4, "{p}");
+            assert!(groups.iter().all(|g| g.len() == 4), "{p}");
+            assert!(!p.chars().any(|c| "0Oo1lI".contains(c)), "{p}");
+            assert!(p.chars().any(|c| c.is_ascii_uppercase()), "{p}");
+            assert!(p.chars().any(|c| c.is_ascii_lowercase()), "{p}");
+            assert!(p.chars().any(|c| c.is_ascii_digit()), "{p}");
+        }
+    }
 
     #[test]
     fn split_dn_respects_escaped_commas() {

@@ -79,6 +79,8 @@ pub async fn run() -> ExitCode {
 // - used_names: worker yakar (silmede), backend serbest birakir (ADR-035)
 // - attribute_mappings: backend yazar, worker okur ve izinli listeyle dogrular
 //   (ADR-029: liste veritabaninda degil worker kodunda)
+// - first_passwords: backend ister ve gosterince bosaltir; sifreli parolayi ve
+//   red nedenini yalnizca worker yazar (ADR-036/085)
 const SERVICE_GRANTS: &str = "\
 GRANT SELECT ON _sqlx_migrations TO {backend}, {worker};
 GRANT SELECT, INSERT, UPDATE, DELETE ON bootstrap_account, bootstrap_sessions, app_settings, \
@@ -114,6 +116,10 @@ next_attempt_at, locked_by, locked_until, retry_requested, last_error, result, f
 ON jobs TO {worker};
 GRANT SELECT, INSERT, UPDATE, DELETE ON attribute_mappings TO {backend};
 GRANT SELECT ON attribute_mappings TO {worker};
+GRANT SELECT ON first_passwords TO {backend}, {worker};
+GRANT INSERT (identity_id, target_system_id, requested_by), UPDATE (password_enc, shown_at) \
+ON first_passwords TO {backend};
+GRANT UPDATE (password_enc, issued_at, error) ON first_passwords TO {worker};
 GRANT SELECT ON used_names TO {backend}, {worker};
 GRANT INSERT (name, kind, former_identity_id) ON used_names TO {worker};
 GRANT UPDATE (released_at, release_reason) ON used_names TO {backend};

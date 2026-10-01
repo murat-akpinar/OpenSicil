@@ -8,6 +8,7 @@ mod db;
 // 3a motoru ve 3f onizlemesi tuketene kadar yalnizca durum turetme kullanilir (ADR-038).
 #[allow(dead_code)]
 mod desired_state;
+mod first_password;
 mod health;
 mod identity;
 mod identity_web;

@@ -16,6 +16,7 @@ use crate::ad_account::{self, AdWriter};
 use crate::desired_state::{
     desired_state, effective_manager, AccountPresence, Container, DesiredState, LifecycleState,
 };
+use crate::first_password;
 use crate::mapping;
 use crate::model::{self, JobInput, LinkRow};
 use crate::queue::ClaimedJob;
@@ -30,6 +31,8 @@ pub struct EngineEnv<'a> {
     pub worker_id: &'a str,
     /// ADR-029: hassas kaynak eslemesi; kapaliyken satir mudahaledir
     pub sensitive_mapping_enabled: bool,
+    /// ADR-019: ilk paroladan sonra pwdLastSet 0 (ilk giriste degistir)
+    pub first_login_change_required: bool,
 }
 
 // ADR-052: hedefe ulasilamamasi deneme tuketmez; nesne duzeyi hata tuketir;
@@ -525,7 +528,8 @@ async fn reconcile_existing(
     let attrs = sync_attributes(c, ldap, &dn).await?;
     let expires = sync_account_expires(c, ldap, &dn).await?;
     let reset = reset_password_if_due(c, ldap, &dn, link).await?;
-    let expires = format!("{expires}{reset}");
+    let first = issue_first_password(c, ldap, &dn, link).await?;
+    let expires = format!("{expires}{reset}{first}");
     if applied == Applied::DryRun || c.env.mode.dry_run {
         return Ok(format!(
             "kuru çalıştırma, uygulanacaktı: {note}{groups}{attrs}{expires} ({dn})"
@@ -570,6 +574,63 @@ async fn reset_password_if_due(
     .map_err(|e| JobError::Failed(format!("parola sıfırlama işareti yazılamadı: {e}")))?;
     Ok(", parola sıfırlandı".to_string())
 }
+
+// --- START FEATURE: first-password ---
+// ADR-046/085: bekleyen istek varsa hesap "kullanilmamis" kuralindan gecer, okunabilir
+// parola yazilir ve sifreli olarak istege birakilir; red nedeni istege yazilir.
+async fn issue_first_password(
+    c: &AdJob<'_>,
+    ldap: &mut Ldap,
+    dn: &str,
+    link: &LinkRow,
+) -> Result<String, JobError> {
+    let Some(request) = first_password::pending(c.pool, c.job.identity_id, c.job.target_system_id)
+        .await
+        .map_err(JobError::Failed)?
+    else {
+        return Ok(String::new());
+    };
+    let logon_attrs = ["lastLogonTimestamp", "pwdLastSet"];
+    let read_first = |attrs: &HashMap<String, Vec<String>>, name: &str| {
+        attrs.get(name).and_then(|v| v.first()).cloned()
+    };
+    let before = ad_account::read_attributes(ldap, dn, &logon_attrs).await?;
+    let unused = first_password::account_unused(
+        read_first(&before, "lastLogonTimestamp").as_deref(),
+        read_first(&before, "pwdLastSet").as_deref(),
+        link,
+    );
+    let reject = |reason: &'static str| async move {
+        first_password::reject(c.pool, request, reason)
+            .await
+            .map_err(JobError::Failed)?;
+        Ok(format!(", ilk parola reddedildi: {reason}"))
+    };
+    if !unused {
+        return reject(first_password::REJECT_USED).await;
+    }
+    let password = ad_account::readable_password();
+    let op = WriteOp::SetFirstPassword {
+        dn: dn.to_string(),
+        password: password.clone(),
+        change_required: c.env.first_login_change_required,
+    };
+    if apply(c, ldap, op, OperationClass::FirstPassword).await? == Applied::DryRun {
+        return reject(first_password::REJECT_DRY_RUN).await;
+    }
+    let stamp = match c.env.first_login_change_required {
+        true => None,
+        false => read_first(
+            &ad_account::read_attributes(ldap, dn, &["pwdLastSet"]).await?,
+            "pwdLastSet",
+        ),
+    };
+    first_password::issue(c.pool, c.env.aead_key, request, &password, stamp.as_deref())
+        .await
+        .map_err(JobError::Failed)?;
+    Ok(", ilk parola verildi".to_string())
+}
+// --- END FEATURE: first-password ---
 
 // Astlar icin ayni hedefe tek kimlik oncelikli is; acik is varsa yenisi acilmaz.
 async fn enqueue_subordinates(c: &AdJob<'_>) -> Result<(), JobError> {
@@ -972,6 +1033,185 @@ mod tests {
     use super::*;
     use crate::test_support;
 
+    // ADR-019/046/085: kuru modda red; acik modda pwdLastSet 0; kapali modda damga
+    // baglantiya yazilir ve parola gercekten bind eder; kullanilmis hesap reddedilir.
+    #[tokio::test]
+    #[ignore = "lab Samba AD gerektirir: AD_LAB_URL, AD_LAB_BIND_DN, AD_LAB_PASSWORD, AD_CA_FILE ile çalıştır"]
+    async fn issues_first_password_in_lab_only_to_unused_account() {
+        let var = |n: &str| std::env::var(n).unwrap_or_else(|_| panic!("{n} ayarlanmalı"));
+        let (admin_pool, pool, db_name) = test_support::fresh_migrated_db().await;
+        let seed = test_support::seed_example_model(&pool).await;
+        let key = [7u8; crate::crypto::KEY_LEN];
+        let cfg = test_support::configure_lab_ad(
+            &pool,
+            &key,
+            &var("AD_LAB_URL"),
+            &var("AD_LAB_BIND_DN"),
+            &var("AD_LAB_PASSWORD"),
+            &var("AD_CA_FILE"),
+        )
+        .await;
+        test_support::point_model_at_real_catalog(&pool, &seed, &cfg).await;
+        test_support::delete_lab_accounts(&cfg, "parola.test*").await;
+        sqlx::query("UPDATE identities SET given_name = 'Parola', surname = $2 WHERE id = $1")
+            .bind(seed.identity)
+            .bind(format!("Test{}", std::process::id() % 100_000))
+            .execute(&pool)
+            .await
+            .unwrap();
+        let job = ClaimedJob {
+            id: test_support::enqueue(&pool, seed.identity, seed.ad, 1).await,
+            identity_id: seed.identity,
+            target_system_id: seed.ad,
+            priority: 1,
+            attempts: 0,
+        };
+        let job = crate::queue::claim(&pool, "w1", &[])
+            .await
+            .unwrap()
+            .unwrap_or(job);
+        let ca = var("AD_CA_FILE");
+        let env = |dry_run: bool, change_required: bool| EngineEnv {
+            time_zone: "Europe/Istanbul",
+            mode: Mode { dry_run },
+            aead_key: &key,
+            ad_ca_file: Some(&ca),
+            worker_id: "w1",
+            sensitive_mapping_enabled: false,
+            first_login_change_required: change_required,
+        };
+        let live = run_job(&pool, &job, &env(false, true)).await.unwrap();
+        assert!(live.starts_with("hesap açıldı"), "{live}");
+        let request = || {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_scalar::<_, i64>(
+                    "INSERT INTO first_passwords (identity_id, target_system_id, requested_by) \
+                     VALUES ($1, $2, 'ik') RETURNING id",
+                )
+                .bind(seed.identity)
+                .bind(seed.ad)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+            }
+        };
+        let outcome = |id: i64| {
+            let pool = pool.clone();
+            async move {
+                let (enc, error): (Option<Vec<u8>>, Option<String>) =
+                    sqlx::query_as("SELECT password_enc, error FROM first_passwords WHERE id = $1")
+                        .bind(id)
+                        .fetch_one(&pool)
+                        .await
+                        .unwrap();
+                (
+                    enc.map(|e| {
+                        String::from_utf8(crate::crypto::decrypt_versioned(&key, &e).unwrap())
+                            .unwrap()
+                    }),
+                    error,
+                )
+            }
+        };
+
+        // kuru calistirma: istek hemen reddedilir, parola yazilmaz
+        let dry_request = request().await;
+        let dry = run_job(&pool, &job, &env(true, true)).await.unwrap();
+        assert!(dry.contains("ilk parola reddedildi: kuru"), "{dry}");
+        assert_eq!(
+            outcome(dry_request).await,
+            (None, Some(first_password::REJECT_DRY_RUN.to_string()))
+        );
+
+        // acik mod: parola yazilir, pwdLastSet 0
+        let open_request = request().await;
+        let issued = run_job(&pool, &job, &env(false, true)).await.unwrap();
+        assert!(issued.contains("ilk parola verildi"), "{issued}");
+        let (password, error) = outcome(open_request).await;
+        let password = password.expect("şifreli parola yazılmalı");
+        assert!(error.is_none());
+        assert_eq!(password.len(), 19, "{password}");
+        assert_eq!(password.split('-').count(), 4, "{password}");
+        let guid: String =
+            sqlx::query_scalar("SELECT external_id FROM account_links WHERE identity_id = $1")
+                .bind(seed.identity)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let mut ldap = ad::connect(&cfg).await.unwrap();
+        let account = ad_account::find_by_guid(&mut ldap, &guid)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(account.pwd_last_set.as_deref(), Some("0"));
+
+        // kapali mod: damga baglantiya yazilir, parola gercekten bind eder
+        let closed_request = request().await;
+        let issued = run_job(&pool, &job, &env(false, false)).await.unwrap();
+        assert!(issued.contains("ilk parola verildi"), "{issued}");
+        let (password, _) = outcome(closed_request).await;
+        let password = password.expect("şifreli parola yazılmalı");
+        let stamp: Option<String> = sqlx::query_scalar(
+            "SELECT first_password_pwd_last_set FROM account_links WHERE identity_id = $1",
+        )
+        .bind(seed.identity)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let account = ad_account::find_by_guid(&mut ldap, &guid)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(stamp.as_deref().is_some_and(|s| s != "0"), "{stamp:?}");
+        assert_eq!(account.pwd_last_set, stamp);
+        let bound = ldap
+            .simple_bind(&account.dn, &password)
+            .await
+            .unwrap()
+            .success();
+        assert!(bound.is_ok(), "teslim edilen parola bind etmeli: {bound:?}");
+        ldap.unbind().await.unwrap();
+
+        // kullanilmis hesap: damga tutmuyor (kisi parolasini degistirmis) → red
+        sqlx::query(
+            "UPDATE account_links SET first_password_pwd_last_set = '1' WHERE identity_id = $1",
+        )
+        .bind(seed.identity)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let used_request = request().await;
+        let rejected = run_job(&pool, &job, &env(false, false)).await.unwrap();
+        assert!(
+            rejected.contains("ilk parola reddedildi: hesap"),
+            "{rejected}"
+        );
+        assert_eq!(
+            outcome(used_request).await,
+            (None, Some(first_password::REJECT_USED.to_string()))
+        );
+        let (intents, leaked): (i64, i64) = sqlx::query_as(
+            "SELECT COUNT(*) FILTER (WHERE operation_class = 'first_password'), \
+             COUNT(*) FILTER (WHERE detail::text LIKE $2) FROM audit_log \
+             WHERE event_type = 'ad.account.first_password' AND identity_id = $1",
+        )
+        .bind(seed.identity)
+        .bind(format!("%{password}%"))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            (intents, leaked),
+            (2, 0),
+            "iki niyet, parola denetime girmez"
+        );
+
+        test_support::delete_lab_accounts(&cfg, "parola.test*").await;
+        drop(pool);
+        test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
     #[test]
     fn membership_diff_only_touches_catalog_groups() {
         let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
@@ -1035,6 +1275,7 @@ mod tests {
             ad_ca_file: Some(&ca),
             worker_id: "w1",
             sensitive_mapping_enabled: false,
+            first_login_change_required: true,
         };
 
         let dry = run_job(&pool, &job, &env(true)).await.unwrap();

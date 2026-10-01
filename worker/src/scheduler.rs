@@ -15,6 +15,12 @@ use crate::engine::state_name;
 const LOCK_KEY: i64 = 0x6f70_656e_7369_6369;
 // ADR-016: tarihli gecis tek kimlik islemiyle ayni oncelikte.
 const TRANSITION_PRIORITY: i16 = 1;
+// ADR-036: gosterilmeyen ilk parola ve cevapsiz istek bu sure sonunda kapanir.
+const FIRST_PASSWORD_TTL: &str = "10 minutes";
+const FIRST_PASSWORD_UNSHOWN: &str =
+    "parola 10 dakika içinde gösterilmedi ve silindi; yeniden isteyin";
+const FIRST_PASSWORD_UNANSWERED: &str =
+    "worker 10 dakika içinde yanıt vermedi; işler listesine bakın ve yeniden isteyin";
 
 type LinkRow = (
     i64,
@@ -58,6 +64,7 @@ pub async fn tick(pool: &PgPool, time_zone: &str) -> Result<usize, String> {
     let mut opened = expire_additional_roles(&mut tx, time_zone).await?;
     opened += open_password_reset_jobs(&mut tx).await?;
     opened += open_retention_jobs(&mut tx).await?;
+    expire_first_passwords(&mut tx).await?;
     for row in rows {
         let (identity_id, target_system_id, applied) = (row.0, row.1, row.2.as_deref());
         let state = derived_state(&row)?;
@@ -107,6 +114,34 @@ async fn expire_additional_roles(
     .map_err(|e| format!("süresi dolan ek roller işlenemedi: {e}"))?;
     Ok(opened.rows_affected() as usize)
 }
+
+// --- START FEATURE: first-password ---
+// ADR-036/085: gosterilmeyen sifreli parola 10 dk sonra silinir; worker'in 10 dk icinde
+// cevaplamadigi istek de kapanir ki durum sayfasi sonsuza dek beklemesin.
+async fn expire_first_passwords(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+) -> Result<(), String> {
+    sqlx::query(
+        "UPDATE first_passwords SET password_enc = NULL, error = $1 \
+         WHERE password_enc IS NOT NULL AND issued_at < now() - $2::interval",
+    )
+    .bind(FIRST_PASSWORD_UNSHOWN)
+    .bind(FIRST_PASSWORD_TTL)
+    .execute(&mut **tx)
+    .await
+    .map_err(|e| format!("gösterilmeyen ilk parolalar silinemedi: {e}"))?;
+    sqlx::query(
+        "UPDATE first_passwords SET error = $1 \
+         WHERE issued_at IS NULL AND error IS NULL AND requested_at < now() - $2::interval",
+    )
+    .bind(FIRST_PASSWORD_UNANSWERED)
+    .bind(FIRST_PASSWORD_TTL)
+    .execute(&mut **tx)
+    .await
+    .map(|_| ())
+    .map_err(|e| format!("cevapsız ilk parola istekleri kapatılamadı: {e}"))
+}
+// --- END FEATURE: first-password ---
 
 // ADR-033: ayrilistan G gun sonra (acilde hemen) parola penceresi acilir; bu bir
 // durum gecisi degildir, applied_state esitken de is gerekir. Iptal (dogrulanmis
@@ -397,6 +432,67 @@ mod tests {
             1,
             "acil: hemen"
         );
+
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
+    // ADR-036/085: 10 dk gosterilmeyen parola silinir, cevapsiz istek kapanir; taze ve
+    // gosterilmis satirlara dokunulmaz.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn tick_expires_unshown_and_unanswered_first_passwords() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        let seed = crate::test_support::seed_example_model(&pool).await;
+        let insert = |age: &'static str, issued: bool, enc: bool, shown: bool| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_scalar::<_, i64>(
+                    "INSERT INTO first_passwords (identity_id, target_system_id, requested_by, \
+                     requested_at, issued_at, password_enc, shown_at) \
+                     VALUES ($1, $2, 'ik', now() - $3::interval, \
+                       CASE WHEN $4 THEN now() - $3::interval END, \
+                       CASE WHEN $5 THEN '\\x01aa'::bytea END, \
+                       CASE WHEN $6 THEN now() END) RETURNING id",
+                )
+                .bind(seed.identity)
+                .bind(seed.ad)
+                .bind(age)
+                .bind(issued)
+                .bind(enc)
+                .bind(shown)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+            }
+        };
+        let fresh = insert("1 minute", true, true, false).await;
+        let stale = insert("11 minutes", true, true, false).await;
+        let unanswered = insert("11 minutes", false, false, false).await;
+        let shown = insert("11 minutes", true, false, true).await;
+        tick(&pool, "Europe/Istanbul").await.unwrap();
+        let state = |id: i64| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_as::<_, (bool, Option<String>)>(
+                    "SELECT password_enc IS NOT NULL, error FROM first_passwords WHERE id = $1",
+                )
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+            }
+        };
+        assert_eq!(state(fresh).await, (true, None));
+        assert_eq!(
+            state(stale).await,
+            (false, Some(FIRST_PASSWORD_UNSHOWN.to_string()))
+        );
+        assert_eq!(
+            state(unanswered).await,
+            (false, Some(FIRST_PASSWORD_UNANSWERED.to_string()))
+        );
+        assert_eq!(state(shown).await, (false, None));
 
         drop(pool);
         crate::test_support::drop_temp_db(&admin_pool, &db_name).await;

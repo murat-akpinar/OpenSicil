@@ -55,6 +55,8 @@ pub struct LinkRow {
     pub applied_state: Option<String>,
     /// ADR-033: ayrilis parolasi bir kez rastgelelestirilir
     pub password_reset_at_departure: bool,
+    /// ADR-019 isaret kapaliyken worker'in son yazdigi ilk parolanin pwdLastSet'i
+    pub first_password_pwd_last_set: Option<String>,
 }
 
 const MAX_DEPARTMENT_DEPTH: i32 = 8;
@@ -419,7 +421,15 @@ async fn load_target_defaults(pool: &PgPool, target: i64) -> Result<TargetDefaul
     })
 }
 
-type LinkQueryRow = (String, Option<bool>, bool, String, Option<String>, bool);
+type LinkQueryRow = (
+    String,
+    Option<bool>,
+    bool,
+    String,
+    Option<String>,
+    bool,
+    Option<String>,
+);
 
 async fn load_link(
     pool: &PgPool,
@@ -428,7 +438,7 @@ async fn load_link(
 ) -> Result<(Option<AccountLink>, Option<LinkRow>), String> {
     let row: Option<LinkQueryRow> = sqlx::query_as(
         "SELECT origin, verified_unused, deletion_approved, external_id, applied_state, \
-         password_reset_at_departure \
+         password_reset_at_departure, first_password_pwd_last_set \
          FROM account_links WHERE identity_id = $1 AND target_system_id = $2",
     )
     .bind(identity_id)
@@ -436,7 +446,8 @@ async fn load_link(
     .fetch_optional(pool)
     .await
     .map_err(|e| format!("hesap bağlantısı okunamadı: {e}"))?;
-    let Some((origin, verified_unused, deletion_approved, external_id, applied_state, reset)) = row
+    let Some((origin, verified_unused, deletion_approved, external_id, applied_state, reset, pwd)) =
+        row
     else {
         return Ok((None, None));
     };
@@ -444,6 +455,7 @@ async fn load_link(
         external_id,
         applied_state,
         password_reset_at_departure: reset,
+        first_password_pwd_last_set: pwd,
     };
     Ok((
         Some(AccountLink {
