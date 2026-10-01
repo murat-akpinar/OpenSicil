@@ -172,6 +172,22 @@ async fn setup(pool: &PgPool) -> Result<Setup, sqlx::Error> {
     Ok(setup_steps([row.0, row.1, row.2, row.3], row.4))
 }
 
+/// Aciklama anahtari her zaman `<key>_hint`; derleme aninda birlestirilir ki
+/// iki metin anahtari ayri ayri yazilip birbirinden sapmasin.
+macro_rules! setup_step {
+    ($key:literal, $icon:literal, $done:expr, $links:expr) => {
+        SetupStep {
+            key: $key,
+            hint: concat!($key, "_hint"),
+            done: $done,
+            icon: $icon,
+            links: $links,
+            admin_only: false,
+            note: "",
+        }
+    };
+}
+
 /// Adim listesi; saf — DB olmadan sinanir.
 fn setup_steps(done: [bool; SETUP_STEPS], ad_target: Option<i64>) -> Setup {
     // Toplu sahiplenme hedefin mutabakat ekraninda. AD satiri migration'da
@@ -180,54 +196,42 @@ fn setup_steps(done: [bool; SETUP_STEPS], ad_target: Option<i64>) -> Setup {
         Some(id) => format!("/targets/{id}/reconcile"),
         None => "/reports".to_string(),
     };
-    let steps = vec![
-        SetupStep {
-            key: "setup.ad",
-            hint: "setup.ad_hint",
-            done: done[0],
-            icon: "ico-server",
-            links: vec![link("nav.settings", "/config")],
-            admin_only: true,
-            note: "",
-        },
-        SetupStep {
-            key: "setup.catalog",
-            hint: "setup.catalog_hint",
-            done: done[1],
-            icon: "ico-sitemap",
-            links: vec![link("nav.targets", "/targets")],
-            admin_only: false,
-            note: "",
-        },
-        SetupStep {
-            key: "setup.model",
-            hint: "setup.model_hint",
-            done: done[2],
-            icon: "ico-key",
-            links: vec![
-                link("nav.departments", "/departments"),
-                link("nav.roles", "/roles"),
-            ],
-            admin_only: false,
-            note: "",
-        },
-        SetupStep {
-            key: "setup.staff",
-            hint: "setup.staff_hint",
-            done: done[3],
-            icon: "ico-users",
-            links: vec![SetupLink {
-                key: "adopt.title",
-                href: adopt,
-            }],
-            admin_only: false,
-            // Ikinci yol CSV (ADR-103 madde 1 B1); ekrani Faz 5'te geliyor
-            note: "setup.staff_csv",
-        },
-    ];
+    let mut ad = setup_step!(
+        "setup.ad",
+        "ico-server",
+        done[0],
+        vec![link("nav.settings", "/config")]
+    );
+    ad.admin_only = true;
+    let mut staff = setup_step!(
+        "setup.staff",
+        "ico-users",
+        done[3],
+        vec![link("adopt.title", &adopt)]
+    );
+    // Ikinci yol CSV (ADR-103 madde 1 B1); ekrani Faz 5'te geliyor
+    staff.note = "setup.staff_csv";
     Setup {
         done: done.iter().all(|step| *step),
-        steps,
+        steps: vec![
+            ad,
+            setup_step!(
+                "setup.catalog",
+                "ico-sitemap",
+                done[1],
+                vec![link("nav.targets", "/targets")]
+            ),
+            setup_step!(
+                "setup.model",
+                "ico-key",
+                done[2],
+                vec![
+                    link("nav.departments", "/departments"),
+                    link("nav.roles", "/roles"),
+                ]
+            ),
+            staff,
+        ],
     }
 }
 

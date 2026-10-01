@@ -44,6 +44,7 @@
 - Gerçek Windows AD doğrulaması — üç ⊞ sorusu cevaplandı
 - Mutabakat gerçek Windows AD'ye karşı doğrulandı (29 Hogwarts hesabı)
 - Hogwarts test AD'si için departman ve rol modeli seed'i
+- Arayüz mockup bölümü kapanışı — güvenlik ve test
 
 ### Yeniden düzenleme
 
