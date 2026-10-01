@@ -30,6 +30,7 @@ mod operator_guard;
 mod operator_session;
 mod org;
 mod org_web;
+mod reconcile;
 mod search;
 mod server;
 mod settings;

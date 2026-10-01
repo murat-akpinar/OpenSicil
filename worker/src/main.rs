@@ -21,6 +21,7 @@ mod mapping_rules;
 mod model;
 mod queue;
 mod read_lane;
+mod reconcile;
 mod scheduler;
 #[cfg(test)]
 mod test_support;
@@ -165,6 +166,7 @@ async fn run_read_lane(pool: PgPool, env: Arc<Env>, stop: Arc<AtomicBool>) {
         };
         let outcome = match job.kind.as_str() {
             read_lane::CATALOG_REFRESH => refresh_catalog(&pool, &env, job.target_system_id).await,
+            read_lane::RECONCILE => run_reconcile(&pool, &env, job.target_system_id, job.id).await,
             other => Err(format!("bilinmeyen okuma işi türü: {other}")),
         };
         match &outcome {
@@ -177,9 +179,13 @@ async fn run_read_lane(pool: PgPool, env: Arc<Env>, stop: Arc<AtomicBool>) {
     }
 }
 
-// docs/03 katalog; ADR-061: DC'ye ulasilamiyorsa surec cikmaz, is basarisiz olur
-// ve bir sonraki istekte yeniden denenir. Kapsam hatasi da AD connector'ini baslatmaz.
-async fn refresh_catalog(pool: &PgPool, env: &Env, target: i64) -> Result<String, String> {
+// Okuma islerinin ortak acilisi: ayarlar → kapsam → baglanti → acilis kontrolleri
+// (kapsam DN → GUID, ADR-060). ADR-061: DC'ye ulasilamiyorsa surec cikmaz, is
+// basarisiz olur ve bir sonraki istekte yeniden denenir.
+async fn open_ad(
+    pool: &PgPool,
+    env: &Env,
+) -> Result<(ldap3::Ldap, ad::ManagedScope, ad::StartupChecks), String> {
     let cfg = ad::load_config(pool, &env.aead_key, env.ad_ca_file.as_deref())
         .await
         .map_err(|e| format!("AD ayarları okunamadı: {e}"))?
@@ -187,10 +193,47 @@ async fn refresh_catalog(pool: &PgPool, env: &Env, target: i64) -> Result<String
     let scope = ad::parse_scope(|name| std::env::var(name).ok())
         .map_err(|e| format!("yönetilen kapsam geçersiz: {e}"))?;
     let mut ldap = ad::connect(&cfg).await.map_err(|e| e.to_string())?;
-    // docs/05 acilis kontrolleri (kapsam DN → GUID, ADR-060); gecmezse katalog okunmaz
     let checks = ad::startup_checks(&mut ldap, &scope)
         .await
         .map_err(|e| e.to_string())?;
+    Ok((ldap, scope, checks))
+}
+
+// Mutabakat (ADR-099): yonetilen kullanici OU'larindaki hesaplar okunur ve
+// `account_links` ile karsilastirilir. Hedefe yazilmaz, denetim kaydina
+// dokunulmaz, fren sayaclari harcanmaz (ADR-051).
+async fn run_reconcile(
+    pool: &PgPool,
+    env: &Env,
+    target: i64,
+    read_job_id: i64,
+) -> Result<String, String> {
+    let (mut ldap, scope, _checks) = open_ad(pool, env).await?;
+    let accounts = ad::read_accounts(&mut ldap, &scope)
+        .await
+        .map_err(|e| e.to_string())?;
+    ldap.unbind().await.ok();
+
+    let links = reconcile::load_links(pool, target)
+        .await
+        .map_err(|e| format!("hesap bağlantıları okunamadı: {e}"))?;
+    let findings = reconcile::compare(&accounts, &links);
+    let counts = reconcile::store(pool, target, read_job_id, &findings)
+        .await
+        .map_err(|e| format!("mutabakat bulguları yazılamadı: {e}"))?;
+    Ok(format!(
+        "{} hesap tarandı: {} yönetiliyor, {} gözlemde, {} yönetilmeyen, {} kayıp",
+        accounts.len(),
+        counts.managed,
+        counts.observed,
+        counts.unmanaged,
+        counts.missing
+    ))
+}
+
+// docs/03 katalog.
+async fn refresh_catalog(pool: &PgPool, env: &Env, target: i64) -> Result<String, String> {
+    let (mut ldap, scope, checks) = open_ad(pool, env).await?;
     let snapshot = ad::read_catalog(&mut ldap, &scope, &checks)
         .await
         .map_err(|e| e.to_string())?;

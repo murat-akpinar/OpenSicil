@@ -145,6 +145,7 @@ pub fn routes() -> Router<AppState> {
         .merge(crate::used_names::routes())
         .merge(crate::mapping_web::routes())
         .merge(crate::upcoming::routes())
+        .merge(crate::reconcile::routes())
         .merge(crate::search::routes())
         .merge(crate::first_password::routes())
 }

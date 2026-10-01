@@ -176,6 +176,12 @@ mod tests {
             "upcomingkind",
             &["end", "role_end", "suspension_start", "suspension_return"],
         ),
+        (
+            "reconcilekind",
+            &["managed", "observed", "unmanaged", "missing"],
+        ),
+        ("readjob", &["queued", "running", "succeeded", "failed"]),
+        ("readjobkind", &["queued", "running", "succeeded", "failed"]),
     ];
 
     fn keys(lang: Lang) -> Vec<&'static str> {

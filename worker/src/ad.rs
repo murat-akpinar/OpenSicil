@@ -539,6 +539,86 @@ pub async fn read_catalog(
         forbidden,
     })
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DirectoryAccount {
+    pub guid: String,
+    pub sam: String,
+    pub display_name: Option<String>,
+    pub dn: String,
+    /// DN'in konteyner kismi: ilk `CN=…,` atilmis hali (ekranda "nerede duruyor").
+    pub container: String,
+    pub enabled: bool,
+}
+
+const ACCOUNT_ATTRS: [&str; 5] = [
+    "objectGUID",
+    "sAMAccountName",
+    "displayName",
+    "cn",
+    "userAccountControl",
+];
+
+// userAccountControl ACCOUNTDISABLE biti (docs/05); UAC 514 = 512 | 2 = pasif.
+const ACCOUNTDISABLE: u32 = 0x2;
+
+/// Hesabin bulundugu konteyner: `CN=Harry Potter,OU=Users,…` -> `OU=Users,…`.
+/// `split_dn` ile ayni kacis kuralini kullanmak gerekmez, yalnizca ilk kacisliz
+/// virgulden sonrasi alinir; kacisli virgul (`\,`) atlanir.
+fn container_of(dn: &str) -> String {
+    let bytes = dn.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\\' => i += 2,
+            b',' => return dn[i + 1..].trim_start().to_string(),
+            _ => i += 1,
+        }
+    }
+    String::new()
+}
+
+fn to_account(entry: &SearchEntry) -> Option<DirectoryAccount> {
+    let uac = text_attr(entry, "userAccountControl")
+        .and_then(|v| v.trim().parse::<u32>().ok())
+        .unwrap_or(0);
+    Some(DirectoryAccount {
+        guid: guid_to_string(&binary_attr(entry, "objectGUID")?)?,
+        sam: text_attr(entry, "sAMAccountName")?,
+        // displayName bos olabilir (gercek AD'de siklikla bos); cn her zaman var.
+        display_name: text_attr(entry, "displayName").or_else(|| text_attr(entry, "cn")),
+        container: container_of(&entry.dn),
+        dn: entry.dn.clone(),
+        enabled: uac & ACCOUNTDISABLE == 0,
+    })
+}
+
+/// Yonetilen kullanici OU'larindaki kisi hesaplarini okur (ADR-099 mutabakat).
+/// Kapsamin disina cikmaz: her OU kendi tabaninda, alt agac taranir.
+/// Hedefe hicbir sey yazmaz.
+pub async fn read_accounts(
+    ldap: &mut Ldap,
+    scope: &ManagedScope,
+) -> Result<Vec<DirectoryAccount>, WriteError> {
+    let mut accounts: Vec<DirectoryAccount> = Vec::new();
+    for ou in &scope.user_ous {
+        let entries = search(
+            ldap,
+            ou,
+            Scope::Subtree,
+            "(&(objectCategory=person)(objectClass=user))",
+            &ACCOUNT_ATTRS,
+        )
+        .await?;
+        for account in entries.iter().filter_map(to_account) {
+            // Ic ice kapsam verilmisse ayni hesap iki aramadan da gelebilir.
+            if !accounts.iter().any(|a| a.guid == account.guid) {
+                accounts.push(account);
+            }
+        }
+    }
+    Ok(accounts)
+}
 // --- END FEATURE: ad-connector ---
 
 #[cfg(test)]
@@ -638,6 +718,22 @@ mod tests {
         assert!(read_pem_certs("/yok/boyle/dosya").is_err());
     }
 
+    #[test]
+    fn container_strips_the_leaf_and_keeps_escaped_commas() {
+        assert_eq!(
+            container_of("CN=Harry Potter,OU=Users,OU=Hogwarts,DC=hogwarts,DC=local"),
+            "OU=Users,OU=Hogwarts,DC=hogwarts,DC=local"
+        );
+        // Kacisli virgul ad'in parcasi, konteyner siniri degil (docs/05 DN kacisi)
+        assert_eq!(
+            container_of("CN=Potter\\, Harry,OU=Users,DC=hogwarts,DC=local"),
+            "OU=Users,DC=hogwarts,DC=local"
+        );
+        assert_eq!(container_of("DC=hogwarts"), "");
+    }
+
+    // Mutabakat taramasi (ADR-099) lab Samba'ya karsi: seed.sh'in actigi
+    // `mevcut.personel` yonetilen kullanici OU'sunda gorunmeli.
     // Lab Samba AD gerektirir: docs/09 lab bolumu (gen-tls.sh + seed.sh) ve
     // AD_LAB_URL, AD_LAB_BIND_DN, AD_LAB_PASSWORD, AD_CA_FILE.
     #[tokio::test]
@@ -671,6 +767,27 @@ mod tests {
             ),
             "çözülemeyen kapsam DN'i connector'ı başlatmaz"
         );
+        // ADR-099: kapsamdaki hesaplar; katalog gruplari okur, bu hesaplari.
+        let accounts = read_accounts(&mut ldap, &scope)
+            .await
+            .expect("hesaplar okunamadı");
+        let seeded = accounts
+            .iter()
+            .find(|a| a.sam == "mevcut.personel")
+            .expect("seed.sh'in açtığı hesap kapsamda görünmeli");
+        assert!(seeded.guid.contains('-'), "GUID tireli: {}", seeded.guid);
+        assert!(
+            under_any(&seeded.dn, &scope.user_ous),
+            "hesap yönetilen OU'da olmalı: {}",
+            seeded.dn
+        );
+        assert_eq!(seeded.container, "OU=Personel,DC=opensicil,DC=lab");
+        // Kapsam disindaki OU'dan hesap gelmemeli (ADR-014)
+        assert!(
+            accounts.iter().all(|a| under_any(&a.dn, &scope.user_ous)),
+            "kapsam dışı hesap taramaya girmiş"
+        );
+
         let snapshot = read_catalog(&mut ldap, &scope, &checks)
             .await
             .expect("katalog okunamadı");

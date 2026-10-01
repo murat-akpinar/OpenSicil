@@ -23,9 +23,9 @@ const APPROVE_AUTHORITIES: &[&str] = &["admin"];
 
 // Ekranda iki satirdan biri dolu olur: hata ya da kayit sonrasi etki ozeti.
 #[derive(Default)]
-struct Notice {
-    error: String,
-    info: String,
+pub struct Notice {
+    pub error: String,
+    pub info: String,
 }
 
 impl Notice {
@@ -36,7 +36,7 @@ impl Notice {
         }
     }
 
-    fn info(text: String) -> Notice {
+    pub fn info(text: String) -> Notice {
         Notice {
             info: text,
             ..Notice::default()

@@ -94,4 +94,5 @@
 - Tek oturum mekanizması, yerel giriş kalıcı break-glass oldu (ADR-095)
 - Arayüz görsel yenilemesi — yüzey, tipografi, ikon ve boş durumlar
 - Arayüz mockup düzenine geçti — gösterge paneli ana sayfası ve üst bar araması
+- Mutabakat taraması ve ekranı — AD'deki hesaplar artık görünüyor
 

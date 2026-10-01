@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}{{ lang.t("reconcile.title") }} — OpenSicil{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1 class="h1">{{ lang.t("reconcile.title") }}</h1>
+    <p class="sub">{{ lang.t("reconcile.subtitle") }}</p>
+  </div>
+  {% if can_scan %}
+  <form method="post" action="/targets/{{ target_id }}/reconcile/scan">
+    <button class="btn" type="submit"><i class="ico ico-refresh" aria-hidden="true"></i>{{ lang.t("reconcile.scan") }}</button>
+  </form>
+  {% endif %}
+</div>
+
+{% if !notice.info.is_empty() %}<div class="alert alert-info mb-4">{{ notice.info }}</div>{% endif %}
+
+<div class="card mb-6 space-y-2">
+  <div class="card-head">
+    <span class="ico-tile"><i class="ico ico-refresh" aria-hidden="true"></i></span>
+    <h2 class="h2">{{ lang.t("reconcile.last_scan") }}</h2>
+  </div>
+  {% if v.scanned_at.is_empty() %}
+    <p class="meta">{{ lang.t("reconcile.never_scanned") }}</p>
+  {% else %}
+    <p class="meta"><span class="badge badge-{{ lang.key("readjobkind", v.status.as_str()) }}">{{ lang.key("readjob", v.status.as_str()) }}</span> {{ v.scanned_at }}</p>
+    {% if !v.result.is_empty() %}<p class="meta">{{ v.result }}</p>{% endif %}
+  {% endif %}
+</div>
+
+<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-6">
+  <div class="stat"><span class="meta">{{ lang.t("reconcilekind.unmanaged") }}</span><strong class="h1">{{ v.unmanaged }}</strong></div>
+  <div class="stat"><span class="meta">{{ lang.t("reconcilekind.managed") }}</span><strong class="h1">{{ v.managed }}</strong></div>
+  <div class="stat"><span class="meta">{{ lang.t("reconcilekind.observed") }}</span><strong class="h1">{{ v.observed }}</strong></div>
+  <div class="stat"><span class="meta">{{ lang.t("reconcilekind.missing") }}</span><strong class="h1">{{ v.missing }}</strong></div>
+</div>
+
+{% if v.rows.is_empty() %}
+<div class="empty">
+  <span class="ico-tile ico-tile-lg"><i class="ico ico-users" aria-hidden="true"></i></span>
+  <p class="empty-title">{{ lang.t("reconcile.empty") }}</p>
+  <p class="empty-hint">{{ lang.t("reconcile.empty_hint") }}</p>
+</div>
+{% else %}
+<div class="card overflow-x-auto p-0">
+  <table class="tbl">
+    <thead><tr>
+      <th>{{ lang.t("reconcile.account") }}</th>
+      <th>{{ lang.t("field.name") }}</th>
+      <th>{{ lang.t("reconcile.container") }}</th>
+      <th>{{ lang.t("reconcile.state") }}</th>
+      <th>{{ lang.t("reconcile.kind") }}</th>
+    </tr></thead>
+    <tbody>
+    {% for r in v.rows %}
+      <tr>
+        <td>
+          {% match r.identity_id %}
+            {% when Some with (id) %}<a href="/identities/{{ id }}">{{ r.account_name }}</a>
+            {% when None %}{{ r.account_name }}
+          {% endmatch %}
+        </td>
+        <td>{{ r.display_name }}</td>
+        <td class="meta">{{ r.container }}</td>
+        <td>
+          {% match r.enabled %}
+            {% when Some with (on) %}{% if on %}{{ lang.t("reconcile.enabled") }}{% else %}{{ lang.t("reconcile.disabled") }}{% endif %}
+            {% when None %}—
+          {% endmatch %}
+        </td>
+        <td><span class="badge badge-{% if r.kind == "missing" %}warn{% else if r.kind == "unmanaged" %}info{% else %}ok{% endif %}">{{ lang.key("reconcilekind", r.kind.as_str()) }}</span></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

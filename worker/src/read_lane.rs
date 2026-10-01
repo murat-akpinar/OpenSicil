@@ -11,6 +11,7 @@
 use sqlx::PgPool;
 
 pub const CATALOG_REFRESH: &str = "catalog_refresh";
+pub const RECONCILE: &str = "reconcile";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReadJob {
