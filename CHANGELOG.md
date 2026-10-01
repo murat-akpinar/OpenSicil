@@ -21,6 +21,10 @@
 - Arayüz kabuğu kutucuğu işaretlendi, durum notu
 - Zimbra v1'den sonraya alındı, todo.md'nin sonuna taşındı (ADR-090)
 
+### Düzeltmeler
+
+- Arayüz kökü 404 veriyordu, kabuğun / bağlantısı rotasızdı
+
 ### Testler
 
 - Faz 1a güvenlik ve test kapanışını tamamla

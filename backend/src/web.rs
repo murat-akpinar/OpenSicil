@@ -137,6 +137,10 @@ impl FromRequestParts<AppState> for BootstrapSession {
 
 pub fn routes() -> Router<AppState> {
     Router::new()
+        // Kabuktaki marka ve "Kimlikler" baglantisi, dil seciciden donus (local_path
+        // varsayilani) ve tarayiciya elle yazilan adres koke gider; login_form
+        // oturum varsa operator ana sayfasini, yoksa giris formunu verir
+        .route("/", get(login_form))
         .route("/login", get(login_form).post(login_submit))
         .route("/logout", post(logout))
         .route(
@@ -703,6 +707,59 @@ mod tests {
             body.contains("<html lang=\"en\">") && body.contains(">TR<"),
             "{body}"
         );
+
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
+    // Kabuktaki her sayfa "/" baglantisini tasir (marka + "Kimlikler"); rota yoksa
+    // gezinmenin ilk linki 404 verir.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn root_path_serves_the_operator_home_or_the_login_form() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        let operator = crate::operator_session::Operator {
+            subject: "sub-kok".to_string(),
+            username: "kok.operatoru".to_string(),
+            email: "kok@example.org".to_string(),
+            authorities: vec!["hr".to_string()],
+            lang: Lang::Tr,
+        };
+        let token = crate::operator_session::create_session(&pool, &operator)
+            .await
+            .unwrap();
+
+        let get_root = |app: Router, cookie: Option<String>| async move {
+            let mut builder = Request::builder().uri("/");
+            if let Some(cookie) = cookie {
+                builder = builder.header("cookie", cookie);
+            }
+            let response = app
+                .oneshot(builder.body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            let status = response.status();
+            let body = String::from_utf8(
+                axum::body::to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .unwrap()
+                    .to_vec(),
+            )
+            .unwrap();
+            (status, body)
+        };
+
+        let (status, body) = get_root(
+            test_app(pool.clone()),
+            Some(format!("{OPERATOR_SESSION_COOKIE_NAME}={token}")),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains("kok.operatoru"), "{body}");
+
+        let (status, body) = get_root(test_app(pool.clone()), None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains("name=\"password\""), "{body}");
 
         drop(pool);
         crate::test_support::drop_temp_db(&admin_pool, &db_name).await;

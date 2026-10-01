@@ -178,8 +178,9 @@ Aynı imajın `migrate` alt komutu, şema sahibi rolüyle **tek seferlik contain
 ## İlk giriş
 `.env`'de artık yalnızca DB bağlantısı ve AEAD ana anahtarı var; AD/Zimbra/OIDC ayarları web'den girilir ([ADR-068](decisions/068-yapilandirma-sayfasi-ve-bootstrap-hesabi.md)):
 
+0. `.env`'i `.env.example`'dan türetin. `PUBLIC_URL` **tarayıcının gördüğü adres** olmalıdır (OIDC redirect URI buradan üretilir): tek makinede `https://localhost`, ağdan girilecekse `https://<sunucu-ip>`. `TLS_CERT_PATH`/`TLS_KEY_PATH` sertifikası aynı adı/IP'yi SAN'ında taşımalı — tarayıcı CN'e bakmaz. Geliştirmede: `sh nginx/gen-tls.sh <ek-ad-ya-da-ip …>` (self-signed; tarayıcı CA'yı tanımadığı için ilk açılışta uyarı verir, `nginx/tls/cert.pem`'i işletim sistemine/tarayıcıya güvenilir olarak eklerseniz uyarı kalkar). `PUBLIC_URL` değişirse OIDC sağlayıcısındaki izinli redirect URI listesi de güncellenir.
 1. `docker compose up -d` (migrate önce çalışır, `bootstrap_account` tablosuna `admin`/`admin` seed edilir).
-2. `https://<PUBLIC_URL>/login` adresine `admin` / `admin` ile girin.
+2. `https://<PUBLIC_URL>/` ya da `/login` adresine `admin` / `admin` ile girin.
 3. İlk girişte eski parola sorulmadan yeni bir parola girmeniz istenir (en az 12 karakter). Bu hesap **yalnızca** Yapılandırma sayfasına erişebilir, başka hiçbir ekrana giremez.
 4. Yapılandırma sayfasından AD bağlantısını (host, bind DN, servis hesabı parolası), Zimbra bağlantısını (admin URL, admin parolası) ve OIDC ayarlarını (issuer, client id/secret) girin. Sır alanları boş bırakılırsa mevcut değer korunur; kaydedilen sırlar ekranda bir daha düz metin gösterilmez.
 5. En az bir `OpenSicil-Admins` OIDC girişi doğrulanınca yerel `admin` girişi gizlenir/pasifleşir ([ADR-068](decisions/068-yapilandirma-sayfasi-ve-bootstrap-hesabi.md) madde 3, [ADR-073](decisions/073-oidc-crate-secimi.md)). `/login` sayfasında Yapılandırma'dan kaydedilen OIDC ayarları tamsa "OIDC ile giriş" bağlantısı görünür; `/oidc/login` Keycloak'a (ya da başka bir OIDC sağlayıcısına) yönlendirir, yetkiler dönen `id_token`'ın `groups` claim'inden okunur.
