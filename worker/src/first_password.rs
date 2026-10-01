@@ -80,6 +80,7 @@ mod tests {
             applied_state: None,
             password_reset_at_departure: reset,
             first_password_pwd_last_set: stored.map(str::to_string),
+            observed: false,
         }
     }
 

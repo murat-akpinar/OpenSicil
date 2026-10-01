@@ -7,6 +7,7 @@
 // gruplar (yerlesik SID/RID, adminCount, OpenSicil yonetim gruplari ve bunlarin
 // ic ice uyeleri) kataloga hic girmez.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -427,6 +428,31 @@ async fn nested_members_of(
 }
 
 const GROUP_ATTRS: [&str; 4] = ["cn", "objectGUID", "objectSid", "adminCount"];
+
+// ADR-018 madde 4 / ADR-086: kullanicinin dogrudan ve ice ice uyeliklerinde yasakli grup
+// var mi; memberOf zinciri yukari yurunur (ziyaret kumesi), eslesme kurali gerekmez.
+pub async fn privileged_group(
+    ldap: &mut Ldap,
+    member_of: &[String],
+) -> Result<Option<String>, WriteError> {
+    let attrs = ["cn", "objectGUID", "objectSid", "adminCount", "memberOf"];
+    let mut queue: Vec<String> = member_of.to_vec();
+    let mut seen: HashSet<String> = HashSet::new();
+    while let Some(dn) = queue.pop() {
+        if !seen.insert(dn.to_ascii_lowercase()) {
+            continue;
+        }
+        let entries = search(ldap, &dn, Scope::Base, "(objectClass=group)", &attrs).await?;
+        let Some(entry) = entries.first() else {
+            continue;
+        };
+        if to_group(entry).is_some_and(|g| is_forbidden_seed(&g)) {
+            return Ok(text_attr(entry, "cn"));
+        }
+        queue.extend(entry.attrs.get("memberOf").cloned().unwrap_or_default());
+    }
+    Ok(None)
+}
 
 // ADR-060: domain kokundeki msDS-LogonTimeSyncInterval 0 ise lastLogonTimestamp
 // hic yazilmaz; "hic giris yapilmamis hesap" kontrolu (ilk parola, kayit iptali)

@@ -542,6 +542,8 @@ struct IdentityFormTemplate {
     /// Duzenleme: tarih, kimlik no ve kullanici adi alanlari gizli (ADR-083)
     editing: bool,
     action: String,
+    /// ADR-018: mevcut hesap ipucu yalnizca sahiplenme acikken gosterilir (ortak ayar)
+    ownership_enabled: bool,
 }
 
 #[derive(Template)]
@@ -583,6 +585,8 @@ async fn render_form(
                 Some(id) => format!("/identities/{id}/edit"),
                 None => "/identities".to_string(),
             },
+            ownership_enabled: crate::common_settings::CommonSettings::from_env()
+                .is_ok_and(|c| c.ownership_mode_enabled),
         }),
         Err(e) => internal("form seçenekleri okunamadı", e),
     }

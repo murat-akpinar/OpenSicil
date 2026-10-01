@@ -1,5 +1,6 @@
 mod ad;
 mod ad_account;
+mod adoption;
 mod catalog;
 mod common_settings;
 // backend kopyasiyla birebir ayni; worker su an yalnizca cozer, ilk parola (3d) sifreler.
@@ -68,6 +69,8 @@ struct Env {
     sensitive_mapping_enabled: bool,
     // ADR-019: ilk paroladan sonra pwdLastSet 0; varsayilan acik
     first_login_change_required: bool,
+    // ADR-018: sahiplenme (ortak ayar, varsayilan kapali)
+    ownership_mode_enabled: bool,
 }
 
 fn parse_bool_env(name: &str) -> Result<Option<bool>, String> {
@@ -111,6 +114,7 @@ fn load_env() -> Result<Env, String> {
         ad_ca_file: std::env::var("AD_CA_FILE").ok(),
         sensitive_mapping_enabled: common.sensitive_mapping_enabled,
         first_login_change_required,
+        ownership_mode_enabled: common.ownership_mode_enabled,
     })
 }
 
@@ -272,6 +276,7 @@ async fn process_job(pool: &PgPool, job: &queue::ClaimedJob, worker_id: &str, en
         worker_id,
         sensitive_mapping_enabled: env.sensitive_mapping_enabled,
         first_login_change_required: env.first_login_change_required,
+        ownership_mode_enabled: env.ownership_mode_enabled,
     };
     let run = engine::run_job(pool, job, &engine_env).await;
     let (outcome, unreachable) = match run {

@@ -143,8 +143,8 @@ OpenIAM'i kuran kurum **veri sorumlusudur**. Hukuki dayanak, aydınlatma metni v
 - [ ] Değişiklik seti eşiği aşılınca uygulama duruyor; başlatan kişi kendi değişikliğini onaylayamıyor.
 - [ ] Saatlik yıkıcı işlem sınırı aşılınca yeni kimliklerin yıkıcı işlem gerektiren işleri **bütünüyle** bekliyor; yalnızca ekleme ya da öznitelik gerektiren işler ve ilk parolalar devam ediyor ([ADR-050](decisions/050-verme-sayaci-ve-is-butunlugu.md)). İlk parola sınırı ayrı sayılıyor. Acil ayrılış kendi kotası kadar geçiyor, kota dolunca o da bekliyor ([ADR-016](decisions/016-hedef-olcek-ve-olcekte-calisma.md)).
 - [ ] Worker yeniden başlatılınca fren sayaçları sıfırlanmıyor; backend veritabanı rolü sayacı düşüremiyor ve sahte denetim satırıyla dolduramıyor.
-- [ ] Sahiplenme ayarı kapalıyken sahiplenme isteği reddediliyor. Açıkken `adminCount` dolu, yasaklı grup üyesi, kapsam dışı veya başka kimliğe bağlı hesap reddediliyor.
-- [ ] Gözlem modundaki bağlantıda motor hedef sisteme hiçbir şey yazmıyor.
+- [x] Sahiplenme ayarı kapalıyken sahiplenme isteği reddediliyor. Açıkken `adminCount` dolu, yasaklı grup üyesi, kapsam dışı veya başka kimliğe bağlı hesap reddediliyor. (2026-10-01: lab testi `adopts_existing_lab_account_in_observed_mode_after_rule_checks` — beşi de müdahale olarak reddediliyor)
+- [x] Gözlem modundaki bağlantıda motor hedef sisteme hiçbir şey yazmıyor. (2026-10-01: aynı lab testi, gözlem işinde yazma niyeti satırı yok)
 - [ ] Dosyada olmayan kimlik içe aktarmadan etkilenmiyor; hatalı satır içeren dosyadan hiçbir satır uygulanmıyor.
 - [ ] Veritabanı dökümünde, log'larda ve kuyruk tablosunda parola ve düz metin kimlik numarası yok (N-09).
 - [ ] Virgül, tırnak, yıldız ve parantez içeren adlarla hesap açma doğru DN'yi üretiyor, arama filtresi bozulmuyor.

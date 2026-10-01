@@ -147,7 +147,7 @@ impl WriteOp {
     }
 }
 
-fn json_quote(s: &str) -> String {
+pub fn json_quote(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 

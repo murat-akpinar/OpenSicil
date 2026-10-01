@@ -47,6 +47,8 @@ pub struct Person {
     pub end_date: Option<String>,
     pub employment_type: String,
     pub root_department_name: String,
+    /// ADR-018/086: sahiplenilecek AD hesabi; doluysa hesap acilmaz
+    pub existing_ad_account_hint: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -57,6 +59,8 @@ pub struct LinkRow {
     pub password_reset_at_departure: bool,
     /// ADR-019 isaret kapaliyken worker'in son yazdigi ilk parolanin pwdLastSet'i
     pub first_password_pwd_last_set: Option<String>,
+    /// ADR-018: gozlem modu — motor fark hesaplar ama uygulamaz
+    pub observed: bool,
 }
 
 const MAX_DEPARTMENT_DEPTH: i32 = 8;
@@ -146,6 +150,7 @@ type PersonRow = (
     String,
     Option<String>,
     String,
+    Option<String>,
 );
 
 async fn load_person(pool: &PgPool, identity_id: i64, time_zone: &str) -> Result<Person, String> {
@@ -153,7 +158,8 @@ async fn load_person(pool: &PgPool, identity_id: i64, time_zone: &str) -> Result
         "SELECT i.given_name, i.surname, i.employee_number, d.name, i.username, i.email, i.upn, \
          i.requested_username, i.name_conflict_override, i.mobile_phone, i.national_id_enc, \
          to_char(i.start_date, 'YYYY-MM-DD'), \
-         to_char((i.end_at AT TIME ZONE $2) - interval '1 day', 'YYYY-MM-DD'), i.employment_type \
+         to_char((i.end_at AT TIME ZONE $2) - interval '1 day', 'YYYY-MM-DD'), i.employment_type, \
+         i.existing_ad_account_hint \
          FROM identities i JOIN departments d ON d.id = i.department_id WHERE i.id = $1",
     )
     .bind(identity_id)
@@ -177,6 +183,7 @@ async fn load_person(pool: &PgPool, identity_id: i64, time_zone: &str) -> Result
         end_date: row.12,
         employment_type: row.13,
         root_department_name: String::new(),
+        existing_ad_account_hint: row.14,
     })
 }
 
@@ -429,6 +436,7 @@ type LinkQueryRow = (
     Option<String>,
     bool,
     Option<String>,
+    String,
 );
 
 async fn load_link(
@@ -438,7 +446,7 @@ async fn load_link(
 ) -> Result<(Option<AccountLink>, Option<LinkRow>), String> {
     let row: Option<LinkQueryRow> = sqlx::query_as(
         "SELECT origin, verified_unused, deletion_approved, external_id, applied_state, \
-         password_reset_at_departure, first_password_pwd_last_set \
+         password_reset_at_departure, first_password_pwd_last_set, mode \
          FROM account_links WHERE identity_id = $1 AND target_system_id = $2",
     )
     .bind(identity_id)
@@ -446,8 +454,16 @@ async fn load_link(
     .fetch_optional(pool)
     .await
     .map_err(|e| format!("hesap bağlantısı okunamadı: {e}"))?;
-    let Some((origin, verified_unused, deletion_approved, external_id, applied_state, reset, pwd)) =
-        row
+    let Some((
+        origin,
+        verified_unused,
+        deletion_approved,
+        external_id,
+        applied_state,
+        reset,
+        pwd,
+        mode,
+    )) = row
     else {
         return Ok((None, None));
     };
@@ -456,6 +472,7 @@ async fn load_link(
         applied_state,
         password_reset_at_departure: reset,
         first_password_pwd_last_set: pwd,
+        observed: mode == "observed",
     };
     Ok((
         Some(AccountLink {

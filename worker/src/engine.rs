@@ -13,6 +13,7 @@ use std::collections::HashMap;
 
 use crate::ad;
 use crate::ad_account::{self, AdWriter};
+use crate::adoption;
 use crate::desired_state::{
     desired_state, effective_manager, AccountPresence, Container, DesiredState, LifecycleState,
 };
@@ -33,6 +34,8 @@ pub struct EngineEnv<'a> {
     pub sensitive_mapping_enabled: bool,
     /// ADR-019: ilk paroladan sonra pwdLastSet 0 (ilk giriste degistir)
     pub first_login_change_required: bool,
+    /// ADR-018: sahiplenme; kapaliyken ipuculu kayit mudahaleye duser
+    pub ownership_mode_enabled: bool,
 }
 
 // ADR-052: hedefe ulasilamamasi deneme tuketmez; nesne duzeyi hata tuketir;
@@ -152,8 +155,18 @@ async fn reconcile_ad(c: &AdJob<'_>, ldap: &mut Ldap) -> Result<String, JobError
         return verify_cancellation(c, ldap, link).await;
     }
     match (&c.input.link_row, c.desired.account) {
-        (None, AccountPresence::Present { enabled }) => provision(c, ldap, enabled).await,
+        // ADR-018: ipucu doluysa hesap acilmaz, sahiplenilir
+        (None, AccountPresence::Present { enabled }) => {
+            match c.input.person.existing_ad_account_hint.as_deref() {
+                Some(hint) => adopt(c, ldap, hint).await,
+                None => provision(c, ldap, enabled).await,
+            }
+        }
         (None, presence) => Ok(format!("hesap yok ve açılmayacak: {presence:?}")),
+        // ADR-018/086: gozlem modunda hicbir sey uygulanmaz (fark ve yonetime alma 3e-2)
+        (Some(link), _) if link.observed => {
+            Ok("gözlem modunda: hiçbir şey uygulanmadı (ADR-018)".to_string())
+        }
         (Some(link), AccountPresence::Present { enabled }) => {
             let result = reconcile_existing(c, ldap, link, enabled).await?;
             // ADR-040: ayar yalnizca hesap yokken okunur; bagli hesap yonetilmeye devam
@@ -463,6 +476,84 @@ async fn provision(c: &AdJob<'_>, ldap: &mut Ldap, enabled: bool) -> Result<Stri
     ))
 }
 
+// --- START FEATURE: adoption ---
+// ADR-018/086: ipucundaki hesap kurallardan gecerse baglanti gozlem modunda yazilir;
+// her ret mudahaledir, nedeni is satirinda.
+async fn adopt(c: &AdJob<'_>, ldap: &mut Ldap, hint: &str) -> Result<String, JobError> {
+    let intervene = |why: String| Err(JobError::NeedsIntervention(why));
+    if !c.env.ownership_mode_enabled {
+        return intervene("sahiplenme kapalı (OWNERSHIP_MODE_ENABLED=false): ipucuyu kaldırın ya da ayarı açıp tekrar deneyin (ADR-018)".to_string());
+    }
+    if c.env.mode.dry_run {
+        return intervene("kuru çalıştırma açık: sahiplenme uygulanmadı, DRY_RUN kapanınca tekrar deneyin (ADR-054)".to_string());
+    }
+    let employee_attr = c
+        .mappings
+        .iter()
+        .find(|m| m.source_kind == "employee_number")
+        .map(|m| m.attribute.as_str());
+    let Some(cand) = adoption::find_by_sam(ldap, c.base_dn, hint, employee_attr).await? else {
+        return intervene(format!("ipucu bulunamadı: '{hint}' AD'de yok"));
+    };
+    if let Some(why) = adoption_violation(c, ldap, &cand).await? {
+        return intervene(format!("sahiplenme reddedildi: {why} ({})", cand.dn));
+    }
+    let person = &c.input.person;
+    let mismatch = !adoption::name_matches(
+        cand.given_name.as_deref(),
+        cand.surname.as_deref(),
+        &person.given_name,
+        &person.surname,
+    );
+    adoption::link_observed(
+        c.pool,
+        c.job.identity_id,
+        c.job.target_system_id,
+        &cand,
+        mismatch,
+    )
+    .await
+    .map_err(JobError::Failed)?;
+    let warning = if mismatch {
+        "; uyarı: hedefteki ad-soyad kimlikle uyuşmuyor (ADR-042)"
+    } else {
+        ""
+    };
+    Ok(format!("sahiplenildi (gözlem modu): {}{warning}", cand.dn))
+}
+
+// ADR-018 kosullari 2–5 sirayla; ilk ihlalin nedeni doner.
+async fn adoption_violation(
+    c: &AdJob<'_>,
+    ldap: &mut Ldap,
+    cand: &adoption::Candidate,
+) -> Result<Option<String>, JobError> {
+    let scope = ad::parse_scope(|n| std::env::var(n).ok()).map_err(JobError::Failed)?;
+    if !ad::under_any(&cand.dn, &scope.user_ous) {
+        return Ok(Some("yönetilen kullanıcı OU'larının dışında".to_string()));
+    }
+    let linked = adoption::linked_identity(c.pool, c.job.target_system_id, &cand.guid)
+        .await
+        .map_err(JobError::Failed)?;
+    if let Some(other) = linked {
+        return Ok(Some(format!("hesap #{other} kimliğine bağlı")));
+    }
+    if cand.admin_count {
+        return Ok(Some(
+            "adminCount dolu; yapışkandır, kurum temizleyip yeniden dener (docs/05)".to_string(),
+        ));
+    }
+    if let Some(group) = ad::privileged_group(ldap, &cand.member_of).await? {
+        return Ok(Some(format!("yasaklı grup üyesi: {group}")));
+    }
+    let employee_ok = adoption::employee_number_matches(
+        cand.employee_value.as_deref(),
+        c.input.person.employee_number.as_deref(),
+    );
+    Ok((!employee_ok).then(|| "sicil no hedefteki değerle uyuşmuyor".to_string()))
+}
+// --- END FEATURE: adoption ---
+
 async fn insert_link(c: &AdJob<'_>, guid: &str) -> Result<LinkRow, JobError> {
     sqlx::query(
         "INSERT INTO account_links (identity_id, target_system_id, external_id, origin, mode) \
@@ -479,6 +570,7 @@ async fn insert_link(c: &AdJob<'_>, guid: &str) -> Result<LinkRow, JobError> {
         applied_state: None,
         password_reset_at_departure: false,
         first_password_pwd_last_set: None,
+        observed: false,
     })
 }
 
@@ -1046,6 +1138,225 @@ mod tests {
     use super::*;
     use crate::test_support;
 
+    // ADR-018/086: ipuclu kayit hesap acmaz; retler mudahale (kapali, kuru, yok, kapsam disi,
+    // yasakli grup, sicil, baska kimlige bagli); kabulde gozlem baglantisi + ad uyarisi;
+    // sonraki iste hicbir sey uygulanmaz.
+    #[tokio::test]
+    #[ignore = "lab Samba AD gerektirir: AD_LAB_URL, AD_LAB_BIND_DN, AD_LAB_PASSWORD, AD_CA_FILE ile çalıştır"]
+    async fn adopts_existing_lab_account_in_observed_mode_after_rule_checks() {
+        let var = |n: &str| std::env::var(n).unwrap_or_else(|_| panic!("{n} ayarlanmalı"));
+        let (admin_pool, pool, db_name) = test_support::fresh_migrated_db().await;
+        let seed = test_support::seed_example_model(&pool).await;
+        let key = [7u8; crate::crypto::KEY_LEN];
+        let cfg = test_support::configure_lab_ad(
+            &pool,
+            &key,
+            &var("AD_LAB_URL"),
+            &var("AD_LAB_BIND_DN"),
+            &var("AD_LAB_PASSWORD"),
+            &var("AD_CA_FILE"),
+        )
+        .await;
+        test_support::point_model_at_real_catalog(&pool, &seed, &cfg).await;
+        // SAFETY: tek is parcacikli test; ayni degiskenleri eszamanli degistiren baska test yok.
+        unsafe {
+            std::env::set_var("AD_MANAGED_USER_OUS", "OU=Personel,DC=opensicil,DC=lab");
+            std::env::set_var("AD_MANAGED_GROUP_OUS", "OU=Gruplar,DC=opensicil,DC=lab");
+        }
+        let mut ldap = ad::connect(&cfg).await.unwrap();
+        let base = ad::base_dn(&mut ldap).await.unwrap();
+        let existing = adoption::find_by_sam(&mut ldap, &base, "mevcut.personel", None)
+            .await
+            .unwrap()
+            .expect("seed.sh mevcut.personel hesabını açar");
+        let domain_admins = format!("CN=Domain Admins,CN=Users,{base}");
+        async fn membership(
+            ldap: &mut Ldap,
+            group: &str,
+            dn: &str,
+            add: bool,
+        ) -> Result<(), ldap3::LdapError> {
+            let values = std::collections::HashSet::from([dn]);
+            let m = if add {
+                ldap3::Mod::Add("member", values)
+            } else {
+                ldap3::Mod::Delete("member", values)
+            };
+            ldap.modify(group, vec![m])
+                .await
+                .and_then(|r| r.success().map(|_| ()))
+        }
+        async fn set_attr(
+            ldap: &mut Ldap,
+            dn: &str,
+            attr: &str,
+            value: Option<&str>,
+        ) -> Result<(), ldap3::LdapError> {
+            let m = match value {
+                Some(v) => ldap3::Mod::Replace(attr, std::collections::HashSet::from([v])),
+                None => ldap3::Mod::Delete(attr, std::collections::HashSet::new()),
+            };
+            ldap.modify(dn, vec![m])
+                .await
+                .and_then(|r| r.success().map(|_| ()))
+        }
+        // onceki yarim kalan calismanin izleri
+        let _ = membership(&mut ldap, &domain_admins, &existing.dn, false).await;
+        let _ = set_attr(&mut ldap, &existing.dn, "employeeID", None).await;
+        let _ = set_attr(&mut ldap, &existing.dn, "adminCount", None).await;
+
+        let set_hint = |hint: &'static str, identity: i64| {
+            let pool = pool.clone();
+            async move {
+                // sicil no yalnizca ana kimlige: tekil sutun, ikinci kimlik carpismasin
+                sqlx::query(
+                    "UPDATE identities SET existing_ad_account_hint = $2, \
+                     employee_number = CASE WHEN id = $3 THEN '123' ELSE employee_number END \
+                     WHERE id = $1",
+                )
+                .bind(identity)
+                .bind(hint)
+                .bind(seed.identity)
+                .execute(&pool)
+                .await
+                .unwrap();
+            }
+        };
+        set_hint("mevcut.personel", seed.identity).await;
+        let job = ClaimedJob {
+            id: test_support::enqueue(&pool, seed.identity, seed.ad, 1).await,
+            identity_id: seed.identity,
+            target_system_id: seed.ad,
+            priority: 1,
+            attempts: 0,
+        };
+        let job = crate::queue::claim(&pool, "w1", &[])
+            .await
+            .unwrap()
+            .unwrap_or(job);
+        let ca = var("AD_CA_FILE");
+        let env = |ownership: bool, dry_run: bool| EngineEnv {
+            time_zone: "Europe/Istanbul",
+            mode: Mode { dry_run },
+            aead_key: &key,
+            ad_ca_file: Some(&ca),
+            worker_id: "w1",
+            sensitive_mapping_enabled: false,
+            first_login_change_required: true,
+            ownership_mode_enabled: ownership,
+        };
+        let intervention = |run: Result<String, JobError>| match run {
+            Err(JobError::NeedsIntervention(reason)) => reason,
+            other => panic!("müdahale beklenirdi: {other:?}"),
+        };
+
+        let r = intervention(run_job(&pool, &job, &env(false, false)).await);
+        assert!(r.contains("sahiplenme kapalı"), "{r}");
+        let r = intervention(run_job(&pool, &job, &env(true, true)).await);
+        assert!(r.contains("kuru çalıştırma"), "{r}");
+        set_hint("yok.boyle.biri", seed.identity).await;
+        let r = intervention(run_job(&pool, &job, &env(true, false)).await);
+        assert!(r.contains("ipucu bulunamadı"), "{r}");
+        set_hint("Administrator", seed.identity).await;
+        let r = intervention(run_job(&pool, &job, &env(true, false)).await);
+        assert!(r.contains("OU'larının dışında"), "{r}");
+        set_hint("mevcut.personel", seed.identity).await;
+        membership(&mut ldap, &domain_admins, &existing.dn, true)
+            .await
+            .unwrap();
+        let r = intervention(run_job(&pool, &job, &env(true, false)).await);
+        membership(&mut ldap, &domain_admins, &existing.dn, false)
+            .await
+            .unwrap();
+        assert!(r.contains("yasaklı grup üyesi: Domain Admins"), "{r}");
+        // adminCount yapiskandir: gruptan cikmis olsa da reddedilir (docs/05)
+        set_attr(&mut ldap, &existing.dn, "adminCount", Some("1"))
+            .await
+            .unwrap();
+        let r = intervention(run_job(&pool, &job, &env(true, false)).await);
+        set_attr(&mut ldap, &existing.dn, "adminCount", None)
+            .await
+            .unwrap();
+        assert!(r.contains("adminCount dolu"), "{r}");
+        set_attr(&mut ldap, &existing.dn, "employeeID", Some("124"))
+            .await
+            .unwrap();
+        let r = intervention(run_job(&pool, &job, &env(true, false)).await);
+        assert!(r.contains("sicil no"), "{r}");
+        set_attr(&mut ldap, &existing.dn, "employeeID", Some("0123"))
+            .await
+            .unwrap();
+
+        let adopted = run_job(&pool, &job, &env(true, false)).await.unwrap();
+        assert!(
+            adopted.starts_with("sahiplenildi (gözlem modu)"),
+            "{adopted}"
+        );
+        assert!(adopted.contains("ad-soyad kimlikle uyuşmuyor"), "{adopted}");
+        let (origin, mode, mismatch, external_id): (String, String, bool, String) = sqlx::query_as(
+            "SELECT origin, mode, name_mismatch, external_id FROM account_links WHERE identity_id = $1",
+        )
+        .bind(seed.identity)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            (
+                origin.as_str(),
+                mode.as_str(),
+                mismatch,
+                external_id.as_str()
+            ),
+            ("adopted", "observed", true, existing.guid.as_str())
+        );
+        let (username, upn): (Option<String>, Option<String>) =
+            sqlx::query_as("SELECT username, upn FROM identities WHERE id = $1")
+                .bind(seed.identity)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(username.as_deref(), Some("mevcut.personel"));
+        assert!(
+            upn.is_some_and(|u| u.contains('@')),
+            "UPN hedeften okunur (ADR-034)"
+        );
+
+        // gozlem: sonraki is hicbir sey yazmaz
+        let observed = run_job(&pool, &job, &env(true, false)).await.unwrap();
+        assert!(observed.starts_with("gözlem modunda"), "{observed}");
+        let intents: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM audit_log WHERE identity_id = $1 AND operation_class IS NOT NULL",
+        )
+        .bind(seed.identity)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(intents, 0, "gözlemde hedefe yazma niyeti yok");
+
+        // ayni hesap ikinci kimlige baglanamaz
+        set_hint("mevcut.personel", seed.other_identity).await;
+        let other = ClaimedJob {
+            id: test_support::enqueue(&pool, seed.other_identity, seed.ad, 1).await,
+            identity_id: seed.other_identity,
+            target_system_id: seed.ad,
+            priority: 1,
+            attempts: 0,
+        };
+        let other = crate::queue::claim(&pool, "w1", &[])
+            .await
+            .unwrap()
+            .unwrap_or(other);
+        let r = intervention(run_job(&pool, &other, &env(true, false)).await);
+        assert!(r.contains("kimliğine bağlı"), "{r}");
+
+        set_attr(&mut ldap, &existing.dn, "employeeID", None)
+            .await
+            .unwrap();
+        ldap.unbind().await.unwrap();
+        drop(pool);
+        test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
     // ADR-019/046/085: kuru modda red; acik modda pwdLastSet 0; kapali modda damga
     // baglantiya yazilir ve parola gercekten bind eder; kullanilmis hesap reddedilir.
     #[tokio::test]
@@ -1092,6 +1403,7 @@ mod tests {
             worker_id: "w1",
             sensitive_mapping_enabled: false,
             first_login_change_required: change_required,
+            ownership_mode_enabled: false,
         };
         // ADR-056: kayitla acilan istek hesap acilir acilmaz ayni iste karsilanir
         let at_provision: i64 = sqlx::query_scalar(
@@ -1315,6 +1627,7 @@ mod tests {
             worker_id: "w1",
             sensitive_mapping_enabled: false,
             first_login_change_required: true,
+            ownership_mode_enabled: false,
         };
 
         let dry = run_job(&pool, &job, &env(true)).await.unwrap();

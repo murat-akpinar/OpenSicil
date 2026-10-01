@@ -51,6 +51,9 @@ pub struct IdentityForm {
     /// ADR-056: "Kaydet ve ilk parolayı ver" düğmesi; bos degilse istenmistir
     #[serde(default)]
     pub issue_first_password: String,
+    /// ADR-018: sahiplenilecek AD kullanici adi; yalnizca sahiplenme acikken gosterilir
+    #[serde(default)]
+    pub existing_ad_account_hint: String,
     #[serde(default)]
     pub end_date: String,
     // ADR-022: istege bagli elle kullanici adi; bossa sablon
@@ -75,6 +78,25 @@ pub struct NewIdentity {
     pub start_date: String,
     pub end_date: Option<String>,
     pub requested_username: Option<String>,
+    /// ADR-018/086: sahiplenilecek AD hesabi (sAMAccountName); doluysa hesap acilmaz
+    pub existing_ad_account_hint: Option<String>,
+}
+
+// ADR-086: sAMAccountName bicimi; LDAP kacisi worker'da, burada yalnizca sekil.
+pub fn valid_account_hint(raw: &str) -> Result<Option<String>, String> {
+    const MAX_LEN: usize = 20;
+    let hint = raw.trim();
+    if hint.is_empty() {
+        return Ok(None);
+    }
+    let allowed = |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_');
+    if hint.len() > MAX_LEN || !hint.chars().all(allowed) {
+        return Err(
+            "Mevcut hesap ipucu AD kullanıcı adıdır: en çok 20 karakter, harf, rakam, nokta, tire, alt çizgi"
+                .to_string(),
+        );
+    }
+    Ok(Some(hint.to_string()))
 }
 
 // Sekil kontrolu burada; ADR-011 normallestirmesi worker'da (validate_manual).
@@ -134,6 +156,7 @@ pub fn validate(f: &IdentityForm) -> Result<NewIdentity, String> {
         start_date: f.start_date.trim().to_string(),
         end_date: optional(&f.end_date),
         requested_username: valid_requested_username(&f.requested_username)?,
+        existing_ad_account_hint: valid_account_hint(&f.existing_ad_account_hint)?,
     })
 }
 
@@ -189,22 +212,14 @@ pub async fn create(
     new: &NewIdentity,
     first_password_by: Option<&str>,
 ) -> Result<(i64, Option<i64>), CreateError> {
-    // On kontrol operatore erken ve net cevap verir; yaris durumunda UNIQUE indeks yakalar.
-    if let Some(nid) = &new.national_id {
-        if national_id::find_identity(pool, keys.blind_index, nid)
-            .await?
-            .is_some()
-        {
-            return Err(CreateError::DuplicateNationalId);
-        }
-    }
+    reject_known_national_id(pool, keys, new).await?;
     let mut tx = pool.begin().await?;
     let id: i64 = sqlx::query_scalar(
         "INSERT INTO identities (given_name, surname, employee_number, mobile_phone, \
          department_id, primary_role_id, manager_id, employment_type, start_date, end_at, \
-         requested_username) \
+         requested_username, existing_ad_account_hint) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::date, \
-         (($10::date + 1)::timestamp AT TIME ZONE $11), $12) RETURNING id",
+         (($10::date + 1)::timestamp AT TIME ZONE $11), $12, $13) RETURNING id",
     )
     .bind(&new.given_name)
     .bind(&new.surname)
@@ -218,6 +233,7 @@ pub async fn create(
     .bind(&new.end_date)
     .bind(time_zone)
     .bind(&new.requested_username)
+    .bind(&new.existing_ad_account_hint)
     .fetch_one(&mut *tx)
     .await?;
     if let Some(nid) = &new.national_id {
@@ -231,6 +247,21 @@ pub async fn create(
     let first_password = open_jobs(&mut tx, id, first_password_by).await?;
     tx.commit().await?;
     Ok((id, first_password))
+}
+
+// On kontrol operatore erken ve net cevap verir; yaris durumunda UNIQUE indeks yakalar.
+async fn reject_known_national_id(
+    pool: &PgPool,
+    keys: &Keys<'_>,
+    new: &NewIdentity,
+) -> Result<(), CreateError> {
+    let Some(nid) = &new.national_id else {
+        return Ok(());
+    };
+    match national_id::find_identity(pool, keys.blind_index, nid).await? {
+        Some(_) => Err(CreateError::DuplicateNationalId),
+        None => Ok(()),
+    }
 }
 
 // Her hedefe tek kimlik isi; istenmisse AD hedefine ilk parola istegi (ADR-056).
@@ -1263,6 +1294,18 @@ mod tests {
     }
 
     #[test]
+    fn account_hint_is_trimmed_and_shaped_like_sam_account_name() {
+        assert_eq!(valid_account_hint("  ").unwrap(), None);
+        assert_eq!(
+            valid_account_hint(" mevcut.personel ").unwrap().as_deref(),
+            Some("mevcut.personel")
+        );
+        assert!(valid_account_hint("ayşe yılmaz").is_err());
+        assert!(valid_account_hint("a*b").is_err());
+        assert!(valid_account_hint("abcdefghijklmnopqrstu").is_err());
+    }
+
+    #[test]
     fn split_error_follows_reason_detail_contract() {
         assert_eq!(
             split_error("hesap bağlantısı yazılamadı: db timeout"),
@@ -1304,6 +1347,7 @@ mod tests {
         f.primary_role_id = options.roles[0].id.clone();
         f.manager_id = ids[0].to_string();
         f.national_id = "10000000146".to_string();
+        f.existing_ad_account_hint = " Mevcut.Personel ".to_string();
         let keys = Keys {
             aead: &[1u8; crate::crypto::KEY_LEN],
             blind_index: &[2u8; crate::crypto::KEY_LEN],
@@ -1320,6 +1364,17 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(requested.as_deref(), Some("ik"));
+        let hint: Option<String> =
+            sqlx::query_scalar("SELECT existing_ad_account_hint FROM identities WHERE id = $1")
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            hint.as_deref(),
+            Some("Mevcut.Personel"),
+            "ipucu kırpılıp saklanır"
+        );
         // Isler zaten kayitla acildi; ikinci cagri yenisini acmaz (ON CONFLICT)
         enqueue_all_targets(&pool, id, crate::jobs::Priority::Single)
             .await
