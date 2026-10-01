@@ -103,7 +103,8 @@ Kurallar:
   - Not: ADR-080 — kayıt doğrudan modele yazılır ve etkilenen kimlikler için öncelik 2 iş açılır (taslak/eşik 3f'te `org::enqueue_affected`'ı sahneleme yoluna taşır); rol/departman silme yok; `/targets` hedef sistem varsayılanlarını da kapsar
 - [x] Elle kullanıcı adı; bağlı olmayan hesapla ve kullanılmış adla çakışmada müdahale; serbest bırakma ([ADR-022](decisions/022-kullanici-adi-elle-giris-ve-cakisma.md), [ADR-035](decisions/035-kullanilmis-ad-duz-metin-serbest-birakma.md), [ADR-042](decisions/042-ayni-kisi-farkli-anahtar.md))
   - Not: ADR-081 — istek ve karar `identities.requested_username`/`name_conflict_override` (0010, backend yazar), adı yine worker üretir; kişi sayfasında müdahale bloğu (farklı ad / sıradaki ad / `/used-names` serbest bırakma); sahiplenme (ipucu) seçeneği Faz 5
-- [ ] Eşleme izinli listesi + "sadece boşsa yaz" ([ADR-029](decisions/029-esleme-hedef-oznitelikleri-izinli-liste.md), [ADR-034](decisions/034-sam-upn-esleme-disi-ve-bossa-yaz.md))
+- [x] Eşleme izinli listesi + "sadece boşsa yaz" ([ADR-029](decisions/029-esleme-hedef-oznitelikleri-izinli-liste.md), [ADR-034](decisions/034-sam-upn-esleme-disi-ve-bossa-yaz.md))
+  - Not: ADR-082 — `attribute_mappings` tablosu + `/targets/{id}/mappings` ekranı + ikiz `mapping_rules.rs`; worker her işte doğrular (ihlal müdahale), mevcut hesapta öznitelik farkını tek modify ile yazar; `manager` eşlemesi ADR-040/041 ile burada geldi (yönetici hedefte yoksa dokunulmaz); Zimbra satırları Zimbra connector'ıyla çalışır
 - [ ] Belirsiz bileşen kuralı: "hesap açılsın=hayır" mevcut hesabı silmez ([ADR-040](decisions/040-motor-belirsiz-degere-dokunmaz.md))
   - Not: etki önizlemesi burada yoktur; model farkı 3f'te tek fonksiyonla yazılır
 - [ ] Faz kapanışı: güvenlik ve test

@@ -13,6 +13,10 @@ mod identity;
 mod identity_web;
 mod jobs;
 mod logging;
+// Ikiz dosya (worker ile birebir ayni); donusumler yalnizca worker'da calisir.
+#[allow(dead_code)]
+mod mapping_rules;
+mod mapping_web;
 mod migrate;
 mod national_id;
 mod oidc;
@@ -83,7 +87,12 @@ mod tests {
     // Docker build context'inde worker dizini yoktur; orada test atlanir.
     #[test]
     fn twin_modules_match_worker_copies() {
-        for name in ["common_settings.rs", "desired_state.rs", "crypto.rs"] {
+        for name in [
+            "common_settings.rs",
+            "desired_state.rs",
+            "crypto.rs",
+            "mapping_rules.rs",
+        ] {
             let mine =
                 std::fs::read_to_string(format!("src/{name}")).expect("kendi kopyası okunamadı");
             let Ok(theirs) = std::fs::read_to_string(format!("../worker/src/{name}")) else {

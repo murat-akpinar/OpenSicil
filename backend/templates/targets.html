@@ -9,7 +9,7 @@
 {% if !error.is_empty() %}<p class="mb-4" style="color:#f38ba8;">{{ error }}</p>{% endif %}
 {% for v in targets %}
 <form method="post" action="/targets/{{ v.target.id }}" class="space-y-3 rounded p-3 mb-6" style="border:1px solid #313244;">
-  <h2 class="font-medium">{{ v.target.name }}</h2>
+  <h2 class="font-medium">{{ v.target.name }} <a class="text-sm underline ml-2" href="/targets/{{ v.target.id }}/mappings">öznitelik eşlemesi</a></h2>
   <label class="block text-sm"><input type="checkbox" name="provision_account_default" value="1"{% if v.target.provision_account_default %} checked{% endif %}> Hesap açılsın (varsayılan)</label>
   <div>
     <label class="block text-sm mb-1" for="ct-{{ v.target.id }}">Varsayılan OU / COS</label>

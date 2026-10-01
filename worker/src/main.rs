@@ -11,6 +11,10 @@ mod db;
 mod desired_state;
 mod engine;
 mod heartbeat;
+mod mapping;
+// Ikiz dosya (backend ile birebir ayni); ekran etiketleri yalnizca backend'de kullanilir.
+#[allow(dead_code)]
+mod mapping_rules;
 mod model;
 mod queue;
 mod scheduler;
@@ -59,6 +63,8 @@ struct Env {
     write_mode: writes::Mode,
     aead_key: [u8; crypto::KEY_LEN],
     ad_ca_file: Option<String>,
+    // ADR-029: hassas kaynak (kimlik no, cep) eslemesi; kapaliyken satir reddedilir
+    sensitive_mapping_enabled: bool,
 }
 
 // Ortak ayarlar acilista dogrulanir ve loglanir; backend'in satiriyla yan
@@ -93,6 +99,7 @@ fn load_env() -> Result<Env, String> {
         write_mode: writes::Mode { dry_run },
         aead_key,
         ad_ca_file: std::env::var("AD_CA_FILE").ok(),
+        sensitive_mapping_enabled: common.sensitive_mapping_enabled,
     })
 }
 
@@ -252,6 +259,7 @@ async fn process_job(pool: &PgPool, job: &queue::ClaimedJob, worker_id: &str, en
         aead_key: &env.aead_key,
         ad_ca_file: env.ad_ca_file.as_deref(),
         worker_id,
+        sensitive_mapping_enabled: env.sensitive_mapping_enabled,
     };
     let run = engine::run_job(pool, job, &engine_env).await;
     let (outcome, unreachable) = match run {

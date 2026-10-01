@@ -16,6 +16,7 @@ pub const DEPARTMENT_CHANGED: &str = "department.changed";
 pub const TARGET_CHANGED: &str = "target.changed";
 pub const IDENTITY_NAME_REQUESTED: &str = "identity.name_requested";
 pub const USED_NAME_RELEASED: &str = "used_name.released";
+pub const MAPPING_CHANGED: &str = "mapping.changed";
 
 pub struct Actor<'a> {
     pub subject: Option<&'a str>,

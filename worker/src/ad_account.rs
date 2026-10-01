@@ -6,7 +6,7 @@
 // erisilir, yazma GUID'den cozulen gercek DN'e yapilir. Uyelik grubun `member`
 // ozniteligiyle degistirilir. Parola kimseye gosterilmez (ADR-009).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use chacha20poly1305::aead::rand_core::RngCore;
 use chacha20poly1305::aead::OsRng;
@@ -189,8 +189,44 @@ impl TargetWriter for AdWriter<'_> {
                 group_dn,
                 member_dn,
             } => change_member(self.ldap, group_dn, member_dn, false).await,
+            WriteOp::SetAttributes { dn, changes } => set_attributes(self.ldap, dn, changes).await,
         }
     }
+}
+
+// docs/05 Oznitelik guncelleme: replace; kaynak bossa sil (ADR-012).
+async fn set_attributes(
+    ldap: &mut Ldap,
+    dn: &str,
+    changes: &[(String, Option<String>)],
+) -> Result<(), WriteError> {
+    let mods: Vec<Mod<&str>> = changes
+        .iter()
+        .map(|(attr, value)| match value {
+            Some(v) => Mod::Replace(attr.as_str(), HashSet::from([v.as_str()])),
+            None => Mod::Delete(attr.as_str(), HashSet::new()),
+        })
+        .collect();
+    ldap.modify(dn, mods)
+        .await
+        .map_err(ad::classify)?
+        .success()
+        .map(|_| ())
+        .map_err(ad::classify)
+}
+
+/// Eslenen ozniteliklerin hedefteki mevcut degerleri (fark icin).
+pub async fn read_attributes(
+    ldap: &mut Ldap,
+    dn: &str,
+    attrs: &[&str],
+) -> Result<HashMap<String, Vec<String>>, WriteError> {
+    let found = ad::search(ldap, dn, Scope::Base, "(objectClass=*)", attrs).await?;
+    Ok(found
+        .into_iter()
+        .next()
+        .map(|entry| entry.attrs)
+        .unwrap_or_default())
 }
 
 // ADR-057 madde 3: tek `add`. AD parolayi reddederse hesap hic olusmaz.

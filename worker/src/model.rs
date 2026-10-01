@@ -8,8 +8,8 @@
 use sqlx::PgPool;
 
 use crate::desired_state::{
-    AccountLink, AdditionalRole, Clock, Date, Model, Origin, SingleValued, Source, TargetDefaults,
-    Timeline,
+    lifecycle_state, AccountLink, AdditionalRole, Clock, Date, ManagerChain, Model, Origin,
+    SingleValued, Source, TargetDefaults, Timeline,
 };
 
 pub struct JobInput {
@@ -21,6 +21,8 @@ pub struct JobInput {
     pub target_kind: String,
     /// Baglantinin motorun ihtiyac duydugu ham kismi (GUID, uygulanan durum)
     pub link_row: Option<LinkRow>,
+    /// Yonetici zinciri (ADR-041); `manager` eslemesinin kaynagi
+    pub manager: Option<ManagerChain>,
 }
 
 /// Kimlik alanlari: eslemenin kaynaklari (ADR-012) ve ad uretimi girdisi (ADR-011)
@@ -37,6 +39,14 @@ pub struct Person {
     pub requested_username: Option<String>,
     /// "Farkli kisi, siradaki adi ver" (ADR-022/042)
     pub name_conflict_override: bool,
+    // Esleme kaynaklari (ADR-012/082); hassas olanlar yalnizca ayar acikken cozulur
+    pub mobile_phone: Option<String>,
+    pub national_id_enc: Option<Vec<u8>>,
+    pub start_date: String,
+    /// Bitisin son calisma gunu (kurulum diliminde), ISO
+    pub end_date: Option<String>,
+    pub employment_type: String,
+    pub root_department_name: String,
 }
 
 #[derive(Debug, Clone)]
@@ -90,7 +100,9 @@ pub async fn load(
     let additional_roles = load_additional_roles(pool, identity_id, target).await?;
     let target_defaults = load_target_defaults(pool, target).await?;
     let (link, link_row) = load_link(pool, identity_id, target).await?;
-    let person = load_person(pool, identity_id).await?;
+    let mut person = load_person(pool, identity_id, time_zone).await?;
+    person.root_department_name = root_department_name(pool, department_id).await?;
+    let manager = load_manager_chain(pool, identity_id, time_zone).await?;
     let target_kind: String = sqlx::query_scalar("SELECT kind FROM target_systems WHERE id = $1")
         .bind(target)
         .fetch_one(pool)
@@ -110,6 +122,7 @@ pub async fn load(
         clock,
         person,
         target_kind,
+        manager,
         link_row,
     })
 }
@@ -124,15 +137,23 @@ type PersonRow = (
     Option<String>,
     Option<String>,
     bool,
+    Option<String>,
+    Option<Vec<u8>>,
+    String,
+    Option<String>,
+    String,
 );
 
-async fn load_person(pool: &PgPool, identity_id: i64) -> Result<Person, String> {
+async fn load_person(pool: &PgPool, identity_id: i64, time_zone: &str) -> Result<Person, String> {
     let row: PersonRow = sqlx::query_as(
         "SELECT i.given_name, i.surname, i.employee_number, d.name, i.username, i.email, i.upn, \
-         i.requested_username, i.name_conflict_override \
+         i.requested_username, i.name_conflict_override, i.mobile_phone, i.national_id_enc, \
+         to_char(i.start_date, 'YYYY-MM-DD'), \
+         to_char((i.end_at AT TIME ZONE $2) - interval '1 day', 'YYYY-MM-DD'), i.employment_type \
          FROM identities i JOIN departments d ON d.id = i.department_id WHERE i.id = $1",
     )
     .bind(identity_id)
+    .bind(time_zone)
     .fetch_one(pool)
     .await
     .map_err(|e| format!("kimlik alanları okunamadı: {e}"))?;
@@ -146,7 +167,62 @@ async fn load_person(pool: &PgPool, identity_id: i64) -> Result<Person, String> 
         upn: row.6,
         requested_username: row.7,
         name_conflict_override: row.8,
+        mobile_phone: row.9,
+        national_id_enc: row.10,
+        start_date: row.11,
+        end_date: row.12,
+        employment_type: row.13,
+        root_department_name: String::new(),
     })
+}
+
+// ADR-017: kok departman adi esleme kaynagi (`company` gibi).
+async fn root_department_name(pool: &PgPool, department_id: i64) -> Result<String, String> {
+    sqlx::query_scalar(
+        "WITH RECURSIVE up AS ( \
+           SELECT id, parent_id, name, 0 AS depth FROM departments WHERE id = $1 \
+           UNION ALL SELECT d.id, d.parent_id, d.name, up.depth + 1 FROM departments d \
+           JOIN up ON d.id = up.parent_id WHERE up.depth < $2) \
+         SELECT name FROM up ORDER BY depth DESC LIMIT 1",
+    )
+    .bind(department_id)
+    .bind(MAX_DEPARTMENT_DEPTH)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| format!("kök departman okunamadı: {e}"))
+}
+
+// ADR-041: yonetici ve onun kaydindaki devir yoneticisi, turetilen durumlariyla.
+async fn load_manager_chain(
+    pool: &PgPool,
+    identity_id: i64,
+    time_zone: &str,
+) -> Result<Option<ManagerChain>, String> {
+    let row: (Option<i64>, Option<i64>) = sqlx::query_as(
+        "SELECT i.manager_id, m.handover_manager_id FROM identities i \
+         LEFT JOIN identities m ON m.id = i.manager_id WHERE i.id = $1",
+    )
+    .bind(identity_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| format!("yönetici okunamadı: {e}"))?;
+    let Some(manager) = row.0 else {
+        return Ok(None);
+    };
+    let state_of = |id: i64| async move {
+        let (timeline, clock, _, _) = load_identity(pool, id, time_zone).await?;
+        Ok::<_, String>(lifecycle_state(&timeline, &clock))
+    };
+    let manager_state = state_of(manager).await?;
+    let handover = match row.1 {
+        Some(h) => Some((h, state_of(h).await?)),
+        None => None,
+    };
+    Ok(Some(ManagerChain {
+        manager,
+        manager_state,
+        handover,
+    }))
 }
 
 fn date(text: &str) -> Result<Date, String> {

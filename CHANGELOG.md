@@ -49,4 +49,5 @@
 - Zamanlayıcı ve uçtan uca lab doğrulaması: kayıt → AD'de pasif hesap → ekranda açıldı (ADR-079)
 - Rol, departman ve hedef sistem ekranları, katalogdan seçim (ADR-080)
 - Elle kullanıcı adı, çakışma müdahalesi ve kullanılmış ad serbest bırakma (ADR-081)
+- Öznitelik eşlemesi: izinli liste, sadece boşsa yaz, yönetici eşlemesi ve ekran (ADR-082)
 

@@ -57,6 +57,11 @@ pub enum WriteOp {
         group_dn: String,
         member_dn: String,
     },
+    /// Eslenen oznitelikler: Some = replace, None = sil (ADR-012/034/082)
+    SetAttributes {
+        dn: String,
+        changes: Vec<(String, Option<String>)>,
+    },
 }
 
 impl WriteOp {
@@ -67,6 +72,7 @@ impl WriteOp {
             WriteOp::SetEnabled { enabled: false, .. } => "ad.account.disable",
             WriteOp::AddMember { .. } => "ad.group.add_member",
             WriteOp::RemoveMember { .. } => "ad.group.remove_member",
+            WriteOp::SetAttributes { .. } => "ad.account.attributes",
         }
     }
 
@@ -86,6 +92,20 @@ impl WriteOp {
             WriteOp::SetEnabled { dn, enabled } => {
                 format!("{{\"dn\":\"{}\",\"enabled\":{enabled}}}", q(dn))
             }
+            // Degerler yazilmaz: hassas kaynak (kimlik no) denetim kaydina girmez (docs/07)
+            WriteOp::SetAttributes { dn, changes } => format!(
+                "{{\"dn\":\"{}\",\"attributes\":[{}]}}",
+                q(dn),
+                changes
+                    .iter()
+                    .map(|(name, value)| format!(
+                        "{{\"name\":\"{}\",\"cleared\":{}}}",
+                        q(name),
+                        value.is_none()
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ),
             WriteOp::AddMember {
                 group_dn,
                 member_dn,

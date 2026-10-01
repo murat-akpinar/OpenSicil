@@ -9,11 +9,14 @@
 use ldap3::Ldap;
 use sqlx::PgPool;
 
+use std::collections::HashMap;
+
 use crate::ad;
 use crate::ad_account::{self, AdWriter};
 use crate::desired_state::{
-    desired_state, AccountPresence, Container, DesiredState, LifecycleState,
+    desired_state, effective_manager, AccountPresence, Container, DesiredState, LifecycleState,
 };
+use crate::mapping;
 use crate::model::{self, JobInput, LinkRow};
 use crate::queue::ClaimedJob;
 use crate::username;
@@ -25,6 +28,8 @@ pub struct EngineEnv<'a> {
     pub aead_key: &'a [u8; crate::crypto::KEY_LEN],
     pub ad_ca_file: Option<&'a str>,
     pub worker_id: &'a str,
+    /// ADR-029: hassas kaynak eslemesi; kapaliyken satir mudahaledir
+    pub sensitive_mapping_enabled: bool,
 }
 
 // ADR-052: hedefe ulasilamamasi deneme tuketmez; nesne duzeyi hata tuketir;
@@ -102,6 +107,12 @@ pub async fn run_job(
         .await
         .map_err(JobError::Failed)?
         .ok_or_else(|| JobError::Unreachable("AD yapılandırılmamış".to_string()))?;
+    // ADR-029: esleme satirlari her iste dogrulanir; ihlal mudahaledir
+    let mappings = mapping::load_rows(pool, job.target_system_id)
+        .await
+        .map_err(JobError::Failed)?;
+    mapping::validate(&mappings, "ad", env.sensitive_mapping_enabled)
+        .map_err(JobError::NeedsIntervention)?;
     let mut ldap = ad::connect(&cfg).await?;
     let base_dn = ad::base_dn(&mut ldap).await?;
     let ctx = AdJob {
@@ -111,6 +122,7 @@ pub async fn run_job(
         base_dn: &base_dn,
         input: &input,
         desired: &desired,
+        mappings: &mappings,
     };
     let outcome = reconcile_ad(&ctx, &mut ldap).await;
     ldap.unbind().await.ok();
@@ -124,6 +136,7 @@ struct AdJob<'a> {
     base_dn: &'a str,
     input: &'a JobInput,
     desired: &'a DesiredState,
+    mappings: &'a [mapping::MappingRow],
 }
 
 async fn reconcile_ad(c: &AdJob<'_>, ldap: &mut Ldap) -> Result<String, JobError> {
@@ -307,26 +320,89 @@ async fn container_dn(c: &AdJob<'_>, ldap: &mut Ldap) -> Result<String, JobError
         .ok_or_else(|| JobError::Failed(format!("OU hedefte bulunamadı (GUID {guid})")))
 }
 
-// ADR-012 varsayilan esleme; bos kaynak yazilmaz. manager ADR-040/041 ile sonraki kutucukta.
-fn default_mapping(c: &AdJob<'_>, names: &Names, cn: &str) -> Vec<(String, String)> {
+// Eslenemeyen kimlik alanlari (ADR-034): acilista bir kez yazilir, sonra dokunulmaz.
+fn fixed_attributes(names: &Names, cn: &str) -> Vec<(String, String)> {
+    vec![
+        ("cn".to_string(), cn.to_string()),
+        ("sAMAccountName".to_string(), names.username.clone()),
+        ("userPrincipalName".to_string(), names.upn.clone()),
+    ]
+}
+
+// Esleme kaynaklari (ADR-012/082). Hassas kaynaklar yalnizca ayar acikken cozulur;
+// `names` acilista DB'ye yeni yazilan adlardir (Person henuz eski kopya).
+async fn sources(
+    c: &AdJob<'_>,
+    ldap: &mut Ldap,
+    names: Option<&Names>,
+) -> Result<mapping::Sources, JobError> {
     let p = &c.input.person;
-    let pairs = [
-        ("cn", cn.to_string()),
-        ("sAMAccountName", names.username.clone()),
-        ("userPrincipalName", names.upn.clone()),
-        ("givenName", p.given_name.clone()),
-        ("sn", p.surname.clone()),
-        ("displayName", format!("{} {}", p.given_name, p.surname)),
-        ("mail", names.email.clone().unwrap_or_default()),
-        ("department", p.department_name.clone()),
+    let or_person = |fresh: Option<String>, stored: &Option<String>| {
+        fresh.or_else(|| stored.clone()).unwrap_or_default()
+    };
+    let mut values: HashMap<&'static str, String> = HashMap::from([
+        ("given_name", p.given_name.clone()),
+        ("surname", p.surname.clone()),
+        (
+            "employee_number",
+            p.employee_number.clone().unwrap_or_default(),
+        ),
+        (
+            "email",
+            or_person(names.and_then(|n| n.email.clone()), &p.email),
+        ),
+        (
+            "username",
+            or_person(names.map(|n| n.username.clone()), &p.username),
+        ),
+        ("upn", or_person(names.map(|n| n.upn.clone()), &p.upn)),
+        ("department_name", p.department_name.clone()),
+        ("root_department_name", p.root_department_name.clone()),
         ("title", c.desired.title.clone().unwrap_or_default()),
-        ("employeeID", p.employee_number.clone().unwrap_or_default()),
-    ];
-    pairs
-        .into_iter()
-        .filter(|(_, v)| !v.is_empty())
-        .map(|(k, v)| (k.to_string(), v))
-        .collect()
+        ("employment_type", p.employment_type.clone()),
+        ("start_date", p.start_date.clone()),
+        ("end_date", p.end_date.clone().unwrap_or_default()),
+    ]);
+    if c.env.sensitive_mapping_enabled {
+        values.insert("mobile_phone", p.mobile_phone.clone().unwrap_or_default());
+        let national_id = p
+            .national_id_enc
+            .as_deref()
+            .and_then(|enc| mapping::decrypt_national_id(c.env.aead_key, enc))
+            .unwrap_or_default();
+        values.insert("national_id", national_id);
+    }
+    let needs_manager = c
+        .mappings
+        .iter()
+        .any(|r| r.source_kind == "manager_account");
+    let manager_dn = if needs_manager {
+        manager_dn(c, ldap).await?
+    } else {
+        Some(None)
+    };
+    Ok(mapping::Sources { values, manager_dn })
+}
+
+// ADR-040/041: etkin yonetici yok → temizle (None); var ama bu hedefte yonetilen
+// hesabi yok ya da bulunamiyor → belirsiz (Some(None)), dokunulmaz.
+async fn manager_dn(c: &AdJob<'_>, ldap: &mut Ldap) -> Result<Option<Option<String>>, JobError> {
+    let Some(manager) = effective_manager(c.input.manager.as_ref()) else {
+        return Ok(None);
+    };
+    let guid: Option<String> = sqlx::query_scalar(
+        "SELECT external_id FROM account_links WHERE identity_id = $1 AND target_system_id = $2 \
+         AND mode = 'managed' AND deleted_by_us_at IS NULL",
+    )
+    .bind(manager)
+    .bind(c.job.target_system_id)
+    .fetch_optional(c.pool)
+    .await
+    .map_err(|e| JobError::Failed(format!("yönetici bağlantısı okunamadı: {e}")))?;
+    match guid {
+        None => Ok(Some(None)),
+        Some(guid) => Ok(Some(ad_account::dn_by_guid(ldap, &guid).await?)),
+    }
 }
 
 async fn provision(c: &AdJob<'_>, ldap: &mut Ldap, enabled: bool) -> Result<String, JobError> {
@@ -338,9 +414,12 @@ async fn provision(c: &AdJob<'_>, ldap: &mut Ldap, enabled: bool) -> Result<Stri
         cn = ad_account::cn_for(&person.given_name, &person.surname, Some(&names.username));
     }
     let dn = ad_account::account_dn(&cn, &ou_dn);
+    let mut attributes = fixed_attributes(&names, &cn);
+    let s = sources(c, ldap, Some(&names)).await?;
+    attributes.extend(mapping::initial_attributes(c.mappings, &s));
     let create = WriteOp::CreateAccount {
         dn: dn.clone(),
-        attributes: default_mapping(c, &names, &cn),
+        attributes,
         password: ad_account::random_password(),
         account_expires: c.desired.account_expires,
     };
@@ -429,42 +508,76 @@ async fn reconcile_existing(
     };
     let state = state_name(c.desired.state);
     let transition = link.applied_state.as_deref() != Some(state);
-    let mut applied = Applied::Applied;
-    let note = match (enabled, account.enabled) {
-        (true, false) if transition => {
-            let class = if link.applied_state.as_deref() == Some("departed") {
-                OperationClass::Destructive
-            } else {
-                OperationClass::Attribute
-            };
-            let op = WriteOp::SetEnabled {
-                dn: account.dn.clone(),
-                enabled: true,
-            };
-            applied = apply(c, ldap, op, class).await?;
-            "etkinleştirildi"
-        }
-        (true, false) => "hedefte elle pasifleştirilmiş, korunuyor (ADR-032)",
-        (false, true) => {
-            let op = WriteOp::SetEnabled {
-                dn: account.dn.clone(),
-                enabled: false,
-            };
-            applied = apply(c, ldap, op, OperationClass::Destructive).await?;
-            "pasifleştirildi"
-        }
-        _ => "hesap durumu zaten uyumlu",
-    };
-    if applied == Applied::DryRun {
+    let (applied, note) = reconcile_enabled(c, ldap, link, &account, enabled, transition).await?;
+    let attrs = sync_attributes(c, ldap, &account.dn).await?;
+    if applied == Applied::DryRun || c.env.mode.dry_run {
         return Ok(format!(
-            "kuru çalıştırma, uygulanacaktı: {note} ({})",
+            "kuru çalıştırma, uygulanacaktı: {note}{attrs} ({})",
             account.dn
         ));
     }
     if transition {
         set_applied_state(c, state).await?;
     }
-    Ok(format!("{note}: {} → applied_state {state}", account.dn))
+    Ok(format!(
+        "{note}{attrs}: {} → applied_state {state}",
+        account.dn
+    ))
+}
+
+async fn reconcile_enabled(
+    c: &AdJob<'_>,
+    ldap: &mut Ldap,
+    link: &LinkRow,
+    account: &ad_account::DirectoryAccount,
+    enabled: bool,
+    transition: bool,
+) -> Result<(Applied, &'static str), JobError> {
+    let set = |enabled: bool| WriteOp::SetEnabled {
+        dn: account.dn.clone(),
+        enabled,
+    };
+    Ok(match (enabled, account.enabled) {
+        (true, false) if transition => {
+            let class = if link.applied_state.as_deref() == Some("departed") {
+                OperationClass::Destructive
+            } else {
+                OperationClass::Attribute
+            };
+            (apply(c, ldap, set(true), class).await?, "etkinleştirildi")
+        }
+        (true, false) => (
+            Applied::Applied,
+            "hedefte elle pasifleştirilmiş, korunuyor (ADR-032)",
+        ),
+        (false, true) => (
+            apply(c, ldap, set(false), OperationClass::Destructive).await?,
+            "pasifleştirildi",
+        ),
+        _ => (Applied::Applied, "hesap durumu zaten uyumlu"),
+    })
+}
+
+// docs/05 Oznitelik guncelleme: eslenen oznitelikler okunur, fark tek modify ile
+// yazilir; "sadece bossa yaz" dolu degeri korur (ADR-034), belirsiz kaynak atlanir.
+async fn sync_attributes(c: &AdJob<'_>, ldap: &mut Ldap, dn: &str) -> Result<String, JobError> {
+    if c.mappings.is_empty() {
+        return Ok(String::new());
+    }
+    let names: Vec<&str> = c.mappings.iter().map(|r| r.attribute.as_str()).collect();
+    let current = ad_account::read_attributes(ldap, dn, &names).await?;
+    let s = sources(c, ldap, None).await?;
+    let changes = mapping::changes(c.mappings, &s, &current);
+    if changes.is_empty() {
+        return Ok(String::new());
+    }
+    let count = changes.len();
+    let op = WriteOp::SetAttributes {
+        dn: dn.to_string(),
+        changes,
+    };
+    apply(c, ldap, op, OperationClass::Attribute).await?;
+    Ok(format!(", {count} öznitelik güncellendi"))
 }
 // --- END FEATURE: engine ---
 
@@ -523,6 +636,7 @@ mod tests {
             aead_key: &key,
             ad_ca_file: Some(&ca),
             worker_id: "w1",
+            sensitive_mapping_enabled: false,
         };
 
         let dry = run_job(&pool, &job, &env(true)).await.unwrap();
@@ -588,6 +702,61 @@ mod tests {
             intents, 3,
             "hesap + grup + etkinleştirme; ikinci çalışma yazmadı"
         );
+
+        // ADR-012/034/082: esleme — replace, "sadece bossa yaz" korur, hassas kaynak kapisi
+        ldap.modify(
+            &account.dn,
+            vec![ldap3::Mod::Replace(
+                "physicalDeliveryOfficeName",
+                std::collections::HashSet::from(["Elle"]),
+            )],
+        )
+        .await
+        .unwrap()
+        .success()
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO attribute_mappings (target_system_id, target_attribute, source_kind, source_text, write_if_empty) \
+             VALUES ($1, 'description', 'constant', 'Personel', FALSE), \
+                    ($1, 'physicalDeliveryOfficeName', 'constant', 'Ankara', TRUE)",
+        )
+        .bind(seed.ad)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let mapped = run_job(&pool, &job, &env(false)).await.unwrap();
+        assert!(mapped.contains("1 öznitelik güncellendi"), "{mapped}");
+        let attrs = ad_account::read_attributes(
+            &mut ldap,
+            &account.dn,
+            &["description", "physicalDeliveryOfficeName", "displayName"],
+        )
+        .await
+        .unwrap();
+        assert_eq!(attrs["description"], vec!["Personel"]);
+        assert_eq!(
+            attrs["physicalDeliveryOfficeName"],
+            vec!["Elle"],
+            "boşsa yaz: korunur"
+        );
+        assert!(attrs["displayName"][0].starts_with("Motor Test"));
+        sqlx::query(
+            "INSERT INTO attribute_mappings (target_system_id, target_attribute, source_kind) \
+             VALUES ($1, 'mobile', 'mobile_phone')",
+        )
+        .bind(seed.ad)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let gated = run_job(&pool, &job, &env(false)).await;
+        assert!(
+            matches!(&gated, Err(JobError::NeedsIntervention(r)) if r.contains("hassas")),
+            "{gated:?}"
+        );
+        sqlx::query("DELETE FROM attribute_mappings WHERE target_attribute = 'mobile'")
+            .execute(&pool)
+            .await
+            .unwrap();
 
         // ayrilis: pasiflestirme (yikici niyet), applied_state departed
         sqlx::query("UPDATE identities SET end_at = now() - interval '1 hour' WHERE id = $1")
