@@ -445,7 +445,41 @@ mod tests {
         let seed = seed_department_and_roles(&f.backend_pool).await;
         let identity_id = assert_backend_writes_operator_fields(&f.backend_pool, &seed).await;
         assert_worker_writes_only_its_columns(&f.worker_pool, identity_id).await;
+        assert_only_worker_writes_links(&f.backend_pool, &f.worker_pool, identity_id).await;
         f.teardown().await;
+    }
+
+    // ADR-015: hesap baglantisini yalnizca worker yazar (docs/07 kapanis listesi).
+    async fn assert_only_worker_writes_links(
+        backend_pool: &PgPool,
+        worker_pool: &PgPool,
+        identity_id: i64,
+    ) {
+        const NEW_LINK: &str = "INSERT INTO account_links \
+            (identity_id, target_system_id, external_id, origin, mode) \
+            VALUES ($1, $2, 'guid-1', 'provisioned', 'managed')";
+        let ad: i64 = sqlx::query_scalar("SELECT id FROM target_systems WHERE kind = 'ad'")
+            .fetch_one(backend_pool)
+            .await
+            .unwrap();
+        assert_rejected(
+            backend_pool,
+            NEW_LINK,
+            &[identity_id, ad],
+            "backend hesap bağlantısı yazamamalı",
+        )
+        .await;
+        bind_all(NEW_LINK, &[identity_id, ad])
+            .execute(worker_pool)
+            .await
+            .expect("worker hesap bağlantısı yazabilmeli");
+        assert_rejected(
+            backend_pool,
+            "UPDATE account_links SET applied_state = 'active' WHERE identity_id = $1",
+            &[identity_id],
+            "backend uygulanan durumu değiştirememeli",
+        )
+        .await;
     }
 
     struct Seed {

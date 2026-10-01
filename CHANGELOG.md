@@ -6,6 +6,7 @@
 
 - Proje dokümantasyonu ve ilk yapılandırma dosyaları
 - Docker iskeleti ve compose yapilandirmasini olustur
+- Faz 3a kapanışı — güvenlik ve test
 
 ### Dokümantasyon
 

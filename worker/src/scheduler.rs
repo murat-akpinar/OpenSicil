@@ -173,6 +173,28 @@ mod tests {
             .unwrap();
         assert_eq!(tick(&pool, "Europe/Istanbul").await.unwrap(), 1);
 
+        // ADR-038: `bekliyor` iken bitisi gecmis kimlik tek tikte tek is uretir (ayrilis).
+        for sql in [
+            "UPDATE account_links SET mode = 'managed' WHERE identity_id = $1",
+            "UPDATE identities SET start_date = current_date + 1, end_at = now() - interval '1 minute' \
+             WHERE id = $1",
+        ] {
+            sqlx::query(sql)
+                .bind(seed.other_identity)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        assert_eq!(tick(&pool, "Europe/Istanbul").await.unwrap(), 1);
+        let open: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM jobs WHERE identity_id = $1 AND status <> 'succeeded'",
+        )
+        .bind(seed.other_identity)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(open, 1);
+
         drop(pool);
         crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
     }

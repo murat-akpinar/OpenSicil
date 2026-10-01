@@ -94,8 +94,9 @@ Kurallar:
 - [x] Uçtan uca: kayıt → AD'de pasif hesap → ekranda "açıldı"
   - Kabul: elle bir kayıt girilir, AD'de pasif hesap görünür, ekranda durum "açıldı" olur
   - Not: `sh scripts/e2e-lab.sh` aynı yolu gerçek backend + worker + lab AD/Keycloak ile yürütür (ADR-079; 2026-10-01'de geçti: `uctan.uca`, UAC 514, sayfada "açıldı"/"bekliyor"/"uyumlu"). Zamanlayıcı (ADR-028/038) burada geldi: `worker/src/scheduler.rs`. Betik, worker rolünün `app_settings` okuma yetkisinin eksik olduğunu yakaladı; eklendi
-- [ ] Faz kapanışı: güvenlik ve test
+- [x] Faz kapanışı: güvenlik ve test
   - (1a'daki kapanış şablonunun aynısı)
+  - Not (2026-10-01): backend 100 / worker 60 test (lab dahil), format ve clippy temiz, `cargo audit` yalnızca ADR-073 `rsa`; kapsam backend %92,94 / worker %91,27; imaj taraması Faz 2 tabanıyla aynı (backend 60, worker 58, `Status: fixed` yok); sır sızıntısı taraması boş; TODO yok; 50 satırı aşan yalnızca test fonksiyonları. docs/07 listesinden üç madde işaretlendi (backend hesap bağlantısı yazamaz, `bekliyor`+bitiş geçmiş tek tik tek iş, ADR-060); özel karakterli ad (virgül/yıldız) ile lab'da hesap açma ve elle pasifleştirilen hesabın korunması lab testine girmedi, 3b/3c kapanışında
 
 ### 3b. Roller ve adlar
 - [ ] Rol ve departman ekranları, katalogdan seçim, grup ve OU yönetimi
