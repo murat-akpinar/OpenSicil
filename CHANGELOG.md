@@ -79,4 +79,5 @@
 - Saatlik fren sayaçları ve acil kota worker'da (ADR-091)
 - Etki önizlemesi ve değişiklik seti eşiği (ADR-092)
 - Eşiği aşan değişiklik seti taslak olarak bekler, ikinci yönetici onaylar (ADR-093)
+- Onay anında etki önizlemesi yeniden hesaplanır (ADR-055)
 

@@ -262,17 +262,50 @@ async fn pending_view(state: &AppState, owner: Owner, id: i64, op: &Operator) ->
     };
     let approvable = allowed(op, APPROVE_AUTHORITIES)
         && pending.approvable_by(&op.subject, state.approval_timelock_hours);
+    let now = recompute(state, owner, id, &pending.definition).await;
     PendingView {
-        summary: lang.tn(
-            "changeset.pending_summary",
-            &[
-                &pending.definition.applies.to_string(),
-                &pending.definition.observed.to_string(),
-            ],
-        ),
+        summary: summary_text(lang, &pending, &now),
         note: pending_note(lang, &pending, state.approval_timelock_hours, approvable),
         approvable,
     }
+}
+
+// ADR-055 madde 1: fark ONAY ANINDA yeniden hesaplanir; taslak beklerken role
+// atanan kimlikler sayiya girer. Yayimlanan, onay anindaki farktir.
+async fn recompute(
+    state: &AppState,
+    owner: Owner,
+    id: i64,
+    staged: &StagedDefinition,
+) -> Option<Impact> {
+    match change_set::preview(&state.pool, &state.time_zone, &staged.as_draft(owner, id)).await {
+        Ok(impact) => Some(impact),
+        Err(e) => {
+            eprintln!("web: onay anında etki yeniden hesaplanamadı: {e}");
+            None
+        }
+    }
+}
+
+// Sayi taslak kaydedildigindekinden farkliysa ekran bunu soyler (ADR-055).
+fn summary_text(lang: Lang, pending: &Pending, now: &Option<Impact>) -> String {
+    let staged = &pending.definition;
+    let (applies, observed) = match now {
+        Some(impact) => (impact.applies, impact.observed),
+        None => (staged.applies, staged.observed),
+    };
+    let text = lang.tn(
+        "changeset.pending_summary",
+        &[&applies.to_string(), &observed.to_string()],
+    );
+    if applies == staged.applies {
+        return text;
+    }
+    let changed = lang.tn(
+        "changeset.changed_since",
+        &[&staged.applies.to_string(), &applies.to_string()],
+    );
+    format!("{text}; {changed}")
 }
 
 // Kim baslatti, ne zaman; onaylanamiyorsa nedeni ve kalan sure (F-12).
@@ -472,6 +505,7 @@ async fn stage(state: &AppState, sub: Submission<'_>, impact: Impact, info: Stri
         title: sub.title,
         code: sub.code,
         parent_id: sub.parent_id,
+        with_settings: sub.with_settings,
         applies: impact.applies,
         observed: impact.observed,
     };
@@ -732,7 +766,13 @@ async fn decide(state: &AppState, op: &Operator, owner: Owner, id: i64, approve:
     if !approve {
         return reject(state, op, owner, id).await;
     }
+    // ADR-055: yayimlanan, onay anindaki farktir; denetim satirina da o girer.
     let d = pending.definition;
+    let impact = recompute(state, owner, id, &d).await.unwrap_or(Impact {
+        applies: d.applies,
+        observed: d.observed,
+        ..Impact::default()
+    });
     let sub = Submission {
         owner,
         id,
@@ -740,13 +780,8 @@ async fn decide(state: &AppState, op: &Operator, owner: Owner, id: i64, approve:
         title: d.title,
         code: d.code,
         parent_id: d.parent_id,
-        with_settings: true,
+        with_settings: d.with_settings,
         op,
-    };
-    let impact = Impact {
-        applies: d.applies,
-        observed: d.observed,
-        ..Impact::default()
     };
     publish(
         state,
@@ -1089,6 +1124,16 @@ mod tests {
             .await
             .unwrap();
         let url = format!("/roles/{role}");
+        // Ikinci kimlik baska bir role alinir: taslak kaydedilince 1 kimlik etkilenir.
+        let other = org::create_role(&pool, "primary", "Diğer", "")
+            .await
+            .unwrap();
+        sqlx::query("UPDATE identities SET primary_role_id = $1 WHERE id = $2")
+            .bind(other)
+            .bind(ids[1])
+            .execute(&pool)
+            .await
+            .unwrap();
         let body = format!(
             "name=Test+Rol%C3%BC&title=Uzman&entitlement={}&pa.{}=true",
             catalog.gg_vpn, catalog.ad
@@ -1115,6 +1160,23 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(published, 0);
+
+        // ADR-055 madde 1: taslak beklerken role atanan kimlik onay anindaki sayiya girer.
+        sqlx::query("UPDATE identities SET primary_role_id = $1 WHERE id = $2")
+            .bind(role)
+            .bind(ids[1])
+            .execute(&pool)
+            .await
+            .unwrap();
+        let page = body_string(
+            app.clone()
+                .oneshot(request("GET", &url, "", &second))
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert!(page.contains("2 kimliği etkileyecek"), "{page}");
+        assert!(page.contains("1 kimlikti, onay anında 2"), "{page}");
 
         // Ikinci Sistem yoneticisi onaylar: model yazilir, taslak duser, isler acilir.
         let page =

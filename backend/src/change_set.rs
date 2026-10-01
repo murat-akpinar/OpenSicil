@@ -613,8 +613,22 @@ pub struct StagedDefinition {
     pub code: String,
     #[serde(default)]
     pub parent_id: Option<i64>,
+    /// ADR-007: tek degerli ayarlar okunacak mi (birincil rol ve departman).
+    #[serde(default)]
+    pub with_settings: bool,
     pub applies: usize,
     pub observed: usize,
+}
+
+impl StagedDefinition {
+    pub fn as_draft(&self, owner: Owner, id: i64) -> Draft<'_> {
+        Draft {
+            owner,
+            id,
+            edit: &self.edit,
+            with_settings: self.with_settings,
+        }
+    }
 }
 
 pub struct Pending {
@@ -872,6 +886,7 @@ mod tests {
             title: "Uzman".to_string(),
             code: String::new(),
             parent_id: None,
+            with_settings: true,
             applies: 42,
             observed: 3,
         };
@@ -901,6 +916,7 @@ mod tests {
                 title: String::new(),
                 code: String::new(),
                 parent_id: None,
+                with_settings: true,
                 applies: 42,
                 observed: 0,
             },
