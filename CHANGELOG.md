@@ -26,6 +26,7 @@
 ### Düzeltmeler
 
 - Arayüz kökü 404 veriyordu, kabuğun / bağlantısı rotasızdı
+- Değişen statik varlıklar artık ETag ile doğrulanıyor
 
 ### Testler
 
