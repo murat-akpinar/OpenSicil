@@ -39,6 +39,7 @@
 - Arayüz kabuğu kapanışı — güvenlik ve test
 - Fren ve onay fazı kapanışı — güvenlik ve test
 - Gerçek Windows AD doğrulaması — üç ⊞ sorusu cevaplandı
+- Mutabakat gerçek Windows AD'ye karşı doğrulandı (29 Hogwarts hesabı)
 
 ### Yeniden düzenleme
 
