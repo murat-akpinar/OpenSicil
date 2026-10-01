@@ -183,6 +183,9 @@ pub struct DesiredState {
     pub password_reset_due: bool,
     /// ADR-048: iptal hedefte dogrulandi; saklama sifir, parola sifirlanmaz.
     pub cancellation_effective: bool,
+    /// ADR-040: rol/departman "hesap acilsin = hayir" diyor ama bagli hesap var;
+    /// hesap yonetilmeye devam eder, mutabakat "rol hesap ongormuyor" bilgisi yazar.
+    pub provision_not_expected: bool,
 }
 
 pub fn desired_state(
@@ -227,7 +230,14 @@ pub fn desired_state(
         account_expires: t.end_at,
         password_reset_due,
         cancellation_effective,
+        provision_not_expected: link.is_some() && !provision_expected(model),
     }
+}
+
+fn provision_expected(model: &Model) -> bool {
+    resolve_single_valued(model)
+        .provision_account
+        .unwrap_or(model.target.provision_account)
 }
 
 fn days(count: u32) -> i64 {
@@ -275,10 +285,7 @@ fn present_if_provisioned(
     link: Option<&AccountLink>,
     enabled: bool,
 ) -> AccountPresence {
-    let provision = resolve_single_valued(model)
-        .provision_account
-        .unwrap_or(model.target.provision_account);
-    if link.is_none() && !provision {
+    if link.is_none() && !provision_expected(model) {
         AccountPresence::NotProvisioned
     } else {
         AccountPresence::Present { enabled }
@@ -694,6 +701,38 @@ mod tests {
             "hiç hesabı yoksa iptal doğrudan (ADR-038)"
         );
         assert_eq!(s.account, AccountPresence::Absent);
+    }
+
+    // ADR-040: ayar `hayir` + bagli hesap → yonetim surer, yalnizca bilgi bayragi.
+    #[test]
+    fn provision_not_expected_flag_only_with_linked_account() {
+        let mut model = example_model();
+        let on = desired_state(
+            &active_timeline(),
+            &model,
+            Some(&provisioned_link()),
+            &clock(),
+        );
+        assert!(!on.provision_not_expected);
+        model.primary_role.settings.provision_account = Some(false);
+        let linked = desired_state(
+            &active_timeline(),
+            &model,
+            Some(&provisioned_link()),
+            &clock(),
+        );
+        assert!(linked.provision_not_expected);
+        assert_eq!(linked.account, AccountPresence::Present { enabled: true });
+        assert!(
+            matches!(linked.container, Container::Item(_)),
+            "bagli hesabin OU'su role gore surer"
+        );
+        let unlinked = desired_state(&active_timeline(), &model, None, &clock());
+        assert!(
+            !unlinked.provision_not_expected,
+            "hesap yoksa bilgi degil karar"
+        );
+        assert_eq!(unlinked.account, AccountPresence::NotProvisioned);
     }
 
     #[test]

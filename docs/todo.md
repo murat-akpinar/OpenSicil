@@ -105,8 +105,9 @@ Kurallar:
   - Not: ADR-081 — istek ve karar `identities.requested_username`/`name_conflict_override` (0010, backend yazar), adı yine worker üretir; kişi sayfasında müdahale bloğu (farklı ad / sıradaki ad / `/used-names` serbest bırakma); sahiplenme (ipucu) seçeneği Faz 5
 - [x] Eşleme izinli listesi + "sadece boşsa yaz" ([ADR-029](decisions/029-esleme-hedef-oznitelikleri-izinli-liste.md), [ADR-034](decisions/034-sam-upn-esleme-disi-ve-bossa-yaz.md))
   - Not: ADR-082 — `attribute_mappings` tablosu + `/targets/{id}/mappings` ekranı + ikiz `mapping_rules.rs`; worker her işte doğrular (ihlal müdahale), mevcut hesapta öznitelik farkını tek modify ile yazar; `manager` eşlemesi ADR-040/041 ile burada geldi (yönetici hedefte yoksa dokunulmaz); Zimbra satırları Zimbra connector'ıyla çalışır
-- [ ] Belirsiz bileşen kuralı: "hesap açılsın=hayır" mevcut hesabı silmez ([ADR-040](decisions/040-motor-belirsiz-degere-dokunmaz.md))
+- [x] Belirsiz bileşen kuralı: "hesap açılsın=hayır" mevcut hesabı silmez ([ADR-040](decisions/040-motor-belirsiz-degere-dokunmaz.md))
   - Not: etki önizlemesi burada yoktur; model farkı 3f'te tek fonksiyonla yazılır
+  - Not: `desired_state` zaten ayarı yalnızca hesap yokken okuyordu; `provision_not_expected` bayrağı eklendi (iş sonucunda "rol hesap öngörmüyor" bilgisi, 3d mutabakat aynı bayrağı bulgu yapar). Kayıp hesap ve yönetici belirsizliği lab/birim testinde; "bağlantıyı kopar ve yeniden aç" (Sistem yöneticisi) 3c silme/saklama kutucuğuyla
 - [ ] Faz kapanışı: güvenlik ve test
   - (1a'daki kapanış şablonunun aynısı)
 

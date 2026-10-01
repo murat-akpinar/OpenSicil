@@ -144,7 +144,14 @@ async fn reconcile_ad(c: &AdJob<'_>, ldap: &mut Ldap) -> Result<String, JobError
         (None, AccountPresence::Present { enabled }) => provision(c, ldap, enabled).await,
         (None, presence) => Ok(format!("hesap yok ve açılmayacak: {presence:?}")),
         (Some(link), AccountPresence::Present { enabled }) => {
-            reconcile_existing(c, ldap, link, enabled).await
+            let result = reconcile_existing(c, ldap, link, enabled).await?;
+            // ADR-040: ayar yalnizca hesap yokken okunur; bagli hesap yonetilmeye devam
+            // eder, mutabakat (3d) ayni bayragi "rol hesap ongormuyor" bulgusu yapar.
+            Ok(if c.desired.provision_not_expected {
+                format!("{result}; bilgi: rol hesap öngörmüyor, mevcut hesap yönetiliyor (ADR-040)")
+            } else {
+                result
+            })
         }
         (Some(_), AccountPresence::Absent) => {
             Ok("hesap silinmeli; silme saklama kutucuğuyla (3c) gelir".to_string())
@@ -152,8 +159,9 @@ async fn reconcile_ad(c: &AdJob<'_>, ldap: &mut Ldap) -> Result<String, JobError
         (Some(_), AccountPresence::AwaitingDeletionApproval) => {
             Ok("silinmeyi bekliyor (ADR-024)".to_string())
         }
+        // desired_state bagli hesapta NotProvisioned uretmez (ADR-040); savunma dali
         (Some(_), AccountPresence::NotProvisioned) => {
-            Ok("bağlı hesap var; 'hesap açılsın = hayır' onu silmez (ADR-040)".to_string())
+            Ok("'hesap açılsın = hayır' yalnızca hesap yokken okunur (ADR-040)".to_string())
         }
     }
 }
@@ -758,6 +766,15 @@ mod tests {
             .await
             .unwrap();
 
+        // ADR-040: rol artik "hesap acilsin = hayir" diyor; bagli hesap yine yonetilir.
+        for sql in [
+            "UPDATE role_target_settings SET provision_account = FALSE WHERE target_system_id = $1",
+            "UPDATE department_target_settings SET provision_account = FALSE WHERE target_system_id = $1",
+            "UPDATE target_systems SET provision_account_default = FALSE WHERE id = $1",
+        ] {
+            sqlx::query(sql).bind(seed.ad).execute(&pool).await.unwrap();
+        }
+
         // ayrilis: pasiflestirme (yikici niyet), applied_state departed
         sqlx::query("UPDATE identities SET end_at = now() - interval '1 hour' WHERE id = $1")
             .bind(seed.identity)
@@ -766,6 +783,7 @@ mod tests {
             .unwrap();
         let departed = run_job(&pool, &job, &env(false)).await.unwrap();
         assert!(departed.contains("pasifleştirildi"), "{departed}");
+        assert!(departed.contains("rol hesap öngörmüyor"), "{departed}");
         assert!(
             !ad_account::find_by_guid(&mut ldap, &guid)
                 .await
@@ -774,7 +792,15 @@ mod tests {
                 .enabled
         );
 
+        // ADR-040: hedefte elle silinmis bagli hesap yeniden acilmaz, "kayip hesap".
         ldap.delete(&account.dn).await.unwrap().success().unwrap();
+        let lost = run_job(&pool, &job, &env(false)).await.unwrap();
+        assert!(lost.contains("kayıp hesap"), "{lost}");
+        let links: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM account_links")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(links, 1, "bağlantı korunur, yeni hesap açılmaz");
         ldap.unbind().await.ok();
         drop(pool);
         test_support::drop_temp_db(&admin_pool, &db_name).await;
