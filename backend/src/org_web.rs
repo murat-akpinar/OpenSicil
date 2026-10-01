@@ -9,7 +9,10 @@ use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::Router;
 
+use std::collections::HashMap;
+
 use crate::change_set::{self, Draft, Impact, Pending, StagedDefinition};
+use crate::desired_state as ds;
 use crate::i18n::Lang;
 use crate::identity_web::{allowed, audit_operator, forbidden, internal, OperatorSession};
 use crate::operator_session::Operator;
@@ -108,26 +111,62 @@ impl Fields {
     }
 }
 
+#[derive(Clone)]
 struct ItemView {
     id: i64,
     label: String,
     selected: bool,
 }
 
+/// Onay kutulari onek basina katlanir gruplara ayrilir: 25 kutuyu tek sutunda
+/// dizmek "nereye ekleyecegim" sorusunu cevapsiz birakiyordu.
+struct MembershipGroup {
+    /// Katalog adinin son parcasindan onceki kismi (`GG-Course-Charms` → `GG-Course`)
+    title: String,
+    items: Vec<ItemView>,
+    selected: usize,
+    /// Secili oge tasiyan grup acik gelir
+    open: bool,
+}
+
 struct TargetView {
     target_id: i64,
     target_name: String,
-    memberships: Vec<ItemView>,
+    groups: Vec<MembershipGroup>,
+    /// Katalogda hic uyelik ogesi yok mu
+    empty: bool,
     containers: Vec<ItemView>,
     provision: &'static str,
     email_domain: String,
     upn_suffix: String,
+    /// "Su an gecerli" satirlari: dort tek degerli ayarin cozulmus degeri ve
+    /// hangi kaynaktan geldigi (ADR-017 oncelik sirasi)
+    effective: Vec<Effective>,
 }
 
+/// Bir tek degerli ayarin cozulmus hali; `desired_state::resolve_single_valued`
+/// ne dondurduyse o — ekran ikinci bir oncelik algoritmasi calistirmaz.
+struct Effective {
+    /// i18n anahtari: `def.provision` / `def.container` / …
+    label: &'static str,
+    value: String,
+    /// Degerin nereden geldigini soyleyen hazir cumle ("Teachers tanimindan",
+    /// "bu tanimdan", "hedef sistem varsayilani")
+    from: String,
+}
+
+/// En az bu kadar ogesi olan onek kendi grubunu acar; altinda kalanlar
+/// "diger" grubunda toplanir — tek elemanli on bir baslik liste olmaz.
+const MIN_GROUP: usize = 2;
+
+/// Uyelik etiketinde yalnizca ad: grup adlari tekil, DN'i yanina yazmak 25
+/// satirlik bir duvar uretiyordu. Konteynerde DN sart — ayni dizinde on bir
+/// farkli `OU=Users` olabilir, yalnizca ad hangisi oldugunu soylemez.
 fn item_label(c: &org::CatalogChoice, lang: Lang) -> String {
     let mut label = c.display_name.clone();
-    if !c.location.is_empty() && c.location != c.display_name {
-        label.push_str(&format!(" ({})", c.location));
+    let container = c.kind != "group" && c.kind != "list";
+    if container && !c.location.is_empty() && c.location != c.display_name {
+        label = c.location.clone();
     }
     if c.missing {
         label.push_str(lang.t("catalog.missing"));
@@ -135,7 +174,82 @@ fn item_label(c: &org::CatalogChoice, lang: Lang) -> String {
     label
 }
 
-fn target_views(def: &Definition, options: &CatalogOptions, lang: Lang) -> Vec<TargetView> {
+/// `GG-Course-Charms` → `GG-Course`; ayirici yoksa bos (gruplanmaz).
+fn name_prefix(name: &str) -> &str {
+    match name.rfind('-') {
+        Some(i) if i > 0 => &name[..i],
+        _ => "",
+    }
+}
+
+fn group_memberships(items: Vec<(String, ItemView)>, other: &'static str) -> Vec<MembershipGroup> {
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    for (name, _) in &items {
+        *counts.entry(name_prefix(name)).or_default() += 1;
+    }
+    let mut groups: Vec<MembershipGroup> = Vec::new();
+    for (name, item) in &items {
+        let prefix = name_prefix(name);
+        let title = match counts.get(prefix) {
+            Some(n) if *n >= MIN_GROUP && !prefix.is_empty() => prefix,
+            _ => other,
+        };
+        match groups.iter_mut().find(|g| g.title == title) {
+            Some(g) => g.items.push(ItemView { ..item.clone() }),
+            None => groups.push(MembershipGroup {
+                title: title.to_string(),
+                items: vec![item.clone()],
+                selected: 0,
+                open: false,
+            }),
+        }
+    }
+    for g in &mut groups {
+        g.selected = g.items.iter().filter(|i| i.selected).count();
+        g.open = g.selected > 0;
+    }
+    // "Diger" en sona: adlandirilmis gruplar once okunsun.
+    groups.sort_by_key(|g| (g.title == other, g.title.clone()));
+    groups
+}
+
+/// Tek degerli ayarlarin kaynaklari: tanimin kendisi + ust departmanlar +
+/// hedef varsayilani. Bos gelirse ekran yalnizca "su an gecerli" satirini
+/// atlar, form calismaya devam eder.
+struct Chain {
+    owner: Owner,
+    sources: Vec<org::SettingSource>,
+    targets: Vec<org::TargetRow>,
+}
+
+async fn load_chain(state: &AppState, owner: Owner, id: i64) -> Result<Chain, sqlx::Error> {
+    Ok(Chain {
+        owner,
+        sources: org::setting_sources(&state.pool, owner, id).await?,
+        targets: org::list_targets(&state.pool).await?,
+    })
+}
+
+impl Chain {
+    fn rows(&self, target: i64, options: &CatalogOptions, lang: Lang) -> Vec<Effective> {
+        let Some(defaults) = self.targets.iter().find(|t| t.id == target) else {
+            return Vec::new();
+        };
+        let chain: Vec<&org::SettingSource> = self
+            .sources
+            .iter()
+            .filter(|s| s.target_id == target)
+            .collect();
+        effective_rows(self.owner, &chain, defaults, options, lang)
+    }
+}
+
+fn target_views(
+    def: &Definition,
+    options: &CatalogOptions,
+    chain: &Chain,
+    lang: Lang,
+) -> Vec<TargetView> {
     let items = |list: &[org::CatalogChoice], target: i64, pick: &dyn Fn(i64) -> bool| {
         list.iter()
             .filter(|c| c.target_id == target)
@@ -146,26 +260,155 @@ fn target_views(def: &Definition, options: &CatalogOptions, lang: Lang) -> Vec<T
             })
             .collect::<Vec<_>>()
     };
+    let named = |target: i64| {
+        options
+            .memberships
+            .iter()
+            .filter(|c| c.target_id == target)
+            .map(|c| {
+                (
+                    c.display_name.clone(),
+                    ItemView {
+                        id: c.id,
+                        label: item_label(c, lang),
+                        selected: def.entitlement_ids.contains(&c.id),
+                    },
+                )
+            })
+            .collect::<Vec<_>>()
+    };
     def.settings
         .iter()
-        .map(|s| TargetView {
-            target_id: s.target_id,
-            target_name: s.target_name.clone(),
-            memberships: items(&options.memberships, s.target_id, &|id| {
-                def.entitlement_ids.contains(&id)
-            }),
-            containers: items(&options.containers, s.target_id, &|id| {
-                s.container_item_id == Some(id)
-            }),
-            provision: match s.provision_account {
-                Some(true) => "true",
-                Some(false) => "false",
-                None => "",
-            },
-            email_domain: s.email_domain.clone(),
-            upn_suffix: s.upn_suffix.clone(),
+        .map(|s| {
+            let named = named(s.target_id);
+            TargetView {
+                target_id: s.target_id,
+                target_name: s.target_name.clone(),
+                empty: named.is_empty(),
+                groups: group_memberships(named, lang.t("def.other_group")),
+                containers: items(&options.containers, s.target_id, &|id| {
+                    s.container_item_id == Some(id)
+                }),
+                provision: match s.provision_account {
+                    Some(true) => "true",
+                    Some(false) => "false",
+                    None => "",
+                },
+                email_domain: s.email_domain.clone(),
+                upn_suffix: s.upn_suffix.clone(),
+                effective: chain.rows(s.target_id, options, lang),
+            }
         })
         .collect()
+}
+
+/// Kaynak satirlarini `desired_state`'in bekledigi modele cevirir. Departman
+/// sayfasinda zincir departmanlardan, rol sayfasinda tek satir birincil
+/// rolden gelir; sira **burada** kurulur, oncelik `resolve_single_valued`'da.
+fn model_of(owner: Owner, chain: &[&org::SettingSource], target: &org::TargetRow) -> ds::Model {
+    let source = |s: &org::SettingSource| ds::Source {
+        entitlements: Vec::new(),
+        settings: ds::SingleValued {
+            provision_account: s.provision,
+            container: s.container_item_id,
+            email_domain: s.email_domain.clone(),
+            upn_suffix: s.upn_suffix.clone(),
+        },
+    };
+    let (primary, departments) = match owner {
+        Owner::Role => (chain.first().map(|s| source(s)).unwrap_or_default(), vec![]),
+        Owner::Department => (
+            ds::Source::default(),
+            chain.iter().map(|s| source(s)).collect(),
+        ),
+    };
+    ds::Model {
+        base_entitlements: Vec::new(),
+        department_chain: departments,
+        primary_role: primary,
+        title: None,
+        additional_roles: Vec::new(),
+        target: ds::TargetDefaults {
+            provision_account: target.provision_account_default,
+            container: target.default_container_item_id,
+            retention_days: 0,
+            delete_requires_approval: false,
+            password_reset_delay_days: 0,
+        },
+    }
+}
+
+/// Zincirdeki ilk dolu satir — `resolve_single_valued` ile **ayni sirayi**
+/// okur (`model_of` kurdu); test ikisinin ayni degeri verdigini kilitler.
+fn winner<'a, T>(
+    chain: &[&'a org::SettingSource],
+    pick: impl Fn(&org::SettingSource) -> Option<T>,
+) -> Option<&'a org::SettingSource> {
+    chain.iter().copied().find(|s| pick(s).is_some())
+}
+
+fn effective_rows(
+    owner: Owner,
+    chain: &[&org::SettingSource],
+    target: &org::TargetRow,
+    options: &CatalogOptions,
+    lang: Lang,
+) -> Vec<Effective> {
+    let resolved = ds::resolve_single_valued(&model_of(owner, chain, target));
+    // Kaynak cumlesi burada kuruluyor: sablon yalnizca basiyor, "hedef sistem
+    // varsayilani tanimindan" gibi bir birlesim cikmasin.
+    let row = |label, value: Option<String>, from: Option<&org::SettingSource>| Effective {
+        label,
+        value: value.unwrap_or_else(|| lang.t("def.nobody_says").to_string()),
+        from: match from {
+            Some(s) if s.is_self => lang.t("def.from_self").to_string(),
+            Some(s) => lang.t1("def.from", &s.label),
+            None => lang.t("def.from_target_default").to_string(),
+        },
+    };
+    let container_name = |id: Option<i64>| {
+        let id = id?;
+        options
+            .containers
+            .iter()
+            .find(|c| c.id == id)
+            .map(|c| item_label(c, lang))
+    };
+    let yes_no = |v: bool| {
+        lang.t(match v {
+            true => "common.yes",
+            false => "common.no",
+        })
+        .to_string()
+    };
+    vec![
+        // `desired_state::provision_expected` ile ayni dususu yapar: kimse
+        // soylemezse hedefin varsayilani gecerli olur.
+        row(
+            "def.provision",
+            Some(yes_no(
+                resolved
+                    .provision_account
+                    .unwrap_or(target.provision_account_default),
+            )),
+            winner(chain, |s| s.provision),
+        ),
+        row(
+            "def.container",
+            container_name(resolved.container),
+            winner(chain, |s| s.container_item_id),
+        ),
+        row(
+            "def.email_domain",
+            resolved.email_domain.clone(),
+            winner(chain, |s| s.email_domain.clone()),
+        ),
+        row(
+            "def.upn_suffix",
+            resolved.upn_suffix.clone(),
+            winner(chain, |s| s.upn_suffix.clone()),
+        ),
+    ]
 }
 
 fn definition_edit(f: &Fields, def: &Definition) -> org::DefinitionEdit {
@@ -427,10 +670,14 @@ async fn render_role(state: &AppState, op: &Operator, id: i64, notice: Notice) -
         }
         (Err(e), _) | (_, Err(e)) => return internal("rol okunamadı", e),
     };
+    let chain = match load_chain(state, Owner::Role, id).await {
+        Ok(chain) => chain,
+        Err(e) => return internal("ayar zinciri okunamadı", e),
+    };
     render(&RoleTemplate {
         lang: op.lang,
         shell: Shell::of(op),
-        targets: target_views(&role.def, &options, op.lang),
+        targets: target_views(&role.def, &options, &chain, op.lang),
         show_settings: role.kind == "primary",
         role,
         error: notice.error,
@@ -715,10 +962,14 @@ async fn render_department(state: &AppState, op: &Operator, id: i64, notice: Not
         (Ok(d), Ok(o)) => (d, o),
         (Err(e), _) | (_, Err(e)) => return internal("departman seçenekleri okunamadı", e),
     };
+    let chain = match load_chain(state, Owner::Department, id).await {
+        Ok(chain) => chain,
+        Err(e) => return internal("ayar zinciri okunamadı", e),
+    };
     render(&DepartmentTemplate {
         lang: op.lang,
         shell: Shell::of(op),
-        targets: target_views(&dept.def, &options, op.lang),
+        targets: target_views(&dept.def, &options, &chain, op.lang),
         parents: parent_options(&dept, &departments),
         dept,
         error: notice.error,
@@ -1002,6 +1253,128 @@ mod tests {
 
     async fn cookie(pool: &sqlx::PgPool, authorities: &[&str]) -> String {
         cookie_as(pool, "rol.yoneticisi", authorities).await
+    }
+
+    fn source(label: &str, is_self: bool, container: Option<i64>) -> org::SettingSource {
+        org::SettingSource {
+            target_id: 1,
+            label: label.to_string(),
+            is_self,
+            provision: None,
+            container_item_id: container,
+            email_domain: None,
+            upn_suffix: None,
+        }
+    }
+
+    fn ad_target() -> org::TargetRow {
+        org::TargetRow {
+            id: 1,
+            kind: "ad".into(),
+            name: "Active Directory".into(),
+            provision_account_default: true,
+            default_container_item_id: Some(99),
+            retention_days: 0,
+            delete_requires_approval: false,
+            password_reset_delay_days: 0,
+        }
+    }
+
+    fn catalog(ids: &[(i64, &str)]) -> CatalogOptions {
+        CatalogOptions {
+            memberships: Vec::new(),
+            containers: ids
+                .iter()
+                .map(|(id, name)| org::CatalogChoice {
+                    id: *id,
+                    target_id: 1,
+                    kind: "ou".into(),
+                    display_name: (*name).to_string(),
+                    location: String::new(),
+                    missing: false,
+                })
+                .collect(),
+        }
+    }
+
+    // ADR-038: ekran ikinci bir oncelik algoritmasi calistirmaz. "Kazandi" diye
+    // isaretlenen kaynagin degeri `resolve_single_valued`'in dondurdugu deger
+    // olmali; bu test siranin iki yerde ayrisabilmesini engelliyor.
+    #[test]
+    fn the_row_marked_as_the_winner_carries_what_resolve_single_valued_returns() {
+        // Yalnizca ust departmanlar soyluyor: yakin olan kazanir.
+        let chain = [
+            source("Charms", true, None),
+            source("Teachers", false, Some(7)),
+            source("Hogwarts", false, Some(8)),
+        ];
+        let refs: Vec<&org::SettingSource> = chain.iter().collect();
+        let target = ad_target();
+        let options = catalog(&[(7, "OU=Teachers"), (8, "OU=Hogwarts"), (99, "OU=Default")]);
+        let rows = effective_rows(Owner::Department, &refs, &target, &options, Lang::Tr);
+        let container = rows.iter().find(|r| r.label == "def.container").unwrap();
+        assert_eq!(container.value, "OU=Teachers");
+        assert_eq!(container.from, Lang::Tr.t1("def.from", "Teachers"));
+        assert_ne!(container.from, Lang::Tr.t("def.from_self"));
+        let resolved = ds::resolve_single_valued(&model_of(Owner::Department, &refs, &target));
+        assert_eq!(resolved.container, Some(7), "iki yol ayni kaynagi secmeli");
+
+        // Tanimin kendisi soyleyince o kazanir ve satir "bu tanimdan" der.
+        let own = [
+            source("Charms", true, Some(5)),
+            source("Teachers", false, Some(7)),
+        ];
+        let refs: Vec<&org::SettingSource> = own.iter().collect();
+        let options = catalog(&[(5, "OU=Charms"), (7, "OU=Teachers"), (99, "OU=Default")]);
+        let rows = effective_rows(Owner::Department, &refs, &target, &options, Lang::Tr);
+        let container = rows.iter().find(|r| r.label == "def.container").unwrap();
+        assert_eq!(container.value, "OU=Charms");
+        assert_eq!(container.from, Lang::Tr.t("def.from_self"));
+
+        // Hic kaynak soylemezse hedef varsayilani gecerli olur (ADR-017 son halka).
+        let none = [source("Charms", true, None)];
+        let refs: Vec<&org::SettingSource> = none.iter().collect();
+        let rows = effective_rows(Owner::Department, &refs, &target, &options, Lang::Tr);
+        let container = rows.iter().find(|r| r.label == "def.container").unwrap();
+        assert_eq!(container.value, "OU=Default");
+        assert_eq!(container.from, Lang::Tr.t("def.from_target_default"));
+        // provision'i da kimse soylemiyor: `provision_expected` gibi hedefe duser.
+        let provision = rows.iter().find(|r| r.label == "def.provision").unwrap();
+        assert_eq!(provision.value, Lang::Tr.t("common.yes"));
+    }
+
+    #[test]
+    fn memberships_fold_into_prefix_groups_and_the_selected_one_opens() {
+        let item = |id, selected| ItemView {
+            id,
+            label: String::new(),
+            selected,
+        };
+        let items = vec![
+            ("GG-Course-Charms".to_string(), item(1, false)),
+            ("GG-Course-Potions".to_string(), item(2, true)),
+            ("GG-House-Gryffindor".to_string(), item(3, false)),
+            ("GG-House-Slytherin".to_string(), item(4, false)),
+            ("GG-Teachers".to_string(), item(5, false)),
+            ("Tekil".to_string(), item(6, false)),
+        ];
+        let groups = group_memberships(items, "Diğer");
+        let titles: Vec<&str> = groups.iter().map(|g| g.title.as_str()).collect();
+        assert_eq!(
+            titles,
+            vec!["GG-Course", "GG-House", "Diğer"],
+            "diğer sonda"
+        );
+        let course = &groups[0];
+        assert_eq!(course.items.len(), 2);
+        assert_eq!(course.selected, 1);
+        assert!(course.open, "seçili öge taşıyan grup açık gelir");
+        assert!(!groups[1].open);
+        // Tek elemanli onek kendi basligini acmaz: `GG-Teachers` ve `Tekil` birlikte.
+        assert_eq!(groups[2].items.len(), 2);
+        // Her oge tam olarak bir kere gecer: form mukerrer deger gondermesin.
+        let total: usize = groups.iter().map(|g| g.items.len()).sum();
+        assert_eq!(total, 6);
     }
 
     async fn cookie_as(pool: &sqlx::PgPool, username: &str, authorities: &[&str]) -> String {

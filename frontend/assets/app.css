@@ -938,6 +938,36 @@
     display: none;
   }
 
+  /* Tanim sayfasinin bolum basligi (gruplar / hesap ayarlari / su an gecerli) */
+  .sec-title {
+    @apply mt-2 text-sm font-bold tracking-wide text-fg-dim;
+  }
+  .stack-tight {
+    @apply space-y-2;
+  }
+  /* Onek basina katlanan uyelik grubu; kapaliyken tek satir yer kaplar */
+  .group-box {
+    @apply rounded-xl border border-line px-3 py-2;
+  }
+  .group-box[open] {
+    @apply bg-bg;
+  }
+  .group-title {
+    @apply text-sm font-bold;
+  }
+  .group-box .summary-row::after {
+    content: "\f054"; /* chevron-right, acikken asagi doner */
+    @apply ml-auto text-xs text-fg-faint;
+    font-family: "CaskaydiaMono Nerd Font", monospace;
+  }
+  .group-box[open] .summary-row::after {
+    content: "\f078";
+  }
+  /* Onay kutulari genis ekranda iki sutun: 25 kutu tek sutunda duvar oluyordu */
+  .check-grid {
+    @apply mt-2 grid gap-1.5 sm:grid-cols-2;
+  }
+
   /* --- durum etiketleri --- */
   .badge {
     @apply inline-flex items-center gap-1 rounded-full border border-line px-2.5 py-0.5

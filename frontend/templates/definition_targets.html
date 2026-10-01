@@ -1,16 +1,42 @@
-{# Rol ve departman sayfalarinin ortak parcasi: hedef basina katalog uyelikleri ve tek degerli ayarlar #}
+{# Rol ve departman sayfalarinin ortak parcasi: hedef basina katalog uyelikleri
+   ve tek degerli ayarlar. Uyelikler onek basina katlanir gruplarda (25 kutuyu
+   tek sutunda dizmek "nereye ekleyecegim" sorusunu cevapsiz birakiyordu), her
+   tek degerli ayarin altinda "su an gecerli" satiri (ADR-017 oncelik sirasi;
+   deger `desired_state::resolve_single_valued`'dan geliyor). #}
 {% for t in targets %}
-<fieldset class="box space-y-2">
-  <legend class="px-1">{{ t.target_name }}</legend>
-  <p class="text-sm muted">{{ lang.t("def.memberships") }}</p>
-  {% if t.memberships.is_empty() %}
-  <p class="text-sm">{{ lang.t("def.catalog_empty") }}</p>
-  {% endif %}
-  {% for m in t.memberships %}
-  <label class="check"><input type="checkbox" name="entitlement" value="{{ m.id }}"{% if m.selected %} checked{% endif %}> {{ m.label }}</label>
+<section class="card">
+  <div class="card-head">
+    <span class="ico-tile"><i class="ico ico-server" aria-hidden="true"></i></span>
+    <h2 class="h2">{{ t.target_name }}</h2>
+  </div>
+
+  <h3 class="sec-title">{{ lang.t("def.memberships") }}</h3>
+  <p class="hint mb-3">{{ lang.t("def.memberships_hint") }}</p>
+  {% if t.empty %}
+  <p class="text-sm muted">{{ lang.t("def.catalog_empty") }}</p>
+  {% else %}
+  <div class="stack-tight">
+  {% for g in t.groups %}
+    <details class="group-box"{% if g.open %} open{% endif %}>
+      <summary class="summary-row">
+        <span class="group-title">{{ g.title }}</span>
+        <span class="badge badge-muted">{{ g.items.len() }}</span>
+        {% if g.selected > 0 %}<span class="badge badge-ok">{{ lang.t1("def.selected_n", g.selected) }}</span>{% endif %}
+      </summary>
+      <div class="check-grid">
+      {% for m in g.items %}
+        <label class="check"><input type="checkbox" name="entitlement" value="{{ m.id }}"{% if m.selected %} checked{% endif %}> {{ m.label }}</label>
+      {% endfor %}
+      </div>
+    </details>
   {% endfor %}
+  </div>
+  {% endif %}
+
   {% if show_settings %}
-  <div class="mt-3 grid gap-3 sm:grid-cols-2">
+  <h3 class="sec-title mt-6">{{ lang.t("def.account_settings") }}</h3>
+  <p class="hint mb-3">{{ lang.t("def.priority_hint") }}</p>
+  <div class="grid gap-4 sm:grid-cols-2">
     <div>
       <label class="label" for="pa.{{ t.target_id }}">{{ lang.t("def.provision") }}</label>
       <select class="input" id="pa.{{ t.target_id }}" name="pa.{{ t.target_id }}">
@@ -20,7 +46,7 @@
       </select>
     </div>
     <div>
-      <label class="label" for="ct.{{ t.target_id }}">OU / COS</label>
+      <label class="label" for="ct.{{ t.target_id }}">{{ lang.t("def.container") }}</label>
       <select class="input" id="ct.{{ t.target_id }}" name="ct.{{ t.target_id }}">
         <option value="">{{ lang.t("def.unset") }}</option>
         {% for c in t.containers %}<option value="{{ c.id }}"{% if c.selected %} selected{% endif %}>{{ c.label }}</option>{% endfor %}
@@ -35,6 +61,20 @@
       <input class="input" type="text" id="us.{{ t.target_id }}" name="us.{{ t.target_id }}" value="{{ t.upn_suffix }}">
     </div>
   </div>
+  {% if !t.effective.is_empty() %}
+  <h3 class="sec-title mt-6">{{ lang.t("def.effective") }}</h3>
+  <table class="tbl">
+    <tbody>
+    {% for e in t.effective %}
+      <tr>
+        <td class="w-56">{{ lang.t(e.label) }}</td>
+        <td>{{ e.value }}</td>
+        <td class="muted">{{ e.from }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
   {% endif %}
-</fieldset>
+  {% endif %}
+</section>
 {% endfor %}

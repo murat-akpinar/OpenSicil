@@ -576,6 +576,80 @@ pub async fn enqueue_affected(pool: &PgPool, owner: Owner, id: i64) -> Result<us
     Ok(ids.len())
 }
 
+/// Tek degerli bir ayari verebilecek kaynaklardan biri: tanimin kendisi, ust
+/// departmanlari ya da hedef sistemin varsayilani. Sirali gelir (yakindan koke,
+/// en sonda hedef varsayilani) — oncelik mantigi burada **yok**, siralamayi
+/// `desired_state::resolve_single_valued` okuyor (ADR-017/038).
+pub struct SettingSource {
+    pub target_id: i64,
+    pub label: String,
+    /// Tanimin kendi satiri mi (ekranda formun duzenledigi satir)
+    pub is_self: bool,
+    pub provision: Option<bool>,
+    pub container_item_id: Option<i64>,
+    pub email_domain: Option<String>,
+    pub upn_suffix: Option<String>,
+}
+
+type SourceRow = (
+    i64,
+    String,
+    bool,
+    Option<bool>,
+    Option<i64>,
+    Option<String>,
+    Option<String>,
+);
+
+const DEPARTMENT_SOURCES_SQL: &str = "WITH RECURSIVE up AS ( \
+       SELECT id, parent_id, name, 0 AS depth FROM departments WHERE id = $1 \
+       UNION ALL SELECT d.id, d.parent_id, d.name, up.depth + 1 \
+       FROM departments d JOIN up ON d.id = up.parent_id WHERE up.depth < $2) \
+     SELECT t.id, up.name, up.depth = 0, s.provision_account, s.container_item_id, \
+            s.email_domain, s.upn_suffix \
+     FROM up CROSS JOIN target_systems t \
+     LEFT JOIN department_target_settings s \
+       ON s.department_id = up.id AND s.target_system_id = t.id \
+     ORDER BY t.id, up.depth";
+
+const ROLE_SOURCES_SQL: &str = "SELECT t.id, r.name, true, s.provision_account, \
+            s.container_item_id, s.email_domain, s.upn_suffix \
+     FROM roles r CROSS JOIN target_systems t \
+     LEFT JOIN role_target_settings s ON s.role_id = r.id AND s.target_system_id = t.id \
+     WHERE r.id = $1 ORDER BY t.id";
+
+/// Tanimin kendisi + (departmansa) ust departmanlari, hedef basina sirali.
+/// Hedef varsayilani cagiran tarafta eklenir (`list_targets`).
+pub async fn setting_sources(
+    pool: &PgPool,
+    owner: Owner,
+    id: i64,
+) -> Result<Vec<SettingSource>, sqlx::Error> {
+    let sql = match owner {
+        Owner::Role => ROLE_SOURCES_SQL,
+        Owner::Department => DEPARTMENT_SOURCES_SQL,
+    };
+    let mut query = sqlx::query_as(sql).bind(id);
+    if matches!(owner, Owner::Department) {
+        query = query.bind(MAX_DEPTH);
+    }
+    let rows: Vec<SourceRow> = query.fetch_all(pool).await?;
+    Ok(rows
+        .into_iter()
+        .map(
+            |(target_id, label, is_self, provision, container, email, upn)| SettingSource {
+                target_id,
+                label,
+                is_self,
+                provision,
+                container_item_id: container,
+                email_domain: email,
+                upn_suffix: upn,
+            },
+        )
+        .collect())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CatalogChoice {
     pub id: i64,
