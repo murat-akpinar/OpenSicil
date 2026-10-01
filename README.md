@@ -60,7 +60,7 @@ flowchart TB
 
     subgraph user_zone["Kullanıcı bölgesi"]
         nginx["nginx :443 → :8080<br/>tek giriş kapısı<br/><b>TLS burada sonlanır</b> (ADR-066)"]
-        backend["backend :8080 (Rust: axum + sqlx)<br/>yönetim API'si + HTML (htmx + Tailwind, ADR-064)<br/>OIDC oturumu (ADR-065), değişiklik seti, iş oluşturma<br/><b>AD / Zimbra sırrı yok</b>"]
+        backend["backend :8080 (Rust: axum + sqlx)<br/>yönetim API'si + HTML (Tailwind, derlenmiş CSS — ADR-064/088)<br/>OIDC oturumu (ADR-065), değişiklik seti, iş oluşturma<br/><b>AD / Zimbra sırrı yok</b>"]
     end
 
     subgraph data["Veri"]
@@ -90,13 +90,13 @@ flowchart TB
 | Bileşen | Görev | Ağ |
 |---|---|---|
 | **nginx** | Tek giriş kapısı; host'ta yalnızca bu serviste port açık (443, TLS burada sonlanır — [ADR-066](docs/decisions/066-tls-nginxte-sonlanir.md); önünde ayrı bir proxy/Ingress varsa düz HTTP'ye alınabilir) | Dışarıya açık tek port |
-| **backend** | Yönetim API'si + HTML arayüzü (htmx + Tailwind şablonları, ayrı frontend yok — [ADR-064](docs/decisions/064-frontend-htmx-tailwind.md)), OIDC oturumu ([ADR-065](docs/decisions/065-oidc-akisi-backend.md)), doğrulama, değişiklik seti, iş oluşturma | Yalnızca nginx'ten gelen ve veritabanına giden bağlantı. **AD'ye ve Zimbra'ya hiç bağlanmaz** |
+| **backend** | Yönetim API'si + HTML arayüzü (Tailwind şablonları, ayrı frontend yok — [ADR-064](docs/decisions/064-frontend-htmx-tailwind.md); CSS, font ve tema betiği binary'ye gömülü, dış CDN yok — ADR-088), OIDC oturumu ([ADR-065](docs/decisions/065-oidc-akisi-backend.md)), doğrulama, değişiklik seti, iş oluşturma | Yalnızca nginx'ten gelen ve veritabanına giden bağlantı. **AD'ye ve Zimbra'ya hiç bağlanmaz** |
 | **worker** | Olması gereken durumu hesaplar, farkı bulur, connector'larla uygular, zamanlanmış işleri çalıştırır | Gelen bağlantı yok. Yalnızca veritabanına, AD'ye ve Zimbra'ya giden bağlantı |
 | **db** | PostgreSQL: kimlikler, roller, katalog, iş kuyruğu, denetim kaydı, OIDC oturumları | Yalnızca backend ve worker |
 
 **Neden iki süreç:** AD'de hesap açıp gruba ekleyebilen sırlar kurumun en değerli sırlarındandır. İnternete bakan bileşen bunları hiç görmezse, backend'i ele geçiren saldırgan en fazla veritabanına *niyet* yazabilir. Worker'ın *gerçeklerine* (hesap bağlantısı, katalog) yazamaz, çünkü veritabanı rolleri buna izin vermez ([ADR-015](docs/decisions/015-veritabani-rolleri.md)); worker da bu niyeti uygulamadan önce kendi sınırlarıyla kontrol eder ([ADR-014](docs/decisions/014-yonetim-kapsami-ve-toplu-degisiklik-freni.md)).
 
-**Neden ayrı bir frontend yok:** Backend zaten Rust; htmx + Tailwind ile kendi HTML'ini üretir, ayrı bir Node build zinciri ya da SPA container'ı eklenmez ([ADR-064](docs/decisions/064-frontend-htmx-tailwind.md)). nginx yalnızca TLS'i sonlandırıp isteği backend'e geçiren bir ters proxy'dir.
+**Neden ayrı bir frontend yok:** Backend zaten Rust; Tailwind ile kendi HTML'ini üretir, ayrı bir Node build zinciri ya da SPA container'ı eklenmez ([ADR-064](docs/decisions/064-frontend-htmx-tailwind.md)). CSS tek dosyaya derlenir (Tailwind standalone CLI) ve font/tema betiğiyle birlikte binary'ye gömülür; sayfa hiçbir dış adrese istek atmaz ([ADR-088](docs/decisions/088-arayuz-kabugu-derlenmis-css-tema-font.md)). nginx yalnızca TLS'i sonlandırıp isteği backend'e geçiren bir ters proxy'dir.
 
 **Migration:** Şema değişiklikleri, aynı imajın `migrate` alt komutuyla, şema sahibi rolüyle, tek seferlik bir container olarak çalışır — backend ve worker'ın rolleri migration çalıştıramaz ([ADR-015](docs/decisions/015-veritabani-rolleri.md), [ADR-061](docs/decisions/061-dagitim-sozlesmesi-compose-ve-kubernetes.md)).
 

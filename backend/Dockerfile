@@ -14,6 +14,9 @@ COPY src ./src
 # askama sablonlarini derleme aninda Rust koduna gomer (askama_derive); runtime
 # imajinda templates/ dizinine gerek yok.
 COPY templates ./templates
+# Statik varliklar da derleme aninda binary'ye gomulur (ADR-088: include_bytes!);
+# app.css kaynaktan uretilip commit'lenir (sh scripts/build-css.sh).
+COPY static ./static
 
 RUN cargo build --release --locked
 

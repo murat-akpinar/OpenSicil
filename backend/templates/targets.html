@@ -1,36 +1,34 @@
 {% extends "base.html" %}
 {% block title %}Hedef sistemler — OpenSicil{% endblock %}
-{% block width %}max-w-3xl{% endblock %}
 {% block content %}
-<div class="flex justify-between items-center mb-6">
-  <h1 class="text-xl font-semibold">Hedef sistem varsayılanları</h1>
-  <a class="text-sm underline" href="/login">Ana sayfa</a>
+<div class="page-head">
+  <h1 class="h1">Hedef sistem varsayılanları</h1>
 </div>
-{% if !error.is_empty() %}<p class="mb-4" style="color:#f38ba8;">{{ error }}</p>{% endif %}
+{% if !error.is_empty() %}<p class="alert alert-err">{{ error }}</p>{% endif %}
 {% for v in targets %}
-<form method="post" action="/targets/{{ v.target.id }}" class="space-y-3 rounded p-3 mb-6" style="border:1px solid #313244;">
-  <h2 class="font-medium">{{ v.target.name }} <a class="text-sm underline ml-2" href="/targets/{{ v.target.id }}/mappings">öznitelik eşlemesi</a></h2>
-  <label class="block text-sm"><input type="checkbox" name="provision_account_default" value="1"{% if v.target.provision_account_default %} checked{% endif %}> Hesap açılsın (varsayılan)</label>
+<form method="post" action="/targets/{{ v.target.id }}" class="card mb-6 space-y-3">
+  <h2 class="h2">{{ v.target.name }} <a class="link ml-2 text-sm" href="/targets/{{ v.target.id }}/mappings">öznitelik eşlemesi</a></h2>
+  <label class="check"><input type="checkbox" name="provision_account_default" value="1"{% if v.target.provision_account_default %} checked{% endif %}> Hesap açılsın (varsayılan)</label>
   <div>
-    <label class="block text-sm mb-1" for="ct-{{ v.target.id }}">Varsayılan OU / COS</label>
-    <select class="w-full rounded px-3 py-2 text-black" id="ct-{{ v.target.id }}" name="default_container_item_id">
+    <label class="label" for="ct-{{ v.target.id }}">Varsayılan OU / COS</label>
+    <select class="input" id="ct-{{ v.target.id }}" name="default_container_item_id">
       <option value="">Yok</option>
       {% for c in v.containers %}<option value="{{ c.id }}"{% if c.selected %} selected{% endif %}>{{ c.label }}</option>{% endfor %}
     </select>
   </div>
-  <div class="grid grid-cols-2 gap-3">
+  <div class="grid gap-3 sm:grid-cols-2">
     <div>
-      <label class="block text-sm mb-1" for="rd-{{ v.target.id }}">Saklama süresi (gün, ADR-024)</label>
-      <input class="w-full rounded px-3 py-2 text-black" type="number" min="0" id="rd-{{ v.target.id }}" name="retention_days" value="{{ v.target.retention_days }}">
+      <label class="label" for="rd-{{ v.target.id }}">Saklama süresi (gün, ADR-024)</label>
+      <input class="input" type="number" min="0" id="rd-{{ v.target.id }}" name="retention_days" value="{{ v.target.retention_days }}">
     </div>
     <div>
-      <label class="block text-sm mb-1" for="pr-{{ v.target.id }}">Ayrılışta parola sıfırlama gecikmesi (gün, ADR-033)</label>
-      <input class="w-full rounded px-3 py-2 text-black" type="number" min="0" id="pr-{{ v.target.id }}" name="password_reset_delay_days" value="{{ v.target.password_reset_delay_days }}">
+      <label class="label" for="pr-{{ v.target.id }}">Ayrılışta parola sıfırlama gecikmesi (gün, ADR-033)</label>
+      <input class="input" type="number" min="0" id="pr-{{ v.target.id }}" name="password_reset_delay_days" value="{{ v.target.password_reset_delay_days }}">
     </div>
   </div>
-  <label class="block text-sm"><input type="checkbox" name="delete_requires_approval" value="1"{% if v.target.delete_requires_approval %} checked{% endif %}> Silme onay gerektirir</label>
+  <label class="check"><input type="checkbox" name="delete_requires_approval" value="1"{% if v.target.delete_requires_approval %} checked{% endif %}> Silme onay gerektirir</label>
   {% if can_edit %}
-  <button class="w-full rounded py-2" style="background:#89b4fa; color:#1e1e2e;" type="submit">Kaydet</button>
+  <button class="btn btn-primary w-full" type="submit">Kaydet</button>
   {% endif %}
 </form>
 {% endfor %}

@@ -4,12 +4,34 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}OpenSicil{% endblock %}</title>
-<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/app.js"></script>
 {% block head %}{% endblock %}
 </head>
-<body class="min-h-screen flex items-center justify-center p-4" style="background:#1e1e2e; color:#cdd6f4; font-family: ui-monospace, monospace;">
-  <div class="w-full {% block width %}max-w-md{% endblock %} rounded-lg shadow-lg p-8" style="background:#181825; border:1px solid #313244;">
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="/"><span class="brand-mark">OS</span>OpenSicil</a>
+      {% block nav %}
+      <nav class="nav">
+        <a class="nav-link" href="/">Kimlikler</a>
+        <a class="nav-link" href="/upcoming">Yaklaşan bitişler</a>
+        <a class="nav-link" href="/roles">Roller</a>
+        <a class="nav-link" href="/departments">Departmanlar</a>
+        <a class="nav-link" href="/targets">Hedef sistemler</a>
+        <a class="nav-link" href="/used-names">Kullanılmış adlar</a>
+      </nav>
+      {% endblock %}
+      <div class="ml-auto flex items-center gap-2">
+        <button class="btn btn-ghost btn-sm" id="theme-toggle" type="button" aria-label="Temayı değiştir">☾</button>
+        {% block topbar_end %}
+        <form method="post" action="/logout"><button class="btn btn-ghost btn-sm" type="submit">Çıkış</button></form>
+        {% endblock %}
+      </div>
+    </div>
+  </header>
+  <main class="{% block page_class %}page{% endblock %}">
     {% block content %}{% endblock %}
-  </div>
+  </main>
 </body>
 </html>

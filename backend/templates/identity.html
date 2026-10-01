@@ -1,109 +1,118 @@
 {% extends "base.html" %}
 {% block title %}{{ page.person.name }} — OpenSicil{% endblock %}
-{% block width %}max-w-4xl{% endblock %}
 {% block content %}
-<div class="flex justify-between items-center mb-6">
-  <h1 class="text-xl font-semibold">{{ page.person.name }} <span class="text-sm rounded px-2 py-1 ml-2" style="background:#313244;">{{ page.person.state }}</span></h1>
-  <a class="text-sm underline" href="/login">Ana sayfa</a>
+<div class="page-head">
+  <div>
+    <h1 class="h1">{{ page.person.name }}</h1>
+    <p class="muted text-sm">{{ page.person.role }}{% if !page.person.department.is_empty() %} · {{ page.person.department }}{% endif %}</p>
+  </div>
+  <div class="flex items-center gap-2">
+    <span class="badge badge-{{ page.person.state_kind }}">{{ page.person.state }}</span>
+    {% if can_edit_names %}<a class="btn btn-sm" href="/identities/{{ page.person.id }}/edit">Kimliği düzenle</a>{% endif %}
+  </div>
 </div>
 
-<h2 class="font-medium mb-2">Kişi</h2>
-<table class="w-full text-sm mb-6">
-  <tr><td class="py-1" style="color:#a6adc8;">Sicil no</td><td>{{ page.person.employee_number }}</td><td style="color:#a6adc8;">Kimlik no</td><td>{{ page.person.national_id_masked }}</td></tr>
-  <tr><td class="py-1" style="color:#a6adc8;">Departman</td><td>{{ page.person.department }}</td><td style="color:#a6adc8;">Birincil rol</td><td>{{ page.person.role }}</td></tr>
-  <tr><td class="py-1" style="color:#a6adc8;">Yönetici</td><td>{{ page.person.manager }}{% if !page.lifecycle.manager_note.is_empty() %}<span style="color:#f9e2af;">{{ page.lifecycle.manager_note }}</span>{% endif %}</td><td style="color:#a6adc8;">Çalışma tipi</td><td>{{ page.person.employment_type }}</td></tr>
-  {% if page.lifecycle.subordinates > 0 %}
-  <tr><td class="py-1" style="color:#a6adc8;">Astlar</td><td colspan="3">{{ page.lifecycle.subordinates }} kişi{% if page.lifecycle.orphaned_subordinates %} <span style="color:#f38ba8;">— etkin yöneticileri boş kaldı: devir yöneticisi girin (ADR-041)</span>{% endif %}</td></tr>
-  {% endif %}
-  <tr><td class="py-1" style="color:#a6adc8;">Başlangıç</td><td>{{ page.person.start_date }}</td><td style="color:#a6adc8;">Bitiş anı</td><td>{{ page.person.end_at }}</td></tr>
-  <tr><td class="py-1" style="color:#a6adc8;">Cep telefonu</td><td>{{ page.person.mobile_phone }}</td><td style="color:#a6adc8;">Kullanıcı adı</td><td>{{ page.person.username }}</td></tr>
-  <tr><td class="py-1" style="color:#a6adc8;">E-posta</td><td>{{ page.person.email }}</td><td style="color:#a6adc8;">UPN</td><td>{{ page.person.upn }}</td></tr>
-  {% if !page.person.requested_username.is_empty() %}
-  <tr><td class="py-1" style="color:#a6adc8;">İstenen kullanıcı adı</td><td colspan="3">{{ page.person.requested_username }}{% if page.person.name_conflict_override %} (farklı kişi, sıradaki ad verilir){% endif %}</td></tr>
-  {% endif %}
-</table>
+<div class="card mb-6">
+  <dl class="kv">
+    <div><dt>Sicil no</dt><dd>{{ page.person.employee_number }}</dd></div>
+    <div><dt>Kimlik no</dt><dd>{{ page.person.national_id_masked }}</dd></div>
+    <div><dt>Departman</dt><dd>{{ page.person.department }}</dd></div>
+    <div><dt>Birincil rol</dt><dd>{{ page.person.role }}</dd></div>
+    <div><dt>Yönetici</dt><dd>{{ page.person.manager }}{% if !page.lifecycle.manager_note.is_empty() %} <span class="warn">{{ page.lifecycle.manager_note }}</span>{% endif %}</dd></div>
+    <div><dt>Çalışma tipi</dt><dd>{{ page.person.employment_type }}</dd></div>
+    <div><dt>Başlangıç</dt><dd>{{ page.person.start_date }}</dd></div>
+    <div><dt>Bitiş anı</dt><dd>{{ page.person.end_at }}</dd></div>
+    <div><dt>Cep telefonu</dt><dd>{{ page.person.mobile_phone }}</dd></div>
+    <div><dt>Kullanıcı adı</dt><dd>{{ page.person.username }}</dd></div>
+    <div><dt>E-posta</dt><dd>{{ page.person.email }}</dd></div>
+    <div><dt>UPN</dt><dd>{{ page.person.upn }}</dd></div>
+    {% if page.lifecycle.subordinates > 0 %}
+    <div class="sm:col-span-2"><dt>Astlar</dt><dd>{{ page.lifecycle.subordinates }} kişi{% if page.lifecycle.orphaned_subordinates %} <span class="err">— etkin yöneticileri boş kaldı: devir yöneticisi girin (ADR-041)</span>{% endif %}</dd></div>
+    {% endif %}
+    {% if !page.person.requested_username.is_empty() %}
+    <div class="sm:col-span-2"><dt>İstenen kullanıcı adı</dt><dd>{{ page.person.requested_username }}{% if page.person.name_conflict_override %} <span class="muted">(farklı kişi, sıradaki ad verilir)</span>{% endif %}</dd></div>
+    {% endif %}
+  </dl>
+</div>
 
 {% if page.name_intervention %}
-<div class="rounded p-3 mb-6" style="background:#313244;">
-  <h2 class="font-medium mb-1">Kullanıcı adı müdahalesi</h2>
-  <p class="text-sm mb-2">İş kullanıcı adı yüzünden bekliyor. Seçenekler (ADR-022/042): farklı bir ad girin; aynı ad başka birine aitse "farklı kişi, sıradaki adı ver" deyin; kullanılmış ad kaydındaysa Sistem yöneticisi <a class="underline" href="/used-names">serbest bırakır</a>. Kaydet, müdahaledeki işleri yeniden dener.</p>
+<div class="panel panel-warn mb-6">
+  <h2 class="h2 mb-1">Kullanıcı adı müdahalesi</h2>
+  <p class="text-sm mb-2">İş kullanıcı adı yüzünden bekliyor. Seçenekler (ADR-022/042): farklı bir ad girin; aynı ad başka birine aitse "farklı kişi, sıradaki adı ver" deyin; kullanılmış ad kaydındaysa Sistem yöneticisi <a class="link" href="/used-names">serbest bırakır</a>. Kaydet, müdahaledeki işleri yeniden dener.</p>
   {% if can_edit_names %}
   <form method="post" action="/identities/{{ page.person.id }}/names" class="flex gap-3 items-end">
     <div class="grow">
-      <label class="block text-sm mb-1" for="requested_username">Kullanıcı adı</label>
-      <input class="w-full rounded px-3 py-2 text-black" type="text" id="requested_username" name="requested_username" value="{{ page.person.requested_username }}" maxlength="20" autocomplete="off">
+      <label class="label" for="requested_username">Kullanıcı adı</label>
+      <input class="input" type="text" id="requested_username" name="requested_username" value="{{ page.person.requested_username }}" maxlength="20" autocomplete="off">
     </div>
-    <label class="text-sm"><input type="checkbox" name="name_conflict_override" value="1"{% if page.person.name_conflict_override %} checked{% endif %}> Farklı kişi, sıradaki adı ver</label>
-    <button class="rounded px-3 py-2" style="background:#89b4fa; color:#1e1e2e;" type="submit">Kaydet ve tekrar dene</button>
+    <label class="check"><input type="checkbox" name="name_conflict_override" value="1"{% if page.person.name_conflict_override %} checked{% endif %}> Farklı kişi, sıradaki adı ver</label>
+    <button class="btn btn-primary" type="submit">Kaydet ve tekrar dene</button>
   </form>
   {% endif %}
 </div>
 {% endif %}
 
 {% if can_edit_names && !page.lifecycle.deleted %}
-<h2 class="font-medium mb-2">Yaşam döngüsü</h2>
-<div class="grid grid-cols-2 gap-4 mb-6 text-sm">
+<h2 class="h2">Yaşam döngüsü</h2>
+<div class="mb-6 grid gap-4 text-sm md:grid-cols-2">
   {% if !page.lifecycle.departed %}
-  <form method="post" action="/identities/{{ page.person.id }}/departure" class="rounded p-3 space-y-2" style="border:1px solid #313244;">
-    <p class="font-medium">Planlı ayrılış</p>
-    <label class="block">Son çalışma günü <input class="w-full rounded px-2 py-1 text-black" type="date" name="end_date" value="{{ page.lifecycle.end_date }}" required></label>
-    <label class="block">Astların devir yöneticisi (kimlik no) <input class="w-full rounded px-2 py-1 text-black" type="text" name="handover_manager_id" value="{{ page.lifecycle.handover_manager_id }}"></label>
-    <button class="rounded px-3 py-1" style="background:#89b4fa; color:#1e1e2e;" type="submit">Kaydet</button>
+  <form method="post" action="/identities/{{ page.person.id }}/departure" class="card-tight space-y-2">
+    <p class="h2">Planlı ayrılış</p>
+    <label class="block">Son çalışma günü <input class="input" type="date" name="end_date" value="{{ page.lifecycle.end_date }}" required></label>
+    <label class="block">Astların devir yöneticisi (kimlik no) <input class="input" type="text" name="handover_manager_id" value="{{ page.lifecycle.handover_manager_id }}"></label>
+    <button class="btn btn-primary" type="submit">Kaydet</button>
   </form>
-  <form method="post" action="/identities/{{ page.person.id }}/emergency" class="rounded p-3 space-y-2" style="border:1px solid #f38ba8;">
-    <p class="font-medium" style="color:#f38ba8;">Acil ayrılış</p>
-    <label class="block">Gerekçe <input class="w-full rounded px-2 py-1 text-black" type="text" name="reason" required></label>
-    <label class="block">Astların devir yöneticisi (kimlik no) <input class="w-full rounded px-2 py-1 text-black" type="text" name="handover_manager_id" value="{{ page.lifecycle.handover_manager_id }}"></label>
-    <p class="text-xs" style="color:#a6adc8;">Hesap hemen pasifleşir ve parola sıfırlanır; açık Kerberos biletleri ve çevrimdışı cihaz önbelleği bundan etkilenmez (docs/05).</p>
-    <button class="rounded px-3 py-1" style="background:#f38ba8; color:#1e1e2e;" type="submit">Acil ayrılış</button>
+  <form method="post" action="/identities/{{ page.person.id }}/emergency" class="panel panel-err space-y-2">
+    <p class="err font-bold">Acil ayrılış</p>
+    <label class="block">Gerekçe <input class="input" type="text" name="reason" required></label>
+    <label class="block">Astların devir yöneticisi (kimlik no) <input class="input" type="text" name="handover_manager_id" value="{{ page.lifecycle.handover_manager_id }}"></label>
+    <p class="text-xs muted">Hesap hemen pasifleşir ve parola sıfırlanır; açık Kerberos biletleri ve çevrimdışı cihaz önbelleği bundan etkilenmez (docs/05).</p>
+    <button class="btn btn-danger" type="submit">Acil ayrılış</button>
   </form>
   {% else %}
-  <form method="post" action="/identities/{{ page.person.id }}/revert" class="rounded p-3 space-y-2" style="border:1px solid #313244;">
-    <p class="font-medium">Ayrılışı geri al (yıkıcı işlem, ADR-030)</p>
-    <label class="block">Dönüş günü (boşsa hemen) <input class="w-full rounded px-2 py-1 text-black" type="date" name="return_day"></label>
-    <button class="rounded px-3 py-1" style="background:#89b4fa; color:#1e1e2e;" type="submit">Geri al</button>
+  <form method="post" action="/identities/{{ page.person.id }}/revert" class="card-tight space-y-2">
+    <p class="h2">Ayrılışı geri al (yıkıcı işlem, ADR-030)</p>
+    <label class="block">Dönüş günü (boşsa hemen) <input class="input" type="date" name="return_day"></label>
+    <button class="btn btn-primary" type="submit">Geri al</button>
   </form>
   {% endif %}
   {% if page.lifecycle.suspension_start.is_empty() %}
-  <form method="post" action="/identities/{{ page.person.id }}/suspension" class="rounded p-3 space-y-2" style="border:1px solid #313244;">
-    <p class="font-medium">Askıya al (ADR-053)</p>
-    <label class="block">İlk gün <input class="w-full rounded px-2 py-1 text-black" type="date" name="suspension_start" required></label>
-    <label class="block">İznin son günü (boşsa elle kaldırılır) <input class="w-full rounded px-2 py-1 text-black" type="date" name="suspension_end"></label>
-    <button class="rounded px-3 py-1" style="background:#89b4fa; color:#1e1e2e;" type="submit">Askıya al</button>
+  <form method="post" action="/identities/{{ page.person.id }}/suspension" class="card-tight space-y-2">
+    <p class="h2">Askıya al (ADR-053)</p>
+    <label class="block">İlk gün <input class="input" type="date" name="suspension_start" required></label>
+    <label class="block">İznin son günü (boşsa elle kaldırılır) <input class="input" type="date" name="suspension_end"></label>
+    <button class="btn btn-primary" type="submit">Askıya al</button>
   </form>
   {% else %}
-  <form method="post" action="/identities/{{ page.person.id }}/suspension/lift" class="rounded p-3 space-y-2" style="border:1px solid #313244;">
-    <p class="font-medium">Askı: {{ page.lifecycle.suspension_start }} – {% if page.lifecycle.suspension_end.is_empty() %}açık uçlu{% else %}{{ page.lifecycle.suspension_end }} (hesaplar {{ page.lifecycle.return_day }} 00:00'da açılır){% endif %}</p>
-    <button class="rounded px-3 py-1" style="background:#89b4fa; color:#1e1e2e;" type="submit">Askıyı kaldır</button>
+  <form method="post" action="/identities/{{ page.person.id }}/suspension/lift" class="card-tight space-y-2">
+    <p class="h2">Askı: {{ page.lifecycle.suspension_start }} – {% if page.lifecycle.suspension_end.is_empty() %}açık uçlu{% else %}{{ page.lifecycle.suspension_end }} (hesaplar {{ page.lifecycle.return_day }} 00:00'da açılır){% endif %}</p>
+    <button class="btn btn-primary" type="submit">Askıyı kaldır</button>
   </form>
   {% endif %}
   {% if page.lifecycle.can_cancel && !page.lifecycle.cancelled %}
-  <form method="post" action="/identities/{{ page.person.id }}/cancel" class="rounded p-3 space-y-2" style="border:1px solid #313244;">
-    <p class="font-medium">Kayıt iptali (ADR-048)</p>
-    <p class="text-xs" style="color:#a6adc8;">Yazım hatası ya da hiç gelmeyen kişi için. Worker hesabın hiç kullanılmadığını doğrular; kullanılmışsa ayrılış olarak uygulanır. Ad yakılmaz.</p>
-    <button class="rounded px-3 py-1" style="background:#f9e2af; color:#1e1e2e;" type="submit">Kaydı iptal et</button>
+  <form method="post" action="/identities/{{ page.person.id }}/cancel" class="card-tight space-y-2">
+    <p class="h2">Kayıt iptali (ADR-048)</p>
+    <p class="text-xs muted">Yazım hatası ya da hiç gelmeyen kişi için. Worker hesabın hiç kullanılmadığını doğrular; kullanılmışsa ayrılış olarak uygulanır. Ad yakılmaz.</p>
+    <button class="btn btn-warn" type="submit">Kaydı iptal et</button>
   </form>
   {% endif %}
-  {% if page.lifecycle.cancelled %}<p style="color:#f9e2af;">Kayıt iptali istendi; worker hedefte doğruluyor.</p>{% endif %}
-  {% if page.lifecycle.emergency %}<p style="color:#f38ba8;">Acil ayrılış.</p>{% endif %}
+  {% if page.lifecycle.cancelled %}<p class="warn">Kayıt iptali istendi; worker hedefte doğruluyor.</p>{% endif %}
+  {% if page.lifecycle.emergency %}<p class="err">Acil ayrılış.</p>{% endif %}
 </div>
 {% endif %}
 
-<div class="flex justify-between items-center mb-2">
-  <h2 class="font-medium">Ek roller</h2>
-  {% if can_edit_names %}<a class="text-sm underline" href="/identities/{{ page.person.id }}/edit">Kimliği düzenle</a>{% endif %}
-</div>
+<h2 class="h2">Ek roller</h2>
 {% if page.additional_roles.is_empty() %}
-<p class="text-sm mb-2" style="color:#a6adc8;">Ek rol yok.</p>
+<p class="text-sm mb-2 muted">Ek rol yok.</p>
 {% else %}
-<table class="w-full text-sm mb-2">
-  <thead><tr class="text-left" style="color:#a6adc8;"><th>Rol</th><th>Bitiş (iznin son günü gibi, ADR-020)</th><th></th></tr></thead>
+<table class="tbl mb-2">
+  <thead><tr><th>Rol</th><th>Bitiş (iznin son günü gibi, ADR-020)</th><th></th></tr></thead>
   <tbody>
   {% for r in page.additional_roles %}
-    <tr style="border-top:1px solid #313244;">
-      <td class="py-1">{{ r.name }}</td>
+    <tr>
+      <td>{{ r.name }}</td>
       <td>{{ r.ends_on }}</td>
-      <td>{% if can_edit_names %}<form method="post" action="/identities/{{ page.person.id }}/roles/{{ r.role_id }}/delete"><button class="text-sm underline" type="submit">Kaldır</button></form>{% endif %}</td>
+      <td>{% if can_edit_names %}<form method="post" action="/identities/{{ page.person.id }}/roles/{{ r.role_id }}/delete"><button class="btn btn-sm" type="submit">Kaldır</button></form>{% endif %}</td>
     </tr>
   {% endfor %}
   </tbody>
@@ -112,33 +121,33 @@
 {% if can_edit_names %}
 <form method="post" action="/identities/{{ page.person.id }}/roles" class="flex gap-2 items-end mb-6">
   <div class="grow">
-    <label class="block text-sm mb-1" for="role_id">Ek rol</label>
-    <select class="w-full rounded px-3 py-2 text-black" id="role_id" name="role_id" required>
+    <label class="label" for="role_id">Ek rol</label>
+    <select class="input" id="role_id" name="role_id" required>
       {% for c in page.role_options %}<option value="{{ c.id }}">{{ c.label }}</option>{% endfor %}
     </select>
   </div>
   <div>
-    <label class="block text-sm mb-1" for="ends_on">Bitiş (isteğe bağlı)</label>
-    <input class="rounded px-3 py-2 text-black" type="date" id="ends_on" name="ends_on">
+    <label class="label" for="ends_on">Bitiş (isteğe bağlı)</label>
+    <input class="input" type="date" id="ends_on" name="ends_on">
   </div>
-  <button class="rounded px-3 py-2" style="background:#89b4fa; color:#1e1e2e;" type="submit">Ekle</button>
+  <button class="btn btn-primary" type="submit">Ekle</button>
 </form>
 {% endif %}
 
-<div class="flex justify-between items-center mb-2">
-  <h2 class="font-medium">Hesaplar ve hedefteki fark</h2>
+<div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+  <h2 class="h2 mb-0">Hesaplar ve hedefteki fark</h2>
   {% if can_first_password && !page.lifecycle.deleted %}
   <form method="post" action="/identities/{{ page.person.id }}/first-password">
-    <button class="rounded px-3 py-1 text-sm" style="background:#a6e3a1; color:#1e1e2e;" type="submit" title="Yalnızca kullanılmamış hesaba verilir (ADR-046); bir kez gösterilir (ADR-036)">İlk parolayı ver</button>
+    <button class="btn btn-ok btn-sm" type="submit" title="Yalnızca kullanılmamış hesaba verilir (ADR-046); bir kez gösterilir (ADR-036)">İlk parolayı ver</button>
   </form>
   {% endif %}
 </div>
-<table class="w-full text-sm mb-6">
-  <thead><tr class="text-left" style="color:#a6adc8;"><th>Hedef</th><th>Hesap</th><th>Köken / mod</th><th>Uygulanan</th><th>Fark</th><th></th></tr></thead>
+<table class="tbl mb-6">
+  <thead><tr><th>Hedef</th><th>Hesap</th><th>Köken / mod</th><th>Uygulanan</th><th>Fark</th><th></th></tr></thead>
   <tbody>
   {% for a in page.accounts %}
-    <tr style="border-top:1px solid #313244;">
-      <td class="py-1">{{ a.target }}</td>
+    <tr>
+      <td>{{ a.target }}</td>
       <td>{{ a.external_id }}</td>
       <td>{{ a.origin }} {{ a.mode }}</td>
       <td>{{ a.applied_state }}</td>
@@ -146,10 +155,10 @@
       <td>
         {# ADR-018/087: gozlem modunda fark yukaridadir; onay yonetime alir #}
         {% if a.observed %}
-          {% if a.manage_requested %}<span style="color:#f9e2af;">yönetime alma istendi</span>
+          {% if a.manage_requested %}<span class="warn">yönetime alma istendi</span>
           {% else if can_edit_names %}
           <form method="post" action="/identities/{{ page.person.id }}/accounts/{{ a.target_id }}/manage">
-            <button class="text-sm underline" type="submit" title="Bağlantı yönetilen moda geçer, motor yukarıdaki farkı uygular (ADR-018)">Yönetime al</button>
+            <button class="btn btn-sm" type="submit" title="Bağlantı yönetilen moda geçer, motor yukarıdaki farkı uygular (ADR-018)">Yönetime al</button>
           </form>
           {% endif %}
         {% endif %}
@@ -159,27 +168,27 @@
   </tbody>
 </table>
 
-<h2 class="font-medium mb-2">İşler</h2>
+<h2 class="h2">İşler</h2>
 {% if page.jobs.is_empty() %}
-<p class="mb-6" style="color:#a6adc8;">İş yok.</p>
+<p class="mb-6 muted">İş yok.</p>
 {% else %}
-<table class="w-full text-sm mb-6">
-  <thead><tr class="text-left" style="color:#a6adc8;"><th>Hedef</th><th>Durum</th><th>Deneme</th><th>Sonraki deneme</th><th>Açıklama</th><th></th></tr></thead>
+<table class="tbl mb-6">
+  <thead><tr><th>Hedef</th><th>Durum</th><th>Deneme</th><th>Sonraki deneme</th><th>Açıklama</th><th></th></tr></thead>
   <tbody>
   {% for j in page.jobs %}
-    <tr style="border-top:1px solid #313244;">
-      <td class="py-1">{{ j.target }}</td>
-      <td>{{ j.status }}</td>
+    <tr>
+      <td>{{ j.target }}</td>
+      <td><span class="badge badge-{{ j.status_kind }}">{{ j.status }}</span></td>
       <td>{{ j.attempts }}</td>
       <td>{{ j.next_attempt_at }}</td>
       <td>
-        {% if !j.summary.is_empty() %}<span style="color:#f38ba8;">{{ j.summary }}</span>{% endif %}
-        {% if !j.detail.is_empty() %}<details><summary class="text-xs" style="color:#a6adc8;">teknik ayrıntı</summary><code class="text-xs">{{ j.detail }}</code></details>{% endif %}
-        {% if !j.result.is_empty() %}<span style="color:#a6e3a1;">{{ j.result }}</span>{% endif %}
+        {% if !j.summary.is_empty() %}<span class="err">{{ j.summary }}</span>{% endif %}
+        {% if !j.detail.is_empty() %}<details><summary class="text-xs muted">teknik ayrıntı</summary><code class="text-xs">{{ j.detail }}</code></details>{% endif %}
+        {% if !j.result.is_empty() %}<span class="ok">{{ j.result }}</span>{% endif %}
       </td>
       <td>
         {% if can_retry && j.retryable %}
-        <form method="post" action="/identities/{{ page.person.id }}/jobs/{{ j.id }}/retry"><button class="text-sm underline" type="submit">Tekrar dene</button></form>
+        <form method="post" action="/identities/{{ page.person.id }}/jobs/{{ j.id }}/retry"><button class="btn btn-sm" type="submit">Tekrar dene</button></form>
         {% endif %}
       </td>
     </tr>
@@ -188,15 +197,15 @@
 </table>
 {% endif %}
 
-<h2 class="font-medium mb-2">Son olaylar</h2>
+<h2 class="h2">Son olaylar</h2>
 {% if page.events.is_empty() %}
-<p style="color:#a6adc8;">Olay yok.</p>
+<p class="muted">Olay yok.</p>
 {% else %}
-<table class="w-full text-sm">
-  <thead><tr class="text-left" style="color:#a6adc8;"><th>Zaman</th><th>Olay</th><th>Sonuç</th><th>Kim</th></tr></thead>
+<table class="tbl">
+  <thead><tr><th>Zaman</th><th>Olay</th><th>Sonuç</th><th>Kim</th></tr></thead>
   <tbody>
   {% for e in page.events %}
-    <tr style="border-top:1px solid #313244;"><td class="py-1">{{ e.at }}</td><td>{{ e.event_type }}</td><td>{{ e.outcome }}</td><td>{{ e.actor }}</td></tr>
+    <tr><td>{{ e.at }}</td><td>{{ e.event_type }}</td><td>{{ e.outcome }}</td><td>{{ e.actor }}</td></tr>
   {% endfor %}
   </tbody>
 </table>

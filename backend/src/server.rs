@@ -13,6 +13,8 @@ fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/api/health", get(health::health))
         .with_state(state.pool.clone())
+        // Statik varlıklar (ADR-088) operatör oturumu istemez: CSS/font giriş ekranında da gerekir
+        .merge(crate::assets::routes())
         .merge(
             web::routes()
                 .layer(axum::middleware::from_fn_with_state(

@@ -391,6 +391,17 @@ pub fn state_label(state: LifecycleState) -> &'static str {
     }
 }
 
+// Durum etiketinin rengi (arayuz kabugu, ADR-088): sablonda `badge badge-<kind>`.
+pub fn state_kind(state: LifecycleState) -> &'static str {
+    match state {
+        LifecycleState::Pending => "info",
+        LifecycleState::Active => "ok",
+        LifecycleState::Suspended => "warn",
+        LifecycleState::Departed => "err",
+        LifecycleState::Deleted => "muted",
+    }
+}
+
 // account_links.applied_state anahtarlari (worker engine::state_name ile ayni).
 pub fn state_key(state: LifecycleState) -> &'static str {
     match state {
@@ -435,6 +446,7 @@ pub struct Listed {
     pub name: String,
     pub employee_number: String,
     pub state: &'static str,
+    pub state_kind: &'static str,
 }
 
 // ponytail: kimlik basina bir durum sorgusu, liste 50 ile sinirli; arama
@@ -455,6 +467,7 @@ pub async fn recent(pool: &PgPool, time_zone: &str) -> Result<Vec<Listed>, sqlx:
             name,
             employee_number: employee_number.unwrap_or_default(),
             state: state.map(state_label).unwrap_or(""),
+            state_kind: state.map(state_kind).unwrap_or("muted"),
         });
     }
     Ok(listed)
@@ -478,6 +491,7 @@ pub struct Person {
     pub requested_username: String,
     pub name_conflict_override: bool,
     pub state: &'static str,
+    pub state_kind: &'static str,
 }
 
 // ADR-022/042: istek ve karar yalnizca ad henuz olusmamisken yazilir (false = olusmus).
@@ -517,6 +531,7 @@ pub struct Job {
     pub id: i64,
     pub target: String,
     pub status: &'static str,
+    pub status_kind: &'static str,
     pub attempts: i32,
     pub next_attempt_at: String,
     pub summary: String,
@@ -1041,6 +1056,7 @@ async fn load_person(
         requested_username: r.14.unwrap_or_default(),
         name_conflict_override: r.15,
         state: state_label(state),
+        state_kind: state_kind(state),
     })
 }
 
@@ -1187,6 +1203,17 @@ fn status_label(status: &str) -> &'static str {
     }
 }
 
+// Is durumunun rengi (arayuz kabugu, ADR-088): sablonda `badge badge-<kind>`.
+fn status_kind(status: &str) -> &'static str {
+    match status {
+        "queued" => "info",
+        "running" => "info",
+        "succeeded" => "ok",
+        "needs_intervention" => "err",
+        _ => "muted",
+    }
+}
+
 // Worker hata metni "sebep: teknik ayrinti" sozlesmesindedir (ADR-078 madde 6).
 pub fn split_error(last_error: &str) -> (String, String) {
     let text = last_error
@@ -1233,6 +1260,7 @@ pub(crate) async fn load_jobs(
                     id,
                     target,
                     status: status_label(&status),
+                    status_kind: status_kind(&status),
                     attempts,
                     next_attempt_at: next,
                     summary,

@@ -1,0 +1,341 @@
+/* Arayüz girdi dosyası (ADR-088). Çıktı: backend/static/app.css — `sh scripts/build-css.sh`
+   ile üretilir ve commit'lenir, include_bytes! ile binary'ye gömülür (backend/src/assets.rs).
+   Renkler Catppuccin: açık Latte, koyu Mocha (ADR-067). Şablonlarda satır içi renk yoktur;
+   buradaki token ve bileşen sınıfları kullanılır. */
+@import "tailwindcss";
+
+/* Tailwind'in kaynak taraması: bu dosya assets/ altında, şablonlar bir üstteki templates/ */
+@source "../templates";
+
+/* --- Catppuccin Latte (açık, varsayılan) --- */
+:root {
+  --ctp-bg: #eff1f5;
+  --ctp-bg-soft: #e6e9ef;
+  --ctp-bg-hard: #dce0e8;
+  --ctp-surface: #ccd0da;
+  --ctp-surface-2: #bcc0cc;
+  --ctp-line: #bcc0cc;
+  --ctp-fg: #4c4f69;
+  --ctp-fg-dim: #5c5f77;
+  --ctp-fg-faint: #8c8fa1;
+  --ctp-accent: #1e66f5;
+  --ctp-ok: #40a02b;
+  --ctp-err: #d20f39;
+  --ctp-warn: #df8e1d;
+  --ctp-info: #179299;
+  --ctp-on-accent: #eff1f5;
+  --ctp-ok-soft: #e3f2dd;
+  --ctp-warn-soft: #f8ecd8;
+  --ctp-err-soft: #f9dde2;
+  --ctp-info-soft: #d9efef;
+}
+
+/* Sistem koyu tercihi; operatör elle "light" seçmediyse */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ctp-bg: #1e1e2e;
+    --ctp-bg-soft: #181825;
+    --ctp-bg-hard: #11111b;
+    --ctp-surface: #313244;
+    --ctp-surface-2: #45475a;
+    --ctp-line: #313244;
+    --ctp-fg: #cdd6f4;
+    --ctp-fg-dim: #bac2de;
+    --ctp-fg-faint: #a6adc8;
+    --ctp-accent: #89b4fa;
+    --ctp-ok: #a6e3a1;
+    --ctp-err: #f38ba8;
+    --ctp-warn: #f9e2af;
+    --ctp-info: #94e2d5;
+    --ctp-on-accent: #1e1e2e;
+    --ctp-ok-soft: #2b3a2f;
+    --ctp-warn-soft: #3a382b;
+    --ctp-err-soft: #3a2b31;
+    --ctp-info-soft: #28383a;
+  }
+}
+
+/* Elle koyu seçimi (static/app.js, localStorage) */
+:root[data-theme="dark"] {
+  --ctp-bg: #1e1e2e;
+  --ctp-bg-soft: #181825;
+  --ctp-bg-hard: #11111b;
+  --ctp-surface: #313244;
+  --ctp-surface-2: #45475a;
+  --ctp-line: #313244;
+  --ctp-fg: #cdd6f4;
+  --ctp-fg-dim: #bac2de;
+  --ctp-fg-faint: #a6adc8;
+  --ctp-accent: #89b4fa;
+  --ctp-ok: #a6e3a1;
+  --ctp-err: #f38ba8;
+  --ctp-warn: #f9e2af;
+  --ctp-info: #94e2d5;
+  --ctp-on-accent: #1e1e2e;
+  --ctp-ok-soft: #2b3a2f;
+  --ctp-warn-soft: #3a382b;
+  --ctp-err-soft: #3a2b31;
+  --ctp-info-soft: #28383a;
+}
+
+/* `inline`: utility'ler değeri var() olarak taşır, tema değişkeni değişince renk değişir */
+@theme inline {
+  --color-bg: var(--ctp-bg);
+  --color-bg-soft: var(--ctp-bg-soft);
+  --color-bg-hard: var(--ctp-bg-hard);
+  --color-surface: var(--ctp-surface);
+  --color-surface-2: var(--ctp-surface-2);
+  --color-line: var(--ctp-line);
+  --color-fg: var(--ctp-fg);
+  --color-fg-dim: var(--ctp-fg-dim);
+  --color-fg-faint: var(--ctp-fg-faint);
+  --color-accent: var(--ctp-accent);
+  --color-ok: var(--ctp-ok);
+  --color-err: var(--ctp-err);
+  --color-warn: var(--ctp-warn);
+  --color-info: var(--ctp-info);
+  --color-on-accent: var(--ctp-on-accent);
+  --font-sans: "CaskaydiaMono Nerd Font", ui-monospace, "Cascadia Mono", monospace;
+  --font-mono: "CaskaydiaMono Nerd Font", ui-monospace, "Cascadia Mono", monospace;
+}
+
+/* Arayüz fontu self-host (ADR-067): yalnızca Regular ve Bold; italik kullanılmıyor */
+@font-face {
+  font-family: "CaskaydiaMono Nerd Font";
+  src: url("/static/CaskaydiaMonoNerdFont-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "CaskaydiaMono Nerd Font";
+  src: url("/static/CaskaydiaMonoNerdFont-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@layer base {
+  html {
+    color-scheme: light dark;
+  }
+  body {
+    background-color: var(--ctp-bg);
+    color: var(--ctp-fg);
+    font-family: "CaskaydiaMono Nerd Font", ui-monospace, monospace;
+  }
+  a {
+    color: var(--ctp-accent);
+  }
+  :focus-visible {
+    outline: 2px solid var(--ctp-accent);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  /* --- kabuk --- */
+  .topbar {
+    @apply sticky top-0 z-10 border-b border-line bg-bg-soft;
+  }
+  .topbar-inner {
+    @apply mx-auto flex max-w-6xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3;
+  }
+  .brand {
+    @apply flex items-center gap-2 font-bold tracking-tight text-fg no-underline;
+  }
+  .brand-mark {
+    @apply grid size-7 place-items-center rounded-md bg-accent text-sm font-bold text-on-accent;
+  }
+  .nav {
+    @apply flex flex-wrap items-center gap-1 text-sm;
+  }
+  .nav-link {
+    @apply rounded-md px-2 py-1 text-fg-dim no-underline hover:bg-surface hover:text-fg;
+  }
+  .page {
+    @apply mx-auto w-full max-w-6xl px-4 py-6;
+  }
+  .page-narrow {
+    @apply mx-auto w-full max-w-xl px-4 py-6;
+  }
+  .page-head {
+    @apply mb-6 flex flex-wrap items-center justify-between gap-3;
+  }
+  .h1 {
+    @apply text-xl font-bold tracking-tight;
+  }
+  .h2 {
+    @apply mb-3 text-base font-bold;
+  }
+
+  /* --- yüzeyler --- */
+  .card {
+    @apply rounded-xl border border-line bg-bg-soft p-5;
+  }
+  .card-tight {
+    @apply rounded-lg border border-line bg-bg-soft p-3;
+  }
+  .chip {
+    @apply rounded-md bg-surface px-2 py-0.5 text-sm;
+  }
+  .muted {
+    @apply text-fg-faint;
+  }
+  .err {
+    @apply text-err;
+  }
+  .warn {
+    @apply text-warn;
+  }
+  .ok {
+    @apply text-ok;
+  }
+
+  /* --- düğmeler --- */
+  .btn {
+    @apply inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-md
+           border border-line bg-surface px-3 py-1.5 text-sm font-bold text-fg no-underline
+           hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply border-transparent bg-accent text-on-accent hover:opacity-90;
+  }
+  .btn-ok {
+    @apply border-transparent bg-ok text-on-accent hover:opacity-90;
+  }
+  .btn-warn {
+    @apply border-transparent bg-warn text-on-accent hover:opacity-90;
+  }
+  .btn-danger {
+    @apply border-transparent bg-err text-on-accent hover:opacity-90;
+  }
+  .btn-ghost {
+    @apply border-transparent bg-transparent text-fg-dim hover:bg-surface hover:text-fg;
+  }
+  .btn-sm {
+    @apply px-2 py-1 text-xs;
+  }
+
+  /* --- form --- */
+  .field {
+    @apply mb-3;
+  }
+  .label {
+    @apply mb-1 block text-sm text-fg-dim;
+  }
+  .input {
+    @apply w-full rounded-md border border-line bg-bg px-3 py-2 text-fg
+           placeholder:text-fg-faint focus:border-accent;
+  }
+  .hint {
+    @apply mt-1 block text-xs text-fg-faint;
+  }
+  .check {
+    @apply flex items-center gap-2 text-sm;
+  }
+  fieldset.box {
+    @apply rounded-xl border border-line p-4;
+  }
+  fieldset.box > legend {
+    @apply px-1 text-sm font-bold text-fg-dim;
+  }
+
+  /* Etiket-değer ızgarası (kişi sayfası başlığı): tablo çizgisi olmadan okunur */
+  .kv {
+    @apply grid gap-x-8 gap-y-3 sm:grid-cols-2;
+  }
+  .kv dt {
+    @apply text-xs tracking-wide text-fg-faint;
+  }
+  .kv dd {
+    @apply break-words;
+  }
+
+  /* Vurgulu panel: müdahale / acil gibi dikkat isteyen bloklar */
+  .panel {
+    @apply rounded-xl border border-line bg-bg-soft p-4;
+  }
+  /* Yumuşak tonlar tema başına token: Tailwind'in `/20` saydamlık değiştiricisi
+     `var()` token'larında düşüyor, `color-mix` ise eski tarayıcı için düz renge
+     geri dönüyor (ikisi de derlenmiş çıktıda doğrulandı) — ikisinde de metin okunmaz olurdu. */
+  .panel-warn {
+    border-color: var(--ctp-warn);
+    background-color: var(--ctp-warn-soft);
+  }
+  .panel-err {
+    border-color: var(--ctp-err);
+    background-color: var(--ctp-err-soft);
+  }
+
+  /* --- tablo --- */
+  .tbl {
+    @apply w-full border-collapse text-sm;
+  }
+  .tbl th {
+    @apply border-b border-line px-2 py-2 text-left font-bold text-fg-dim;
+  }
+  .tbl td {
+    @apply border-b border-line px-2 py-2 align-top;
+  }
+  /* Kart (bg-soft) içindeki tabloda fark edilsin diye bir ton daha koyu */
+  .tbl tbody tr:hover {
+    @apply bg-bg-hard;
+  }
+
+  /* --- durum etiketleri --- */
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5
+           text-xs font-bold text-fg-dim;
+  }
+  .badge-ok {
+    border-color: transparent;
+    background-color: var(--ctp-ok-soft);
+    color: var(--ctp-ok);
+  }
+  .badge-warn {
+    border-color: transparent;
+    background-color: var(--ctp-warn-soft);
+    color: var(--ctp-warn);
+  }
+  .badge-err {
+    border-color: transparent;
+    background-color: var(--ctp-err-soft);
+    color: var(--ctp-err);
+  }
+  .badge-info {
+    border-color: transparent;
+    background-color: var(--ctp-info-soft);
+    color: var(--ctp-info);
+  }
+  .badge-muted {
+    @apply border-line text-fg-faint;
+  }
+
+  /* --- uyarı blokları --- */
+  .alert {
+    @apply mb-4 rounded-lg border px-3 py-2 text-sm;
+  }
+  .alert-err {
+    border-color: var(--ctp-err);
+    background-color: var(--ctp-err-soft);
+    color: var(--ctp-err);
+  }
+  .alert-warn {
+    border-color: var(--ctp-warn);
+    background-color: var(--ctp-warn-soft);
+    color: var(--ctp-warn);
+  }
+  .alert-info {
+    border-color: var(--ctp-info);
+    background-color: var(--ctp-info-soft);
+    color: var(--ctp-info);
+  }
+
+  .link {
+    @apply underline decoration-from-font;
+  }
+  .stack {
+    @apply space-y-4;
+  }
+}

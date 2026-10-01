@@ -1,26 +1,25 @@
 {% extends "base.html" %}
 {% block title %}{{ dept.def.name }} — OpenSicil{% endblock %}
-{% block width %}max-w-3xl{% endblock %}
 {% block content %}
-<div class="flex justify-between items-center mb-6">
-  <h1 class="text-xl font-semibold">{{ dept.def.name }} <span class="text-sm rounded px-2 py-1 ml-2" style="background:#313244;">departman</span></h1>
-  <a class="text-sm underline" href="/departments">Departmanlar</a>
+<div class="page-head">
+  <h1 class="h1">{{ dept.def.name }} <span class="chip ml-2 text-sm">departman</span></h1>
+  <a class="link text-sm" href="/departments">Departmanlar</a>
 </div>
-{% if !error.is_empty() %}<p class="mb-4" style="color:#f38ba8;">{{ error }}</p>{% endif %}
+{% if !error.is_empty() %}<p class="alert alert-err">{{ error }}</p>{% endif %}
 {% let show_settings = true %}
 <form method="post" action="/departments/{{ dept.def.id }}" class="space-y-6">
-  <div class="grid grid-cols-3 gap-4">
+  <div class="grid gap-4 sm:grid-cols-3">
     <div>
-      <label class="block text-sm mb-1" for="name">Ad</label>
-      <input class="w-full rounded px-3 py-2 text-black" type="text" id="name" name="name" value="{{ dept.def.name }}" required>
+      <label class="label" for="name">Ad</label>
+      <input class="input" type="text" id="name" name="name" value="{{ dept.def.name }}" required>
     </div>
     <div>
-      <label class="block text-sm mb-1" for="code">Kod</label>
-      <input class="w-full rounded px-3 py-2 text-black" type="text" id="code" name="code" value="{{ dept.code }}">
+      <label class="label" for="code">Kod</label>
+      <input class="input" type="text" id="code" name="code" value="{{ dept.code }}">
     </div>
     <div>
-      <label class="block text-sm mb-1" for="parent_id">Üst departman</label>
-      <select class="w-full rounded px-3 py-2 text-black" id="parent_id" name="parent_id">
+      <label class="label" for="parent_id">Üst departman</label>
+      <select class="input" id="parent_id" name="parent_id">
         <option value="">Kök</option>
         {% for p in parents %}<option value="{{ p.id }}"{% if p.selected %} selected{% endif %}>{{ p.label }}</option>{% endfor %}
       </select>
@@ -28,7 +27,7 @@
   </div>
   {% include "definition_targets.html" %}
   {% if can_edit %}
-  <button class="w-full rounded py-2" style="background:#89b4fa; color:#1e1e2e;" type="submit">Kaydet</button>
+  <button class="btn btn-primary w-full" type="submit">Kaydet</button>
   {% endif %}
 </form>
 {% endblock %}

@@ -66,4 +66,5 @@
 - Kaydet ve ilk parolayı ver tek adımı, teslim ekranı, N-13 ölçümü (ADR-056)
 - Mevcut hesap ipucuyla gözlem modunda sahiplenme (ADR-018, ADR-086)
 - Gözlem farkı ve tek kimlik için yönetime alma (ADR-087)
+- Arayüz kabuğu — derlenmiş Tailwind CSS, Catppuccin teması, self-host font (ADR-088)
 

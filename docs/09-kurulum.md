@@ -180,3 +180,10 @@ Aynı imajın `migrate` alt komutu, şema sahibi rolüyle **tek seferlik contain
 3. İlk girişte eski parola sorulmadan yeni bir parola girmeniz istenir (en az 12 karakter). Bu hesap **yalnızca** Yapılandırma sayfasına erişebilir, başka hiçbir ekrana giremez.
 4. Yapılandırma sayfasından AD bağlantısını (host, bind DN, servis hesabı parolası), Zimbra bağlantısını (admin URL, admin parolası) ve OIDC ayarlarını (issuer, client id/secret) girin. Sır alanları boş bırakılırsa mevcut değer korunur; kaydedilen sırlar ekranda bir daha düz metin gösterilmez.
 5. En az bir `OpenSicil-Admins` OIDC girişi doğrulanınca yerel `admin` girişi gizlenir/pasifleşir ([ADR-068](decisions/068-yapilandirma-sayfasi-ve-bootstrap-hesabi.md) madde 3, [ADR-073](decisions/073-oidc-crate-secimi.md)). `/login` sayfasında Yapılandırma'dan kaydedilen OIDC ayarları tamsa "OIDC ile giriş" bağlantısı görünür; `/oidc/login` Keycloak'a (ya da başka bir OIDC sağlayıcısına) yönlendirir, yetkiler dönen `id_token`'ın `groups` claim'inden okunur.
+
+## Arayüz
+Ekran HTML'i backend'in içinden gelir; ayrı bir frontend container'ı, Node çalışma zamanı ya da dış CDN yoktur ([ADR-064](decisions/064-frontend-htmx-tailwind.md), [ADR-088](decisions/088-arayuz-kabugu-derlenmis-css-tema-font.md)). CSS, font ve küçük tema betiği binary'ye gömülüdür ve `/static/<dosya>` altından, bir yıl `immutable` cache ile sunulur; sayfa hiçbir dış adrese istek atmaz (nginx CSP'si `default-src 'self'`).
+
+- **Renk teması** Catppuccin: açık Latte, koyu Mocha. Varsayılan tarayıcı/sistem tercihidir; üst bardaki düğme elle geçiş yapar ve seçim o tarayıcıda (`localStorage`) kalır. Sunucu tarafında ayar yoktur.
+- **Arayüz fontu** CaskaydiaMono Nerd Font (Regular + Bold), `backend/static/` altında self-host.
+- **CSS'i yeniden üretme** (şablonlarda yeni bir sınıf kullanıldığında): `sh scripts/build-css.sh`. Betik Tailwind'in standalone CLI binary'sini (sürüm `4.3.3`, sha256 doğrulanır) `tmp/araclar/` altına indirir, `backend/assets/app.css`'ten `backend/static/app.css`'i üretir. Çıktı commit'lenir: `cargo build` ve imaj derlemesi onu olduğu gibi gömer, derleme ağ istemez. Node ya da `package.json` yoktur.

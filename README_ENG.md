@@ -62,7 +62,7 @@ flowchart TB
 
     subgraph user_zone["User zone"]
         nginx["nginx :443 → :8080<br/>single entry point<br/><b>TLS terminates here</b> (ADR-066)"]
-        backend["backend :8080 (Rust: axum + sqlx)<br/>admin API + HTML (htmx + Tailwind, ADR-064)<br/>OIDC session (ADR-065), change sets, job creation<br/><b>no AD / Zimbra secrets</b>"]
+        backend["backend :8080 (Rust: axum + sqlx)<br/>admin API + HTML (Tailwind, compiled CSS — ADR-064/088)<br/>OIDC session (ADR-065), change sets, job creation<br/><b>no AD / Zimbra secrets</b>"]
     end
 
     subgraph data["Data"]
@@ -92,13 +92,13 @@ flowchart TB
 | Component | Job | Network |
 |---|---|---|
 | **nginx** | Single entry point; the only service with a published host port (443, TLS terminates here — [ADR-066](docs/decisions/066-tls-nginxte-sonlanir.md); switches to plain HTTP if a proxy/Ingress sits in front) | The only published port |
-| **backend** | Admin API + HTML UI (htmx + Tailwind templates, no separate frontend — [ADR-064](docs/decisions/064-frontend-htmx-tailwind.md)), OIDC session ([ADR-065](docs/decisions/065-oidc-akisi-backend.md)), validation, change sets, job creation | Inbound from nginx only, outbound to the database. **Never connects to AD or Zimbra** |
+| **backend** | Admin API + HTML UI (Tailwind templates, no separate frontend — [ADR-064](docs/decisions/064-frontend-htmx-tailwind.md); CSS, font and theme script embedded in the binary, no external CDN — ADR-088), OIDC session ([ADR-065](docs/decisions/065-oidc-akisi-backend.md)), validation, change sets, job creation | Inbound from nginx only, outbound to the database. **Never connects to AD or Zimbra** |
 | **worker** | Computes the desired state, finds the diff, applies it through connectors, runs scheduled work | No inbound connections. Outbound to the database, AD and Zimbra only |
 | **db** | PostgreSQL: identities, roles, catalog, job queue, audit log, OIDC sessions | backend and worker only |
 
 **Why two processes:** credentials that can create accounts and add them to groups are among the most valuable secrets an organisation has. If the internet-facing component never sees them, an attacker who takes over the backend can at most write *intent* into the database. They cannot write the worker's *facts* (account links, catalog), because the database roles forbid it ([ADR-015](docs/decisions/015-veritabani-rolleri.md)), and the worker checks that intent against its own limits before acting ([ADR-014](docs/decisions/014-yonetim-kapsami-ve-toplu-degisiklik-freni.md)).
 
-**Why there is no separate frontend:** the backend is already Rust; it renders its own HTML with htmx + Tailwind instead of adding a Node build chain or an SPA container ([ADR-064](docs/decisions/064-frontend-htmx-tailwind.md)). nginx is just a reverse proxy that terminates TLS and forwards to the backend.
+**Why there is no separate frontend:** the backend is already Rust; it renders its own HTML with Tailwind instead of adding a Node build chain or an SPA container ([ADR-064](docs/decisions/064-frontend-htmx-tailwind.md)). The CSS is compiled into a single file (Tailwind standalone CLI) and embedded in the binary together with the font and the theme script; the page makes no external requests ([ADR-088](docs/decisions/088-arayuz-kabugu-derlenmis-css-tema-font.md)). nginx is just a reverse proxy that terminates TLS and forwards to the backend.
 
 **Migration:** schema changes run as the same image's `migrate` subcommand, under the schema-owner role, as a one-shot container — the backend and worker roles cannot run migrations ([ADR-015](docs/decisions/015-veritabani-rolleri.md), [ADR-061](docs/decisions/061-dagitim-sozlesmesi-compose-ve-kubernetes.md)).
 

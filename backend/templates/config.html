@@ -1,61 +1,66 @@
 {% extends "base.html" %}
 {% block title %}Yapılandırma — OpenSicil{% endblock %}
+{# Bootstrap hesabı yalnızca bu sayfayı görür (ADR-068): gezinme çubuğu yok #}
+{% block nav %}{% endblock %}
+{% block page_class %}page-narrow{% endblock %}
 {% block content %}
-<div class="flex justify-between items-center mb-6">
-  <h1 class="text-xl font-semibold">Yapılandırma</h1>
-  <form method="post" action="/logout"><button class="text-sm underline" type="submit">Çıkış</button></form>
+<div class="page-head">
+  <div>
+    <h1 class="h1">Yapılandırma</h1>
+    <p class="muted text-sm">Bağlantı ayarları; parolalar şifreli saklanır, ekranda gösterilmez.</p>
+  </div>
 </div>
-<form method="post" action="/config" class="space-y-6">
-  <fieldset class="space-y-3">
-    <legend class="font-medium mb-2">Active Directory</legend>
-    <div>
-      <label class="block text-sm mb-1" for="ad_host">Host</label>
-      <input class="w-full rounded px-3 py-2 text-black" type="text" id="ad_host" name="ad_host" value="{{ ad_host }}">
+<form method="post" action="/config" class="stack">
+  <fieldset class="box">
+    <legend>Active Directory</legend>
+    <div class="field">
+      <label class="label" for="ad_host">Host</label>
+      <input class="input" type="text" id="ad_host" name="ad_host" value="{{ ad_host }}">
     </div>
-    <div>
-      <label class="block text-sm mb-1" for="ad_bind_dn">Bind DN</label>
-      <input class="w-full rounded px-3 py-2 text-black" type="text" id="ad_bind_dn" name="ad_bind_dn" value="{{ ad_bind_dn }}">
+    <div class="field">
+      <label class="label" for="ad_bind_dn">Bind DN</label>
+      <input class="input" type="text" id="ad_bind_dn" name="ad_bind_dn" value="{{ ad_bind_dn }}">
     </div>
-    <div>
-      <label class="block text-sm mb-1" for="ad_service_password">
+    <div class="field">
+      <label class="label" for="ad_service_password">
         Servis hesabı parolası
-        {% if ad_service_password_set %}<span style="color:#a6adc8;">(kayıtlı — değiştirmek için doldurun)</span>{% endif %}
+        {% if ad_service_password_set %}<span class="muted">(kayıtlı — değiştirmek için doldurun)</span>{% endif %}
       </label>
-      <input class="w-full rounded px-3 py-2 text-black" type="password" id="ad_service_password" name="ad_service_password" autocomplete="new-password">
+      <input class="input" type="password" id="ad_service_password" name="ad_service_password" autocomplete="new-password">
     </div>
   </fieldset>
-  <fieldset class="space-y-3">
-    <legend class="font-medium mb-2">Zimbra</legend>
-    <div>
-      <label class="block text-sm mb-1" for="zimbra_url">Admin URL</label>
-      <input class="w-full rounded px-3 py-2 text-black" type="text" id="zimbra_url" name="zimbra_url" value="{{ zimbra_url }}">
+  <fieldset class="box">
+    <legend>Zimbra</legend>
+    <div class="field">
+      <label class="label" for="zimbra_url">Admin URL</label>
+      <input class="input" type="text" id="zimbra_url" name="zimbra_url" value="{{ zimbra_url }}">
     </div>
-    <div>
-      <label class="block text-sm mb-1" for="zimbra_admin_password">
+    <div class="field">
+      <label class="label" for="zimbra_admin_password">
         Admin parolası
-        {% if zimbra_admin_password_set %}<span style="color:#a6adc8;">(kayıtlı — değiştirmek için doldurun)</span>{% endif %}
+        {% if zimbra_admin_password_set %}<span class="muted">(kayıtlı — değiştirmek için doldurun)</span>{% endif %}
       </label>
-      <input class="w-full rounded px-3 py-2 text-black" type="password" id="zimbra_admin_password" name="zimbra_admin_password" autocomplete="new-password">
+      <input class="input" type="password" id="zimbra_admin_password" name="zimbra_admin_password" autocomplete="new-password">
     </div>
   </fieldset>
-  <fieldset class="space-y-3">
-    <legend class="font-medium mb-2">OIDC</legend>
-    <div>
-      <label class="block text-sm mb-1" for="oidc_issuer">Issuer</label>
-      <input class="w-full rounded px-3 py-2 text-black" type="text" id="oidc_issuer" name="oidc_issuer" value="{{ oidc_issuer }}">
+  <fieldset class="box">
+    <legend>OIDC</legend>
+    <div class="field">
+      <label class="label" for="oidc_issuer">Issuer</label>
+      <input class="input" type="text" id="oidc_issuer" name="oidc_issuer" value="{{ oidc_issuer }}">
     </div>
-    <div>
-      <label class="block text-sm mb-1" for="oidc_client_id">Client ID</label>
-      <input class="w-full rounded px-3 py-2 text-black" type="text" id="oidc_client_id" name="oidc_client_id" value="{{ oidc_client_id }}">
+    <div class="field">
+      <label class="label" for="oidc_client_id">Client ID</label>
+      <input class="input" type="text" id="oidc_client_id" name="oidc_client_id" value="{{ oidc_client_id }}">
     </div>
-    <div>
-      <label class="block text-sm mb-1" for="oidc_client_secret">
+    <div class="field">
+      <label class="label" for="oidc_client_secret">
         Client secret
-        {% if oidc_client_secret_set %}<span style="color:#a6adc8;">(kayıtlı — değiştirmek için doldurun)</span>{% endif %}
+        {% if oidc_client_secret_set %}<span class="muted">(kayıtlı — değiştirmek için doldurun)</span>{% endif %}
       </label>
-      <input class="w-full rounded px-3 py-2 text-black" type="password" id="oidc_client_secret" name="oidc_client_secret" autocomplete="new-password">
+      <input class="input" type="password" id="oidc_client_secret" name="oidc_client_secret" autocomplete="new-password">
     </div>
   </fieldset>
-  <button class="w-full rounded py-2" style="background:#89b4fa; color:#1e1e2e;" type="submit">Kaydet</button>
+  <button class="btn btn-primary w-full" type="submit">Kaydet</button>
 </form>
 {% endblock %}

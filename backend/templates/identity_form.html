@@ -1,116 +1,118 @@
 {% extends "base.html" %}
 {% block title %}{% if editing %}Kimliği düzenle{% else %}Yeni kimlik{% endif %} — OpenSicil{% endblock %}
-{% block width %}max-w-2xl{% endblock %}
 {% block content %}
-<div class="flex justify-between items-center mb-6">
-  <h1 class="text-xl font-semibold">{% if editing %}Kimliği düzenle{% else %}Yeni kimlik{% endif %}</h1>
-  <a class="text-sm underline" href="/login">Ana sayfa</a>
+<div class="page-head">
+  <h1 class="h1">{% if editing %}Kimliği düzenle{% else %}Yeni kimlik{% endif %}</h1>
 </div>
 {% if editing %}
-<p class="mb-4 text-sm" style="color:#a6adc8;">Görev değişikliği ve çalışma tipi dönüşümü (ADR-042): tarihler, kimlik no ve kullanıcı adı burada değişmez; kayıt her hedef için iş açar.</p>
+<p class="mb-4 text-sm muted">Görev değişikliği ve çalışma tipi dönüşümü (ADR-042): tarihler, kimlik no ve kullanıcı adı burada değişmez; kayıt her hedef için iş açar.</p>
 {% endif %}
 {% if !error.is_empty() %}
-<p class="mb-4" style="color:#f38ba8;">{{ error }}</p>
+<p class="alert alert-err">{{ error }}</p>
 {% endif %}
-<form method="post" action="{{ action }}" class="space-y-4">
+<form method="post" action="{{ action }}" class="card stack">
   {% if editing %}
   <input type="hidden" name="start_date" value="{{ form.start_date }}">
   <input type="hidden" name="end_date" value="{{ form.end_date }}">
   <input type="hidden" name="national_id_country" value="{{ form.national_id_country }}">
   {% endif %}
   {% if duplicate_warning %}
-  <div class="rounded p-3" style="background:#313244; color:#f9e2af;">
+  <div class="alert alert-warn">
     <p>Aynı ad-soyadlı silinmemiş bir kimlik var. Mükerrer kişi olabilir.</p>
-    <label class="block mt-2"><input type="checkbox" name="confirm_duplicate" value="1"> Yine de kaydet</label>
+    <label class="check mt-2"><input type="checkbox" name="confirm_duplicate" value="1"> Yine de kaydet</label>
   </div>
   {% endif %}
-  <div class="grid grid-cols-2 gap-4">
-    <div>
-      <label class="block text-sm mb-1" for="given_name">Ad</label>
-      <input class="w-full rounded px-3 py-2 text-black" type="text" id="given_name" name="given_name" value="{{ form.given_name }}" required>
+  <div class="grid gap-x-4 sm:grid-cols-2">
+    <div class="field">
+      <label class="label" for="given_name">Ad</label>
+      <input class="input" type="text" id="given_name" name="given_name" value="{{ form.given_name }}" required>
     </div>
-    <div>
-      <label class="block text-sm mb-1" for="surname">Soyad</label>
-      <input class="w-full rounded px-3 py-2 text-black" type="text" id="surname" name="surname" value="{{ form.surname }}" required>
+    <div class="field">
+      <label class="label" for="surname">Soyad</label>
+      <input class="input" type="text" id="surname" name="surname" value="{{ form.surname }}" required>
     </div>
     {% if !editing %}
-    <div>
-      <label class="block text-sm mb-1" for="national_id_country">Ülke</label>
-      <input class="w-full rounded px-3 py-2 text-black" type="text" id="national_id_country" name="national_id_country" value="{{ form.national_id_country }}" maxlength="2">
+    <div class="field">
+      <label class="label" for="national_id_country">Ülke</label>
+      <input class="input" type="text" id="national_id_country" name="national_id_country" value="{{ form.national_id_country }}" maxlength="2">
     </div>
-    <div>
-      <label class="block text-sm mb-1" for="national_id">Kimlik numarası (isteğe bağlı)</label>
-      <input class="w-full rounded px-3 py-2 text-black" type="text" id="national_id" name="national_id" value="{{ form.national_id }}" autocomplete="off">
+    <div class="field">
+      <label class="label" for="national_id">Kimlik numarası (isteğe bağlı)</label>
+      <input class="input" type="text" id="national_id" name="national_id" value="{{ form.national_id }}" autocomplete="off">
     </div>
-    <div>
-      <label class="block text-sm mb-1" for="requested_username">Kullanıcı adı (isteğe bağlı; boşsa şablon üretir)</label>
-      <input class="w-full rounded px-3 py-2 text-black" type="text" id="requested_username" name="requested_username" value="{{ form.requested_username }}" maxlength="20" autocomplete="off">
+    <div class="field">
+      <label class="label" for="requested_username">Kullanıcı adı (isteğe bağlı; boşsa şablon üretir)</label>
+      <input class="input" type="text" id="requested_username" name="requested_username" value="{{ form.requested_username }}" maxlength="20" autocomplete="off">
     </div>
     {% endif %}
-    <div>
-      <label class="block text-sm mb-1" for="employee_number">Sicil no</label>
-      <input class="w-full rounded px-3 py-2 text-black" type="text" id="employee_number" name="employee_number" value="{{ form.employee_number }}">
+    <div class="field">
+      <label class="label" for="employee_number">Sicil no</label>
+      <input class="input" type="text" id="employee_number" name="employee_number" value="{{ form.employee_number }}">
     </div>
-    <div>
-      <label class="block text-sm mb-1" for="mobile_phone">Cep telefonu (+90…)</label>
-      <input class="w-full rounded px-3 py-2 text-black" type="tel" id="mobile_phone" name="mobile_phone" value="{{ form.mobile_phone }}">
+    <div class="field">
+      <label class="label" for="mobile_phone">Cep telefonu (+90…)</label>
+      <input class="input" type="tel" id="mobile_phone" name="mobile_phone" value="{{ form.mobile_phone }}">
     </div>
-    <div>
-      <label class="block text-sm mb-1" for="department_id">Departman</label>
-      <select class="w-full rounded px-3 py-2 text-black" id="department_id" name="department_id" required>
+    <div class="field">
+      <label class="label" for="department_id">Departman</label>
+      <select class="input" id="department_id" name="department_id" required>
         <option value="">Seçin</option>
         {% for c in options.departments %}
         <option value="{{ c.id }}"{% if c.id == form.department_id %} selected{% endif %}>{{ c.label }}</option>
         {% endfor %}
       </select>
     </div>
-    <div>
-      <label class="block text-sm mb-1" for="primary_role_id">Birincil rol</label>
-      <select class="w-full rounded px-3 py-2 text-black" id="primary_role_id" name="primary_role_id" required>
+    <div class="field">
+      <label class="label" for="primary_role_id">Birincil rol</label>
+      <select class="input" id="primary_role_id" name="primary_role_id" required>
         <option value="">Seçin</option>
         {% for c in options.roles %}
         <option value="{{ c.id }}"{% if c.id == form.primary_role_id %} selected{% endif %}>{{ c.label }}</option>
         {% endfor %}
       </select>
     </div>
-    <div>
-      <label class="block text-sm mb-1" for="manager_id">Yönetici</label>
-      <select class="w-full rounded px-3 py-2 text-black" id="manager_id" name="manager_id">
+    <div class="field">
+      <label class="label" for="manager_id">Yönetici</label>
+      <select class="input" id="manager_id" name="manager_id">
         <option value="">Yok</option>
         {% for c in options.managers %}
         <option value="{{ c.id }}"{% if c.id == form.manager_id %} selected{% endif %}>{{ c.label }}</option>
         {% endfor %}
       </select>
     </div>
-    <div>
-      <label class="block text-sm mb-1" for="employment_type">Çalışma tipi</label>
-      <select class="w-full rounded px-3 py-2 text-black" id="employment_type" name="employment_type" required>
+    <div class="field">
+      <label class="label" for="employment_type">Çalışma tipi</label>
+      <select class="input" id="employment_type" name="employment_type" required>
         {% for t in employment_types %}
         <option value="{{ t.0 }}"{% if t.0 == form.employment_type %} selected{% endif %}>{{ t.1 }}</option>
         {% endfor %}
       </select>
     </div>
     {% if !editing %}
-    <div>
-      <label class="block text-sm mb-1" for="start_date">Başlangıç tarihi</label>
-      <input class="w-full rounded px-3 py-2 text-black" type="date" id="start_date" name="start_date" value="{{ form.start_date }}" required>
+    <div class="field">
+      <label class="label" for="start_date">Başlangıç tarihi</label>
+      <input class="input" type="date" id="start_date" name="start_date" value="{{ form.start_date }}" required>
     </div>
-    <div>
-      <label class="block text-sm mb-1" for="end_date">Bitiş tarihi (kadrolu dışında zorunlu)</label>
-      <input class="w-full rounded px-3 py-2 text-black" type="date" id="end_date" name="end_date" value="{{ form.end_date }}">
+    <div class="field">
+      <label class="label" for="end_date">Bitiş tarihi (kadrolu dışında zorunlu)</label>
+      <input class="input" type="date" id="end_date" name="end_date" value="{{ form.end_date }}">
     </div>
     {% if ownership_enabled %}
-    <div class="col-span-2">
-      <label class="block text-sm mb-1" for="existing_ad_account_hint">Mevcut AD hesabı (sahiplenme, ADR-018)</label>
-      <input class="w-full rounded px-3 py-2 text-black" type="text" id="existing_ad_account_hint" name="existing_ad_account_hint" value="{{ form.existing_ad_account_hint }}" maxlength="20" autocomplete="off" placeholder="AD kullanıcı adı; doluysa hesap açılmaz, gözlem modunda bağlanır">
+    <div class="field sm:col-span-2">
+      <label class="label" for="existing_ad_account_hint">Mevcut AD hesabı (sahiplenme, ADR-018)</label>
+      <input class="input" type="text" id="existing_ad_account_hint" name="existing_ad_account_hint" value="{{ form.existing_ad_account_hint }}" maxlength="20" autocomplete="off" placeholder="AD kullanıcı adı; doluysa hesap açılmaz, gözlem modunda bağlanır">
     </div>
     {% endif %}
     {% endif %}
   </div>
-  <button class="w-full rounded py-2" style="background:#89b4fa; color:#1e1e2e;" type="submit">Kaydet</button>
+  <div class="flex flex-wrap gap-2">
+    <button class="btn btn-primary" type="submit">Kaydet</button>
+    {% if !editing %}
+    <button class="btn btn-ok" type="submit" name="issue_first_password" value="1">Kaydet ve ilk parolayı ver</button>
+    {% endif %}
+  </div>
   {% if !editing %}
-  <button class="w-full rounded py-2 mt-2" style="background:#a6e3a1; color:#1e1e2e;" type="submit" name="issue_first_password" value="1">Kaydet ve ilk parolayı ver</button>
-  <p class="text-xs mt-1" style="color:#a6adc8;">Kişi masada bekliyorsa: başlangıç bugün ya da geçmişte olmalı; hesap açılır, parola bir kez gösterilir (ADR-056).</p>
+  <p class="muted text-xs">Kişi masada bekliyorsa: başlangıç bugün ya da geçmişte olmalı; hesap açılır, parola bir kez gösterilir (ADR-056).</p>
   {% endif %}
 </form>
 {% endblock %}

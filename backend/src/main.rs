@@ -1,3 +1,4 @@
+mod assets;
 mod audit;
 mod auth;
 mod bootstrap_account;

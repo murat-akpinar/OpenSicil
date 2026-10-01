@@ -665,7 +665,7 @@ mod tests {
                 .await;
         assert!(
             page.contains(&format!(
-                "— <a class=\"underline\" href=\"/departments/{child_id}\">BT"
+                "— <a class=\"link\" href=\"/departments/{child_id}\">BT"
             )),
             "{page}"
         );

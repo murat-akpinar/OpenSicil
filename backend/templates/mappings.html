@@ -1,58 +1,57 @@
 {% extends "base.html" %}
 {% block title %}{{ target_name }} eşlemesi — OpenSicil{% endblock %}
-{% block width %}max-w-4xl{% endblock %}
 {% block content %}
-<div class="flex justify-between items-center mb-6">
-  <h1 class="text-xl font-semibold">{{ target_name }} — öznitelik eşlemesi</h1>
-  <a class="text-sm underline" href="/targets">Hedef sistemler</a>
+<div class="page-head">
+  <h1 class="h1">{{ target_name }} — öznitelik eşlemesi</h1>
+  <a class="link text-sm" href="/targets">Hedef sistemler</a>
 </div>
-<p class="mb-4 text-sm" style="color:#a6adc8;">Hedef öznitelik kodda sabit izinli listeden seçilir (ADR-029); listede olmayan satırı worker reddeder. "Sadece boşsa yaz" hedefteki dolu değeri korur (ADR-034). Hassas kaynak (kimlik no, cep) yalnızca Sistem yöneticisi ve açık onayla; worker ayarı kapalıysa yine reddeder.</p>
-{% if !error.is_empty() %}<p class="mb-4" style="color:#f38ba8;">{{ error }}</p>{% endif %}
-<table class="w-full text-sm mb-6">
-  <thead><tr class="text-left" style="color:#a6adc8;"><th>Öznitelik</th><th>Kaynak</th><th>Metin</th><th>Dönüşüm</th><th>Boşsa yaz</th><th></th></tr></thead>
+<p class="mb-4 text-sm muted">Hedef öznitelik kodda sabit izinli listeden seçilir (ADR-029); listede olmayan satırı worker reddeder. "Sadece boşsa yaz" hedefteki dolu değeri korur (ADR-034). Hassas kaynak (kimlik no, cep) yalnızca Sistem yöneticisi ve açık onayla; worker ayarı kapalıysa yine reddeder.</p>
+{% if !error.is_empty() %}<p class="alert alert-err">{{ error }}</p>{% endif %}
+<table class="tbl mb-6">
+  <thead><tr><th>Öznitelik</th><th>Kaynak</th><th>Metin</th><th>Dönüşüm</th><th>Boşsa yaz</th><th></th></tr></thead>
   <tbody>
   {% for r in rows %}
-    <tr style="border-top:1px solid #313244;">
-      <td class="py-1">{{ r.attribute }}</td>
-      <td>{{ r.source }}{% if r.sensitive %} <span style="color:#f9e2af;">(hassas)</span>{% endif %}</td>
+    <tr>
+      <td>{{ r.attribute }}</td>
+      <td>{{ r.source }}{% if r.sensitive %} <span class="warn">(hassas)</span>{% endif %}</td>
       <td>{{ r.source_text }}</td>
       <td>{{ r.transform }}</td>
       <td>{% if r.write_if_empty %}evet{% endif %}</td>
-      <td>{% if can_edit %}<form method="post" action="/targets/{{ target_id }}/mappings/{{ r.id }}/delete"><button class="text-sm underline" type="submit">Sil</button></form>{% endif %}</td>
+      <td>{% if can_edit %}<form method="post" action="/targets/{{ target_id }}/mappings/{{ r.id }}/delete"><button class="btn btn-sm" type="submit">Sil</button></form>{% endif %}</td>
     </tr>
   {% endfor %}
   </tbody>
 </table>
 {% if can_edit %}
-<h2 class="font-medium mb-2">Yeni satır</h2>
-<form method="post" action="/targets/{{ target_id }}/mappings" class="grid grid-cols-3 gap-3 items-end">
+<h2 class="h2">Yeni satır</h2>
+<form method="post" action="/targets/{{ target_id }}/mappings" class="card grid items-end gap-3 sm:grid-cols-3">
   <div>
-    <label class="block text-sm mb-1" for="target_attribute">Hedef öznitelik</label>
-    <select class="w-full rounded px-3 py-2 text-black" id="target_attribute" name="target_attribute">
+    <label class="label" for="target_attribute">Hedef öznitelik</label>
+    <select class="input" id="target_attribute" name="target_attribute">
       {% for a in attributes %}<option value="{{ a }}">{{ a }}</option>{% endfor %}
     </select>
   </div>
   <div>
-    <label class="block text-sm mb-1" for="source_kind">Kaynak</label>
-    <select class="w-full rounded px-3 py-2 text-black" id="source_kind" name="source_kind">
+    <label class="label" for="source_kind">Kaynak</label>
+    <select class="input" id="source_kind" name="source_kind">
       {% for s in sources %}{% if can_sensitive || !s.2 %}<option value="{{ s.0 }}">{{ s.1 }}</option>{% endif %}{% endfor %}
     </select>
   </div>
   <div>
-    <label class="block text-sm mb-1" for="source_text">Sabit metin / şablon</label>
-    <input class="w-full rounded px-3 py-2 text-black" type="text" id="source_text" name="source_text">
+    <label class="label" for="source_text">Sabit metin / şablon</label>
+    <input class="input" type="text" id="source_text" name="source_text">
   </div>
   <div>
-    <label class="block text-sm mb-1" for="transform">Dönüşüm</label>
-    <select class="w-full rounded px-3 py-2 text-black" id="transform" name="transform">
+    <label class="label" for="transform">Dönüşüm</label>
+    <select class="input" id="transform" name="transform">
       {% for t in transforms %}<option value="{{ t.0 }}">{{ t.1 }}</option>{% endfor %}
     </select>
   </div>
-  <label class="text-sm"><input type="checkbox" name="write_if_empty" value="1"> Sadece boşsa yaz (ADR-034)</label>
+  <label class="check"><input type="checkbox" name="write_if_empty" value="1"> Sadece boşsa yaz (ADR-034)</label>
   {% if can_sensitive %}
-  <label class="text-sm" style="color:#f9e2af;"><input type="checkbox" name="sensitive_ack" value="1"> Hassas kaynak: bu veri hedefte okunabilir olacak, onaylıyorum (ADR-012)</label>
+  <label class="text-sm warn"><input type="checkbox" name="sensitive_ack" value="1"> Hassas kaynak: bu veri hedefte okunabilir olacak, onaylıyorum (ADR-012)</label>
   {% endif %}
-  <button class="col-span-3 rounded py-2" style="background:#89b4fa; color:#1e1e2e;" type="submit">Ekle</button>
+  <button class="btn btn-primary col-span-3" type="submit">Ekle</button>
 </form>
 {% endif %}
 {% endblock %}

@@ -1,19 +1,17 @@
 {% extends "base.html" %}
 {% block title %}Roller — OpenSicil{% endblock %}
-{% block width %}max-w-3xl{% endblock %}
 {% block content %}
-<div class="flex justify-between items-center mb-6">
-  <h1 class="text-xl font-semibold">Roller</h1>
-  <a class="text-sm underline" href="/login">Ana sayfa</a>
+<div class="page-head">
+  <h1 class="h1">Roller</h1>
 </div>
-{% if !error.is_empty() %}<p class="mb-4" style="color:#f38ba8;">{{ error }}</p>{% endif %}
-<table class="w-full text-sm mb-6">
-  <thead><tr class="text-left" style="color:#a6adc8;"><th>Tür</th><th>Ad</th><th>Unvan</th><th>Öğe</th></tr></thead>
+{% if !error.is_empty() %}<p class="alert alert-err">{{ error }}</p>{% endif %}
+<table class="tbl mb-6">
+  <thead><tr><th>Tür</th><th>Ad</th><th>Unvan</th><th>Öğe</th></tr></thead>
   <tbody>
   {% for r in roles %}
-    <tr style="border-top:1px solid #313244;">
-      <td class="py-1">{{ r.kind_label }}</td>
-      <td><a class="underline" href="/roles/{{ r.id }}">{{ r.name }}</a></td>
+    <tr>
+      <td>{{ r.kind_label }}</td>
+      <td><a class="link" href="/roles/{{ r.id }}">{{ r.name }}</a></td>
       <td>{{ r.title }}</td>
       <td>{{ r.entitlements }}</td>
     </tr>
@@ -21,23 +19,23 @@
   </tbody>
 </table>
 {% if can_edit %}
-<h2 class="font-medium mb-2">Yeni rol</h2>
-<form method="post" action="/roles" class="grid grid-cols-3 gap-3 items-end">
+<h2 class="h2">Yeni rol</h2>
+<form method="post" action="/roles" class="card grid items-end gap-3 sm:grid-cols-3">
   <div>
-    <label class="block text-sm mb-1" for="kind">Tür</label>
-    <select class="w-full rounded px-3 py-2 text-black" id="kind" name="kind">
+    <label class="label" for="kind">Tür</label>
+    <select class="input" id="kind" name="kind">
       {% for k in kinds %}<option value="{{ k.0 }}">{{ k.1 }}</option>{% endfor %}
     </select>
   </div>
   <div>
-    <label class="block text-sm mb-1" for="name">Ad</label>
-    <input class="w-full rounded px-3 py-2 text-black" type="text" id="name" name="name" required>
+    <label class="label" for="name">Ad</label>
+    <input class="input" type="text" id="name" name="name" required>
   </div>
   <div>
-    <label class="block text-sm mb-1" for="title">Unvan (birincil)</label>
-    <input class="w-full rounded px-3 py-2 text-black" type="text" id="title" name="title">
+    <label class="label" for="title">Unvan (birincil)</label>
+    <input class="input" type="text" id="title" name="title">
   </div>
-  <button class="col-span-3 rounded py-2" style="background:#89b4fa; color:#1e1e2e;" type="submit">Kaydet</button>
+  <button class="btn btn-primary col-span-3" type="submit">Kaydet</button>
 </form>
 {% endif %}
 {% endblock %}

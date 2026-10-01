@@ -164,6 +164,22 @@ Kurallar:
 - [ ] Faz kapanışı: güvenlik ve test
   - (1a'daki kapanış şablonunun aynısı)
 
+## Arayüz kabuğu
+
+> Fazlar arası iş, "Faz" olarak numaralanmaz: AD fazının kutucuklarıyla bağımlılığı yok. 3e kapanışından sonra, 3f'ten önce yapıldı (kullanıcı isteği, 2026-10-01) — 3f ve Faz 4 ekranları bu kabuğun bileşenleriyle yazılsın, eski ekranlar ikinci kez elden geçmesin. [ADR-064](decisions/064-frontend-htmx-tailwind.md), [ADR-067](decisions/067-arayuz-dili-tema-font.md) ve [ADR-088](decisions/088-arayuz-kabugu-derlenmis-css-tema-font.md).
+
+- [ ] Derlenmiş CSS, Catppuccin token'ları, self-host font, kabuk ([ADR-088](decisions/088-arayuz-kabugu-derlenmis-css-tema-font.md))
+  - Kabul: `grep -rn "cdn.tailwindcss.com\|style=\"" backend/templates` boş — şablonlarda ne CDN script'i ne satır içi renk kalır
+  - Kabul: `GET /static/app.css` 200 ve `text/css`; sayfa hiçbir dış adrese istek atmaz (nginx CSP'si `script-src 'self'` ile uyumlu, `style-src`'ten `'unsafe-inline'` kalkar)
+  - Kabul: `sh scripts/build-css.sh` sabit sürümlü Tailwind standalone CLI'yi sha256 doğrulayarak indirir ve `backend/static/app.css`'i yeniden üretir; çıktı commit'li
+  - Kabul: açık (Latte) ve koyu (Mocha) tema sistem tercihine göre açılır, elle geçiş tercihi `localStorage`'da kalır; arayüz fontu CaskaydiaMono (Regular + Bold, `backend/static/`)
+  - Kabul: 18 şablonun hepsi aynı kabuğu (üst bar + gezinme + içerik) ve ortak bileşenleri (`.btn`, `.card`, `.tbl`, `.badge`, `.alert`, `.field`) kullanır; mevcut testler geçer
+- [ ] TR/EN dil seçimi: gömülü `tr.toml`/`en.toml` + `t()` ([ADR-067](decisions/067-arayuz-dili-tema-font.md) madde 1, [ADR-088](decisions/088-arayuz-kabugu-derlenmis-css-tema-font.md) madde 6)
+  - Kabul: dil seçicisiyle EN'e geçince bütün ekran metinleri İngilizce; tercih operatör oturumunda saklanır
+  - Kabul: iki dosyanın anahtar kümesi birebir aynı ve şablonlarda kullanılan her anahtar var — test bunu doğrular
+- [ ] Kapanış: güvenlik ve test
+  - (1a'daki kapanış şablonunun aynısı)
+
 ## Ek Hedef Sistem: Zimbra
 
 > AD (Faz 3) çekirdektir; bu bölüm onun üstüne eklenir, "Faz" olarak numaralanmaz. Ama Faz 4 (İşletme) ve Faz 5 (Mevcut kurum) bu bölüm bitmeden Zimbra'yı kapsamaz — mutabakat raporu ve sahiplenme yalnızca AD üstünde çalışır.
