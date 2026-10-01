@@ -123,8 +123,9 @@ pub struct Keys<'a> {
 
 // Tekillik DB'deki benzersiz indekstendir (national_id_bidx UNIQUE); mukerrer
 // kayit sqlx::Error::Database olarak doner, cagiran operatore "zaten kayitli" der.
-pub async fn store(
-    pool: &PgPool,
+// Executor generic: kayit formu kimlik satiriyla ayni transaction'da yazar.
+pub async fn store<'e>(
+    pool: impl sqlx::PgExecutor<'e>,
     keys: &Keys<'_>,
     identity_id: i64,
     id: &NationalId,

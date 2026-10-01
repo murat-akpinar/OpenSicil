@@ -6,6 +6,9 @@
 
 use sqlx::PgPool;
 
+// Acil ayrilis formu (3c), toplu degisiklik seti (3f) ve mutabakat (3d) kendi
+// onceligini kullanana kadar yalnizca Single uretilir.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i16)]
 pub enum Priority {
@@ -47,11 +50,18 @@ pub async fn enqueue(
 }
 
 // "Tekrar dene": yalnizca mudahaledeki is; worker bayragi gorunce kuyruga alir (ADR-052).
-pub async fn request_retry(pool: &PgPool, job_id: i64) -> Result<bool, sqlx::Error> {
+// identity_id sahiplik kontrolu: URL'deki is o kisi sayfasinin isi olmali.
+pub async fn request_retry(
+    pool: &PgPool,
+    job_id: i64,
+    identity_id: i64,
+) -> Result<bool, sqlx::Error> {
     let done = sqlx::query(
-        "UPDATE jobs SET retry_requested = TRUE WHERE id = $1 AND status = 'needs_intervention'",
+        "UPDATE jobs SET retry_requested = TRUE \
+         WHERE id = $1 AND identity_id = $2 AND status = 'needs_intervention'",
     )
     .bind(job_id)
+    .bind(identity_id)
     .execute(pool)
     .await?;
     Ok(done.rows_affected() == 1)
@@ -99,7 +109,7 @@ mod tests {
         );
 
         assert!(
-            !request_retry(&pool, job_id).await.unwrap(),
+            !request_retry(&pool, job_id, ids[0]).await.unwrap(),
             "kuyruktaki işe tekrar dene yok"
         );
         sqlx::query("UPDATE jobs SET status = 'needs_intervention' WHERE id = $1")
@@ -107,7 +117,11 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        assert!(request_retry(&pool, job_id).await.unwrap());
+        assert!(
+            !request_retry(&pool, job_id, ids[1]).await.unwrap(),
+            "başka kimliğin işi değil"
+        );
+        assert!(request_retry(&pool, job_id, ids[0]).await.unwrap());
         assert_eq!(
             enqueue(&pool, ids[0], catalog.ad, Priority::Single)
                 .await

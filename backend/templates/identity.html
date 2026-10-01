@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}{{ page.person.name }} — OpenSicil{% endblock %}
+{% block width %}max-w-4xl{% endblock %}
+{% block content %}
+<div class="flex justify-between items-center mb-6">
+  <h1 class="text-xl font-semibold">{{ page.person.name }} <span class="text-sm rounded px-2 py-1 ml-2" style="background:#313244;">{{ page.person.state }}</span></h1>
+  <a class="text-sm underline" href="/login">Ana sayfa</a>
+</div>
+
+<h2 class="font-medium mb-2">Kişi</h2>
+<table class="w-full text-sm mb-6">
+  <tr><td class="py-1" style="color:#a6adc8;">Sicil no</td><td>{{ page.person.employee_number }}</td><td style="color:#a6adc8;">Kimlik no</td><td>{{ page.person.national_id_masked }}</td></tr>
+  <tr><td class="py-1" style="color:#a6adc8;">Departman</td><td>{{ page.person.department }}</td><td style="color:#a6adc8;">Birincil rol</td><td>{{ page.person.role }}</td></tr>
+  <tr><td class="py-1" style="color:#a6adc8;">Yönetici</td><td>{{ page.person.manager }}</td><td style="color:#a6adc8;">Çalışma tipi</td><td>{{ page.person.employment_type }}</td></tr>
+  <tr><td class="py-1" style="color:#a6adc8;">Başlangıç</td><td>{{ page.person.start_date }}</td><td style="color:#a6adc8;">Bitiş anı</td><td>{{ page.person.end_at }}</td></tr>
+  <tr><td class="py-1" style="color:#a6adc8;">Cep telefonu</td><td>{{ page.person.mobile_phone }}</td><td style="color:#a6adc8;">Kullanıcı adı</td><td>{{ page.person.username }}</td></tr>
+  <tr><td class="py-1" style="color:#a6adc8;">E-posta</td><td>{{ page.person.email }}</td><td style="color:#a6adc8;">UPN</td><td>{{ page.person.upn }}</td></tr>
+</table>
+
+<h2 class="font-medium mb-2">Hesaplar ve hedefteki fark</h2>
+<table class="w-full text-sm mb-6">
+  <thead><tr class="text-left" style="color:#a6adc8;"><th>Hedef</th><th>Hesap</th><th>Köken / mod</th><th>Uygulanan</th><th>Fark</th></tr></thead>
+  <tbody>
+  {% for a in page.accounts %}
+    <tr style="border-top:1px solid #313244;">
+      <td class="py-1">{{ a.target }}</td>
+      <td>{{ a.external_id }}</td>
+      <td>{{ a.origin }} {{ a.mode }}</td>
+      <td>{{ a.applied_state }}</td>
+      <td>{{ a.diff }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<h2 class="font-medium mb-2">İşler</h2>
+{% if page.jobs.is_empty() %}
+<p class="mb-6" style="color:#a6adc8;">İş yok.</p>
+{% else %}
+<table class="w-full text-sm mb-6">
+  <thead><tr class="text-left" style="color:#a6adc8;"><th>Hedef</th><th>Durum</th><th>Deneme</th><th>Sonraki deneme</th><th>Açıklama</th><th></th></tr></thead>
+  <tbody>
+  {% for j in page.jobs %}
+    <tr style="border-top:1px solid #313244;">
+      <td class="py-1">{{ j.target }}</td>
+      <td>{{ j.status }}</td>
+      <td>{{ j.attempts }}</td>
+      <td>{{ j.next_attempt_at }}</td>
+      <td>
+        {% if !j.summary.is_empty() %}<span style="color:#f38ba8;">{{ j.summary }}</span>{% endif %}
+        {% if !j.detail.is_empty() %}<details><summary class="text-xs" style="color:#a6adc8;">teknik ayrıntı</summary><code class="text-xs">{{ j.detail }}</code></details>{% endif %}
+        {% if !j.result.is_empty() %}<span style="color:#a6e3a1;">{{ j.result }}</span>{% endif %}
+      </td>
+      <td>
+        {% if can_retry && j.retryable %}
+        <form method="post" action="/identities/{{ page.person.id }}/jobs/{{ j.id }}/retry"><button class="text-sm underline" type="submit">Tekrar dene</button></form>
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+<h2 class="font-medium mb-2">Son olaylar</h2>
+{% if page.events.is_empty() %}
+<p style="color:#a6adc8;">Olay yok.</p>
+{% else %}
+<table class="w-full text-sm">
+  <thead><tr class="text-left" style="color:#a6adc8;"><th>Zaman</th><th>Olay</th><th>Sonuç</th><th>Kim</th></tr></thead>
+  <tbody>
+  {% for e in page.events %}
+    <tr style="border-top:1px solid #313244;"><td class="py-1">{{ e.at }}</td><td>{{ e.event_type }}</td><td>{{ e.outcome }}</td><td>{{ e.actor }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

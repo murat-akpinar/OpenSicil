@@ -89,7 +89,8 @@ Kurallar:
 - [x] Şablonla kullanıcı adı üretimi; yalnızca veritabanı ve AD çakışması kontrol edilir
 - [x] Varsayılan eşleme + tek `add` ile hesap aç/etkinleştir/pasifleştir ([ADR-057](decisions/057-birincil-kaynak-dogrulamasi.md))
   - Not: `manager` eşlemesi (ADR-040/041), üyelik farkı ve OU taşıma 3b/3c'de; zamanlayıcı (türetilen ≠ `applied_state` → iş) uçtan uca kutucuğuyla
-- [ ] Kimlik kayıt formu + kişi sayfası + operatör dilinde hata + hedefteki fark görünümü (F-12)
+- [x] Kimlik kayıt formu + kişi sayfası + operatör dilinde hata + hedefteki fark görünümü (F-12)
+  - Not: ADR-078 — form 3a alt kümesi (ipucu Faz 5, elle kullanıcı adı ve ek rol 3b, askı 3c); fark görünümü durum düzeyinde (türetilen ↔ `applied_state`), üyelik/öznitelik farkı 3b/3c; "neden bekliyor" (eşik/sayaç/onay) 3f
 - [ ] Uçtan uca: kayıt → AD'de pasif hesap → ekranda "açıldı"
   - Kabul: elle bir kayıt girilir, AD'de pasif hesap görünür, ekranda durum "açıldı" olur
 - [ ] Faz kapanışı: güvenlik ve test

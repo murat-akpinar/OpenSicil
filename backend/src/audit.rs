@@ -9,6 +9,8 @@ pub const SETTINGS_CHANGED: &str = "settings.changed";
 pub const BOOTSTRAP_PASSWORD_CHANGED: &str = "bootstrap.password_changed";
 pub const OPERATOR_LOGIN: &str = "operator.login";
 pub const OPERATOR_REJECTED: &str = "operator.rejected";
+pub const IDENTITY_CREATED: &str = "identity.created";
+pub const JOB_RETRY_REQUESTED: &str = "job.retry_requested";
 
 pub struct Actor<'a> {
     pub subject: Option<&'a str>,

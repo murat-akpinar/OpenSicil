@@ -20,9 +20,7 @@ const MIN_PASSWORD_LENGTH: usize = 12;
 pub struct AppState {
     pub pool: PgPool,
     pub aead_key: [u8; crate::crypto::KEY_LEN],
-    // kimlik numarasi blind index'i (ADR-010); kimlik kayit formu 3a'da okur,
-    // o gune kadar yalnizca acilista dogrulanip tasinir
-    #[allow(dead_code)]
+    // kimlik numarasi blind index'i (ADR-010); kimlik kayit formu kullanir
     pub blind_index_key: [u8; crate::crypto::KEY_LEN],
     pub public_url: String,
     // kurulum saat dilimi (ADR-039); operator reddi kimlik durumunu bununla turetir
@@ -47,6 +45,25 @@ struct LoginTemplate {
 struct OperatorHomeTemplate {
     username: String,
     authorities: Vec<String>,
+    identities: Vec<crate::identity::Listed>,
+}
+
+async fn render_operator_home(
+    state: &AppState,
+    username: String,
+    authorities: Vec<String>,
+) -> Response {
+    match crate::identity::recent(&state.pool, &state.time_zone).await {
+        Ok(identities) => render(&OperatorHomeTemplate {
+            username,
+            authorities,
+            identities,
+        }),
+        Err(e) => {
+            eprintln!("web: kimlik listesi okunamadı: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
 }
 // --- END FEATURE: oidc-login ---
 
@@ -69,7 +86,7 @@ struct ConfigTemplate {
     oidc_client_secret_set: bool,
 }
 
-fn render<T: Template>(tmpl: &T) -> Response {
+pub(crate) fn render<T: Template>(tmpl: &T) -> Response {
     match tmpl.render() {
         Ok(body) => Html(body).into_response(),
         Err(e) => {
@@ -122,7 +139,8 @@ pub fn routes() -> Router<AppState> {
         // --- START FEATURE: oidc-login ---
         .route("/oidc/login", get(oidc_login))
         .route("/oidc/callback", get(oidc_callback))
-    // --- END FEATURE: oidc-login ---
+        // --- END FEATURE: oidc-login ---
+        .merge(crate::identity_web::routes())
 }
 
 // Ayarlar okunamazsa (DB gecici erisilemez) giris sayfasi yine de gosterilir:
@@ -150,10 +168,7 @@ async fn login_form(State(state): State<AppState>, headers: HeaderMap) -> Respon
         if let Ok(Some(operator)) =
             crate::operator_session::validate_session(&state.pool, &token).await
         {
-            return render(&OperatorHomeTemplate {
-                username: operator.username,
-                authorities: operator.authorities,
-            });
+            return render_operator_home(&state, operator.username, operator.authorities).await;
         }
     }
     render_login(&state.pool, String::new()).await
@@ -301,7 +316,7 @@ async fn establish_operator_session(
         }
     };
     audit_operator_login(state, &operator).await;
-    operator_home_with_cookie(&token, result.username, result.authorities)
+    operator_home_with_cookie(state, &token, result.username, result.authorities).await
 }
 
 async fn audit_operator_login(state: &AppState, operator: &crate::operator_session::Operator) {
@@ -323,7 +338,12 @@ async fn audit_operator_login(state: &AppState, operator: &crate::operator_sessi
     }
 }
 
-fn operator_home_with_cookie(token: &str, username: String, authorities: Vec<String>) -> Response {
+async fn operator_home_with_cookie(
+    state: &AppState,
+    token: &str,
+    username: String,
+    authorities: Vec<String>,
+) -> Response {
     let mut headers = HeaderMap::new();
     headers.insert(
         header::SET_COOKIE,
@@ -335,10 +355,7 @@ fn operator_home_with_cookie(token: &str, username: String, authorities: Vec<Str
     );
     (
         headers,
-        render(&OperatorHomeTemplate {
-            username,
-            authorities,
-        }),
+        render_operator_home(state, username, authorities).await,
     )
         .into_response()
 }
@@ -498,6 +515,17 @@ fn with_session_cookie(token: &str, redirect: Redirect) -> Response {
 }
 
 #[cfg(test)]
+pub(crate) fn test_state(pool: PgPool, public_url: &str) -> AppState {
+    AppState {
+        pool,
+        aead_key: [3u8; crate::crypto::KEY_LEN],
+        blind_index_key: [4u8; crate::crypto::KEY_LEN],
+        public_url: public_url.to_string(),
+        time_zone: "Europe/Istanbul".to_string(),
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use axum::body::Body;
@@ -512,16 +540,6 @@ mod tests {
 
     fn test_app_with_public_url(pool: PgPool, public_url: &str) -> Router {
         routes().with_state(test_state(pool, public_url))
-    }
-
-    fn test_state(pool: PgPool, public_url: &str) -> AppState {
-        AppState {
-            pool,
-            aead_key: [3u8; crate::crypto::KEY_LEN],
-            blind_index_key: [4u8; crate::crypto::KEY_LEN],
-            public_url: public_url.to_string(),
-            time_zone: "Europe/Istanbul".to_string(),
-        }
     }
 
     // ADR-059 madde 1: oturum acilisinda da kontrol; ayrilmis operatore oturum acilmaz.

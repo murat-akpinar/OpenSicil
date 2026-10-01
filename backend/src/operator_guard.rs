@@ -34,7 +34,7 @@ pub fn verdict_for(state: LifecycleState) -> Verdict {
 // (start_date, end_at, suspension_start, suspension_end, cancelled, emergency,
 //  deleted_at, now, today) — tarihler ISO metin, anlar Unix saniyesi; saat
 // dilimi cevirisini Postgres yapar (tzdata orada, Rust'ta tz kutuphanesi yok).
-type TimelineRow = (
+pub type TimelineRow = (
     String,
     Option<i64>,
     Option<String>,
@@ -46,28 +46,26 @@ type TimelineRow = (
     String,
 );
 
-const TIMELINE_SQL: &str = "SELECT to_char(start_date, 'YYYY-MM-DD'), \
-    EXTRACT(EPOCH FROM end_at)::bigint, \
-    to_char(suspension_start, 'YYYY-MM-DD'), to_char(suspension_end, 'YYYY-MM-DD'), \
-    cancelled, emergency_departure, EXTRACT(EPOCH FROM deleted_at)::bigint, \
-    EXTRACT(EPOCH FROM now())::bigint, to_char((now() AT TIME ZONE $2)::date, 'YYYY-MM-DD') \
-    FROM identities \
-    WHERE lower(username) = lower(split_part($1, '@', 1)) OR lower(upn) = lower($1) \
-    LIMIT 1";
-
-pub async fn check_operator(
-    pool: &PgPool,
-    time_zone: &str,
-    preferred_username: &str,
-) -> Result<Verdict, sqlx::Error> {
-    let row: Option<TimelineRow> = sqlx::query_as(TIMELINE_SQL)
-        .bind(preferred_username)
-        .bind(time_zone)
-        .fetch_optional(pool)
-        .await?;
-    let Some(row) = row else {
-        return Ok(Verdict::Allowed);
+// $2 her zaman kurulum saat dilimi; WHERE kismi cagirana gore degisir
+// (operator eslesmesi burada, kisi sayfasi id ile: identity.rs).
+#[macro_export]
+macro_rules! timeline_sql {
+    ($where:literal) => {
+        concat!(
+            "SELECT to_char(start_date, 'YYYY-MM-DD'), \
+             EXTRACT(EPOCH FROM end_at)::bigint, \
+             to_char(suspension_start, 'YYYY-MM-DD'), to_char(suspension_end, 'YYYY-MM-DD'), \
+             cancelled, emergency_departure, EXTRACT(EPOCH FROM deleted_at)::bigint, \
+             EXTRACT(EPOCH FROM now())::bigint, \
+             to_char((now() AT TIME ZONE $2)::date, 'YYYY-MM-DD') \
+             FROM identities WHERE ",
+            $where,
+            " LIMIT 1"
+        )
     };
+}
+
+pub fn timeline_from_row(row: &TimelineRow) -> Result<(Timeline, Clock), sqlx::Error> {
     let date = |s: &str| Date::from_iso(s).ok_or_else(|| sqlx::Error::Decode(s.into()));
     let timeline = Timeline {
         start_date: date(&row.0)?,
@@ -82,6 +80,25 @@ pub async fn check_operator(
         now: row.7,
         today: date(&row.8)?,
     };
+    Ok((timeline, clock))
+}
+
+pub async fn check_operator(
+    pool: &PgPool,
+    time_zone: &str,
+    preferred_username: &str,
+) -> Result<Verdict, sqlx::Error> {
+    let row: Option<TimelineRow> = sqlx::query_as(timeline_sql!(
+        "lower(username) = lower(split_part($1, '@', 1)) OR lower(upn) = lower($1)"
+    ))
+    .bind(preferred_username)
+    .bind(time_zone)
+    .fetch_optional(pool)
+    .await?;
+    let Some(row) = row else {
+        return Ok(Verdict::Allowed);
+    };
+    let (timeline, clock) = timeline_from_row(&row)?;
     Ok(verdict_for(lifecycle_state(&timeline, &clock)))
 }
 
