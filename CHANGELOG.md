@@ -50,6 +50,7 @@
 - Hogwarts test AD'si için departman ve rol modeli seed'i
 - Arayüz mockup bölümü kapanışı — güvenlik ve test
 - Giriş bölümü kapanışı — güvenlik ve test, belgeler ADR-095'e göre
+- Fazlar arası işlerin kapanışı — güvenlik ve test, Faz 4 öncesi
 
 ### Yeniden düzenleme
 

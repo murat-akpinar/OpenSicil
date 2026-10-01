@@ -95,6 +95,24 @@ impl Candidate {
     }
 }
 
+/// id, hesap adi, displayName, ad, soyad, sicil, departman adi, departman id,
+/// mail, cep, sabit hat, acilis gunu, sifreli TC
+type CandidateRow = (
+    i64,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    Option<i64>,
+    String,
+    String,
+    String,
+    String,
+    Option<Vec<u8>>,
+);
+
 /// Son taramadaki yonetilmeyen hesaplar; AD'deki departman adi departman
 /// agaciyla adina gore (buyuk/kucuk harf duyarsiz) eslenir. Sifreli TC kimlik
 /// no burada cozulur; cozulemeyen (anahtar donmus) deger bos sayilir.
@@ -103,22 +121,7 @@ pub async fn candidates(
     aead_key: &[u8; crate::crypto::KEY_LEN],
     target: i64,
 ) -> Result<Vec<Candidate>, sqlx::Error> {
-    type Row = (
-        i64,
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        Option<i64>,
-        String,
-        String,
-        String,
-        String,
-        Option<Vec<u8>>,
-    );
-    let rows: Vec<Row> = sqlx::query_as(
+    let rows: Vec<CandidateRow> = sqlx::query_as(
         "SELECT f.id, f.account_name, COALESCE(f.display_name, ''), \
                 COALESCE(f.given_name, ''), COALESCE(f.surname, ''), \
                 COALESCE(f.employee_number, ''), COALESCE(f.department_name, ''), d.id, \
@@ -148,19 +151,22 @@ pub async fn candidates(
             mobile: r.9,
             telephone: r.10,
             when_created: r.11,
-            national_id: r
-                .12
-                .as_deref()
-                .and_then(|enc| match national_id::decrypt(aead_key, enc) {
-                    Ok(value) => Some(value),
-                    Err(e) => {
-                        eprintln!("bulk_adopt: bulgudaki kimlik numarası çözülemedi: {e}");
-                        None
-                    }
-                })
-                .unwrap_or_default(),
+            national_id: decrypted_national_id(aead_key, r.12.as_deref()),
         })
         .collect())
+}
+
+/// Bulgudaki sifreli TC'yi cozer; cozulemeyen (anahtar donmus, bozuk) deger bos
+/// sayilir ve yalnizca log'a dusulur — degerin kendisi degil, hata.
+fn decrypted_national_id(aead_key: &[u8; crate::crypto::KEY_LEN], enc: Option<&[u8]>) -> String {
+    match enc.map(|enc| national_id::decrypt(aead_key, enc)) {
+        Some(Ok(value)) => value,
+        Some(Err(e)) => {
+            eprintln!("bulk_adopt: bulgudaki kimlik numarası çözülemedi: {e}");
+            String::new()
+        }
+        None => String::new(),
+    }
 }
 
 /// Toplu secimin bir kimlik icin tasidigi ortak alanlar; AD'de karsiligi
@@ -234,12 +240,27 @@ async fn create_one(
     candidate: &Candidate,
     batch: &Batch,
 ) -> Result<i64, &'static str> {
-    let (given_name, surname) = candidate.names();
     let department = candidate
         .department_id
         .or(batch.fallback_department_id)
         .ok_or("err.department_required")?;
-    let form = IdentityForm {
+    let form = form_for(candidate, batch, department);
+    let new = identity::validate(&form)?;
+    match identity::create(pool, keys, time_zone, &new, None).await {
+        Ok((id, _)) => Ok(id),
+        Err(identity::CreateError::DuplicateNationalId) => Err("err.duplicate_national_id"),
+        Err(identity::CreateError::Db(e)) => {
+            eprintln!("web: toplu sahiplenme kimlik açamadı: {e}");
+            Err("err.bulk_adopt_failed")
+        }
+    }
+}
+
+/// Kayit formunun toplu sahiplenmedeki karsiligi: AD'den gelen alanlar
+/// (dogrulamadan gecenler) + partinin ortak alanlari.
+fn form_for(candidate: &Candidate, batch: &Batch, department: i64) -> IdentityForm {
+    let (given_name, surname) = candidate.names();
+    IdentityForm {
         given_name,
         surname,
         employee_number: candidate.employee_number.clone(),
@@ -270,15 +291,6 @@ async fn create_one(
         // yeni hesap **acmaz** (ADR-086).
         existing_ad_account_hint: candidate.account_name.clone(),
         ..IdentityForm::default()
-    };
-    let new = identity::validate(&form)?;
-    match identity::create(pool, keys, time_zone, &new, None).await {
-        Ok((id, _)) => Ok(id),
-        Err(identity::CreateError::DuplicateNationalId) => Err("err.duplicate_national_id"),
-        Err(identity::CreateError::Db(e)) => {
-            eprintln!("web: toplu sahiplenme kimlik açamadı: {e}");
-            Err("err.bulk_adopt_failed")
-        }
     }
 }
 // --- END FEATURE: bulk-adoption ---

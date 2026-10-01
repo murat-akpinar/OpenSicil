@@ -31,15 +31,8 @@ pub async fn run() -> ExitCode {
         }
     };
 
-    let migrator = match sqlx::migrate::Migrator::new(Path::new("./migrations")).await {
-        Ok(m) => m,
-        Err(e) => {
-            eprintln!("migrate: migrations dizini okunamadı: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-    if let Err(e) = migrator.run(&pool).await {
-        eprintln!("migrate: şema migration'ı başarısız: {e}");
+    if let Err(e) = apply_migrations(&pool).await {
+        eprintln!("{e}");
         return ExitCode::FAILURE;
     }
 
@@ -48,14 +41,9 @@ pub async fn run() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    // ADR-107 madde 6: slug SQL'de uretilmez; gecmis satirlar burada tek kuralla dolar
-    match crate::org::backfill_slugs(&pool).await {
-        Ok(filled) if filled > 0 => println!("migrate: {filled} rol/departman adresi üretildi"),
-        Ok(_) => {}
-        Err(e) => {
-            eprintln!("migrate: rol/departman adresleri üretilemedi: {e}");
-            return ExitCode::FAILURE;
-        }
+    if let Err(e) = fill_slugs(&pool).await {
+        eprintln!("{e}");
+        return ExitCode::FAILURE;
     }
 
     if let Err(e) = grant_service_privileges(&pool, &backend_user, &worker_user).await {
@@ -65,6 +53,27 @@ pub async fn run() -> ExitCode {
 
     println!("migrate: tamamlandı");
     ExitCode::SUCCESS
+}
+
+async fn apply_migrations(pool: &PgPool) -> Result<(), String> {
+    let migrator = sqlx::migrate::Migrator::new(Path::new("./migrations"))
+        .await
+        .map_err(|e| format!("migrate: migrations dizini okunamadı: {e}"))?;
+    migrator
+        .run(pool)
+        .await
+        .map_err(|e| format!("migrate: şema migration'ı başarısız: {e}"))
+}
+
+// ADR-107 madde 6: slug SQL'de uretilmez; gecmis satirlar burada tek kuralla dolar.
+async fn fill_slugs(pool: &PgPool) -> Result<(), String> {
+    let filled = crate::org::backfill_slugs(pool)
+        .await
+        .map_err(|e| format!("migrate: rol/departman adresleri üretilemedi: {e}"))?;
+    if filled > 0 {
+        println!("migrate: {filled} rol/departman adresi üretildi");
+    }
+    Ok(())
 }
 
 // Servis rollerinin tablo izinleri (ADR-015): semanin sahibi migrate'i calistiran

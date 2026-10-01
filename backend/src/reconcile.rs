@@ -508,13 +508,17 @@ mod tests {
         .fetch_one(&pool)
         .await
         .unwrap();
+        // Bulguda sifreli TC var: ekrana yalnizca maske cikmali (ADR-010)
+        let national_id_enc =
+            crate::crypto::encrypt_versioned(&[3u8; crate::crypto::KEY_LEN], b"10000000146");
         sqlx::query(
             "INSERT INTO reconcile_findings (target_system_id, read_job_id, kind, external_id, \
-             account_name, given_name, surname) VALUES ($1, $2, 'unmanaged', 'g1', \
-             'harry.potter', 'Harry', 'Potter')",
+             account_name, given_name, surname, national_id_enc) VALUES ($1, $2, 'unmanaged', \
+             'g1', 'harry.potter', 'Harry', 'Potter', $3)",
         )
         .bind(target)
         .bind(read_job)
+        .bind(national_id_enc)
         .execute(&pool)
         .await
         .unwrap();
@@ -569,6 +573,8 @@ mod tests {
         );
         assert!(hr.contains(r#"name="finding""#), "satır kutusu yok");
         assert!(!hr.contains("onclick"), "satır içi script CSP'ye takılır");
+        assert!(hr.contains("10*******46"), "TC maskeli basılmalı");
+        assert!(!hr.contains("10000000146"), "düz TC HTML'e girmez");
         let auditor = page("auditor").await;
         assert!(auditor.contains("harry.potter"), "auditor bulguyu okur");
         assert!(

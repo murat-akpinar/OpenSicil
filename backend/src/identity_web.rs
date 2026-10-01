@@ -136,43 +136,54 @@ async fn list_page(
         Ok(n) => n,
         Err(e) => return internal("rolü atanmamış sayısı okunamadı", e),
     };
-    let listed = identity::page(&state.pool, &state.time_zone, &listing).await;
-    match listed {
-        Ok((rows, total)) => {
-            let shown = rows.len() as i64;
-            let from = if shown == 0 { 0 } else { offset + 1 };
-            // Yalnizca bos listede sorulur: dolu listede yonlendirme basilmiyor
-            let unadopted = match rows.is_empty() && query.is_empty() {
-                true => match crate::reconcile::unadopted(&state.pool).await {
-                    Ok(rows) => rows,
-                    Err(e) => return internal("sahiplenme bekleyen hesaplar okunamadı", e),
-                },
-                false => Vec::new(),
-            };
-            render(&IdentitiesTemplate {
-                lang: op.lang,
-                can_register: allowed(&op, REGISTER_AUTHORITIES),
-                shell: Shell::of(&op),
-                q: query,
-                total,
-                range: op.lang.tn(
-                    "identities.range",
-                    &[
-                        &from.to_string(),
-                        &(offset + shown).to_string(),
-                        &total.to_string(),
-                    ],
-                ),
-                prev_offset: (offset > 0).then(|| (offset - PAGE_SIZE).max(0)),
-                next_offset: (offset + shown < total).then_some(offset + PAGE_SIZE),
-                unadopted,
-                unassigned_only,
-                role_unassigned,
-                rows,
-            })
-        }
-        Err(e) => internal("personel listesi okunamadı", e),
-    }
+    let (rows, total) = match identity::page(&state.pool, &state.time_zone, &listing).await {
+        Ok(listed) => listed,
+        Err(e) => return internal("personel listesi okunamadı", e),
+    };
+    // Yalnizca bos listede sorulur: dolu listede yonlendirme basilmiyor
+    let unadopted = match rows.is_empty() && query.is_empty() {
+        true => match crate::reconcile::unadopted(&state.pool).await {
+            Ok(rows) => rows,
+            Err(e) => return internal("sahiplenme bekleyen hesaplar okunamadı", e),
+        },
+        false => Vec::new(),
+    };
+    let (range, prev_offset, next_offset) = pagination(op.lang, offset, rows.len() as i64, total);
+    render(&IdentitiesTemplate {
+        lang: op.lang,
+        can_register: allowed(&op, REGISTER_AUTHORITIES),
+        shell: Shell::of(&op),
+        q: query,
+        total,
+        range,
+        prev_offset,
+        next_offset,
+        unadopted,
+        unassigned_only,
+        role_unassigned,
+        rows,
+    })
+}
+
+/// "1–50 / 312" metni ve onceki/sonraki sayfa ofsetleri; sablon aritmetik yapmaz.
+fn pagination(
+    lang: Lang,
+    offset: i64,
+    shown: i64,
+    total: i64,
+) -> (String, Option<i64>, Option<i64>) {
+    let from = if shown == 0 { 0 } else { offset + 1 };
+    let range = lang.tn(
+        "identities.range",
+        &[
+            &from.to_string(),
+            &(offset + shown).to_string(),
+            &total.to_string(),
+        ],
+    );
+    let prev = (offset > 0).then(|| (offset - PAGE_SIZE).max(0));
+    let next = (offset + shown < total).then_some(offset + PAGE_SIZE);
+    (range, prev, next)
 }
 
 // --- START FEATURE: adoption ---
