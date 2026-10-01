@@ -173,7 +173,7 @@ fn valid_date(value: &str, key: &'static str) -> Result<Date, &'static str> {
 }
 
 // E.164: '+' ve 8–15 rakam, ilk rakam 0 degil (docs/03 cep telefonu).
-fn valid_e164(value: String) -> Result<String, &'static str> {
+pub(crate) fn valid_e164(value: String) -> Result<String, &'static str> {
     let digits = value.strip_prefix('+').unwrap_or("");
     let ok = (E164_MIN_DIGITS..=E164_MAX_DIGITS).contains(&digits.len())
         && digits.bytes().all(|b| b.is_ascii_digit())

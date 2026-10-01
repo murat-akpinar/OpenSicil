@@ -93,6 +93,8 @@
           <th>{{ lang.t("field.full_name") }}</th>
           <th>{{ lang.t("field.employee_number") }}</th>
           <th>{{ lang.t("field.department") }}</th>
+          <th>{{ lang.t("field.email") }}</th>
+          <th>{{ lang.t("field.mobile_phone") }}</th>
         </tr></thead>
         <tbody>
         {% for c in candidates %}
@@ -106,6 +108,14 @@
               {% match c.department_id %}{% when Some with (_d) %}{% when None %}
               <span class="badge badge-warn">{{ lang.t("adopt.no_department_match") }}</span>
               {% endmatch %}
+            </td>
+            {# AD'deki e-posta yalnizca gosterilir: adi ve e-postayi worker uretir (ADR-015) #}
+            <td class="muted">{% if c.mail.is_empty() %}—{% else %}{{ c.mail }}{% endif %}</td>
+            <td class="muted">
+              {% if c.ad_phone().is_empty() %}—{% else %}{{ c.ad_phone() }}{% endif %}
+              {% if !c.ad_phone().is_empty() && !c.phone_ok() %}
+              <span class="badge badge-warn">{{ lang.t("adopt.phone_format") }}</span>
+              {% endif %}
             </td>
           </tr>
         {% endfor %}

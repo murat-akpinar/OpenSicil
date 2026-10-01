@@ -38,9 +38,33 @@ pub struct Candidate {
     /// AD'deki departman adi departman agacinda bulundu mu; bulunmadiysa
     /// formdaki departman kullanilir ve ekran bunu soyler
     pub department_id: Option<i64>,
+    /// AD'deki e-posta: kimlige **yazilmaz**, kullanici adi/e-posta uretimi
+    /// worker'in isidir (ADR-015) ve sahiplenmede AD'den bos alanlari zaten o
+    /// dolduruyor (ADR-086). Burada yalnizca "AD'de ne var" diye gorunur
+    pub mail: String,
+    /// Cep (`mobile`) ve sabit hat (`telephoneNumber`) ham degerleri
+    pub mobile: String,
+    pub telephone: String,
 }
 
 impl Candidate {
+    /// AD'de duran telefon: once cep, cep bossa sabit hat. Ham deger.
+    pub fn ad_phone(&self) -> &str {
+        match self.mobile.is_empty() {
+            true => &self.telephone,
+            false => &self.mobile,
+        }
+    }
+
+    /// Kimligin cep alanina yazilabilir mi? Kimlikteki alan E.164 cep
+    /// numarasidir (docs/03); sabit hat biciminde bir deger ("01632 960001")
+    /// oraya yazilmaz. Uymayan deger bos kalir, satirda rozet cikar ve
+    /// operator duzeltir — `identity::validate` kurali gevsemez (ADR-106).
+    pub fn phone_ok(&self) -> bool {
+        let phone = self.ad_phone();
+        !phone.is_empty() && identity::valid_e164(phone.to_string()).is_ok()
+    }
+
     /// Ad ve soyad AD'de bos olabilir (docs/11 W8). O zaman `displayName`
     /// ikiye bolunur: ilk parca ad, kalani soyad.
     fn names(&self) -> (String, String) {
@@ -66,11 +90,16 @@ pub async fn candidates(pool: &PgPool, target: i64) -> Result<Vec<Candidate>, sq
         String,
         String,
         Option<i64>,
+        String,
+        String,
+        String,
     );
     let rows: Vec<Row> = sqlx::query_as(
         "SELECT f.id, f.account_name, COALESCE(f.display_name, ''), \
                 COALESCE(f.given_name, ''), COALESCE(f.surname, ''), \
-                COALESCE(f.employee_number, ''), COALESCE(f.department_name, ''), d.id \
+                COALESCE(f.employee_number, ''), COALESCE(f.department_name, ''), d.id, \
+                COALESCE(f.mail, ''), COALESCE(f.mobile, ''), \
+                COALESCE(f.telephone_number, '') \
          FROM reconcile_findings f \
          LEFT JOIN departments d ON lower(d.name) = lower(f.department_name) \
          WHERE f.target_system_id = $1 AND f.kind = 'unmanaged' \
@@ -90,6 +119,9 @@ pub async fn candidates(pool: &PgPool, target: i64) -> Result<Vec<Candidate>, sq
             employee_number: r.5,
             department_name: r.6,
             department_id: r.7,
+            mail: r.8,
+            mobile: r.9,
+            telephone: r.10,
         })
         .collect())
 }
@@ -174,6 +206,12 @@ async fn create_one(
         given_name,
         surname,
         employee_number: candidate.employee_number.clone(),
+        // Bicimi uymayan telefon bos gecer: uydurma numara yazmaktansa alan
+        // bos kalir, ekrandaki rozet operatore soyler (ADR-106).
+        mobile_phone: match candidate.phone_ok() {
+            true => candidate.ad_phone().to_string(),
+            false => String::new(),
+        },
         department_id: department.to_string(),
         primary_role_id: batch.primary_role_id.to_string(),
         employment_type: batch.employment_type.clone(),
@@ -209,7 +247,40 @@ mod tests {
             employee_number: String::new(),
             department_name: String::new(),
             department_id: None,
+            mail: String::new(),
+            mobile: String::new(),
+            telephone: String::new(),
         }
+    }
+
+    /// ADR-106: kimlikteki alan E.164 **cep**tir. Cep varsa cep, yoksa sabit
+    /// hat gosterilir; bicimi uymayan deger yazilmaz (gercek Hogwarts AD'sinde
+    /// 29 hesabin hepsinde sabit hat var, hicbirinde cep yok).
+    #[test]
+    fn the_mobile_wins_and_a_non_e164_number_is_not_written() {
+        let phone = |mobile: &str, telephone: &str| Candidate {
+            mobile: mobile.to_string(),
+            telephone: telephone.to_string(),
+            ..candidate("Harry", "Potter", "Harry Potter")
+        };
+
+        // Cep doluysa cep kazanir
+        let both = phone("+905321234567", "01632 960001");
+        assert_eq!(both.ad_phone(), "+905321234567");
+        assert!(both.phone_ok());
+
+        // Cep bossa sabit hat gosterilir ama bicimi uymadigi icin yazilmaz
+        let landline = phone("", "01632 960001");
+        assert_eq!(landline.ad_phone(), "01632 960001");
+        assert!(!landline.phone_ok(), "sabit hat biçimi E.164 değil");
+
+        // E.164 sabit hat kabul edilir: kural bicime bakar, ozniteligin adina degil
+        assert!(phone("", "+442079460001").phone_ok());
+
+        // Ikisi de bossa rozet de cikmaz
+        let empty = phone("", "");
+        assert_eq!(empty.ad_phone(), "");
+        assert!(!empty.phone_ok());
     }
 
     #[test]
@@ -256,8 +327,10 @@ mod tests {
         .fetch_one(&pool)
         .await
         .unwrap();
-        // Uc bulgu: AD alanlari dolu, yalnizca displayName'i olan, ve soyadsiz
-        for (guid, sam, display, given, sn, dept) in [
+        // Uc bulgu: AD alanlari dolu, yalnizca displayName'i olan, ve soyadsiz.
+        // Telefon ikisinde farkli: Harry'de Hogwarts'in sabit hatti (E.164
+        // degil), Ron'da gercek bir cep — ADR-106.
+        for (guid, sam, display, given, sn, dept, mail, mobile, phone) in [
             (
                 "g1",
                 "harry.potter",
@@ -265,6 +338,9 @@ mod tests {
                 "Harry",
                 "Potter",
                 "Test Birimi",
+                "harry.potter@hogwarts.local",
+                "",
+                "01632 960001",
             ),
             (
                 "g2",
@@ -273,14 +349,18 @@ mod tests {
                 "",
                 "",
                 "Bilinmeyen",
+                "",
+                "+905321234567",
+                "",
             ),
-            ("g3", "hagrid", "Hagrid", "", "", ""),
+            ("g3", "hagrid", "Hagrid", "", "", "", "", "", ""),
         ] {
             sqlx::query(
                 "INSERT INTO reconcile_findings (target_system_id, read_job_id, kind, \
                  external_id, account_name, display_name, container, enabled, \
-                 given_name, surname, department_name) \
-                 VALUES ($1, $2, 'unmanaged', $3, $4, $5, 'OU=Users', true, $6, $7, $8)",
+                 given_name, surname, department_name, mail, mobile, telephone_number) \
+                 VALUES ($1, $2, 'unmanaged', $3, $4, $5, 'OU=Users', true, $6, $7, $8, \
+                 $9, $10, $11)",
             )
             .bind(target)
             .bind(read_job)
@@ -290,6 +370,9 @@ mod tests {
             .bind(given)
             .bind(sn)
             .bind(dept)
+            .bind(mail)
+            .bind(mobile)
+            .bind(phone)
             .execute(&pool)
             .await
             .unwrap();
@@ -372,6 +455,32 @@ mod tests {
         // displayName'den bolunen ad
         assert_eq!(hints[1].0, "Ron");
         assert_eq!(hints[1].1, "Billius Weasley");
+
+        // ADR-106: AD'nin telefonu kimlige yazildi ama yalnizca E.164 olani.
+        // Harry'nin sabit hatti bos gecti (uydurma numara yok), Ron'un cebi
+        // yazildi. E-posta kimlige yazilmaz: adi ve e-postayi worker uretir
+        // (ADR-015), bulgudaki `mail` ekranda ipucu olarak durur
+        let phones: Vec<(String, Option<String>)> = sqlx::query_as(
+            "SELECT existing_ad_account_hint, mobile_phone FROM identities \
+             WHERE existing_ad_account_hint IS NOT NULL ORDER BY id",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(phones[0].0, "harry.potter");
+        assert_eq!(
+            phones[0].1, None,
+            "sabit hat E.164 değil, kimliğe yazılmadı"
+        );
+        assert_eq!(phones[1].1.as_deref(), Some("+905321234567"));
+        let mails: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM identities WHERE existing_ad_account_hint IS NOT NULL \
+             AND email IS NOT NULL",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(mails, 0, "e-posta backend'in işi değil (ADR-015)");
 
         // Her yeni kimlik icin her hedefe is acildi (seed'deki iki kimlik haric)
         let jobs: i64 = sqlx::query_scalar("SELECT count(*) FROM jobs WHERE identity_id = ANY($1)")

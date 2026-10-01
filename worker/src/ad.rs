@@ -557,9 +557,17 @@ pub struct DirectoryAccount {
     /// AD'nin serbest metin `department` degeri; departman agacina ad
     /// eslesmesiyle baglanir (ADR-102), burada ham metin durur.
     pub department: Option<String>,
+    /// Kisinin dizindeki e-postasi; sahiplenmede worker zaten AD'den okuyup
+    /// bos alanlari dolduruyor (ADR-086), bu deger ekranda "AD'de ne var"
+    /// sorusunu cevaplar (ADR-106).
+    pub mail: Option<String>,
+    /// Cep ve sabit hat ayri okunur: kimlikteki alan **cep**tir, sabit hat
+    /// yalnizca cep bosken yedege gecer ve bicim kontrolunden gecmek zorunda.
+    pub mobile: Option<String>,
+    pub telephone: Option<String>,
 }
 
-const ACCOUNT_ATTRS: [&str; 9] = [
+const ACCOUNT_ATTRS: [&str; 13] = [
     "objectGUID",
     "sAMAccountName",
     "displayName",
@@ -568,7 +576,14 @@ const ACCOUNT_ATTRS: [&str; 9] = [
     "givenName",
     "sn",
     "employeeID",
+    // Sicilin standart ozniteligi `employeeID`; bos cikan kurumlarda deger
+    // siklikla `employeeNumber`da duruyor (gercek Hogwarts AD'sinde 29 hesabin
+    // 29'unda `employeeNumber`, 0'inda `employeeID` dolu — ADR-106).
+    "employeeNumber",
     "department",
+    "mail",
+    "mobile",
+    "telephoneNumber",
 ];
 
 // userAccountControl ACCOUNTDISABLE biti (docs/05); UAC 514 = 512 | 2 = pasif.
@@ -604,8 +619,14 @@ fn to_account(entry: &SearchEntry) -> Option<DirectoryAccount> {
         enabled: uac & ACCOUNTDISABLE == 0,
         given_name: text_attr(entry, "givenName"),
         surname: text_attr(entry, "sn"),
-        employee_number: text_attr(entry, "employeeID"),
+        // `employeeID` bossa `employeeNumber`: iki oznitelik AD'de ayridir ve
+        // kurumlar birini ya da otekini doldurur (ADR-106).
+        employee_number: text_attr(entry, "employeeID")
+            .or_else(|| text_attr(entry, "employeeNumber")),
         department: text_attr(entry, "department"),
+        mail: text_attr(entry, "mail"),
+        mobile: text_attr(entry, "mobile"),
+        telephone: text_attr(entry, "telephoneNumber"),
     })
 }
 
@@ -679,6 +700,56 @@ mod tests {
         assert!(logon_timestamp_enabled(Some("14")));
         assert!(!logon_timestamp_enabled(Some("0")));
         assert!(!logon_timestamp_enabled(Some(" 0 ")));
+    }
+
+    /// ADR-106: sicil `employeeID`'de degil `employeeNumber`'da olabilir, ve
+    /// iletisim alanlari okunuyor mu (gercek Hogwarts AD'sinde 29 hesabin
+    /// 29'unda `employeeNumber`/`mail`/`telephoneNumber` dolu, `employeeID` ve
+    /// `mobile` bos).
+    fn entry(attrs: &[(&str, &str)]) -> SearchEntry {
+        let mut entry = SearchEntry {
+            dn: "CN=Harry Potter,OU=Users,OU=Hogwarts,DC=hogwarts,DC=local".to_string(),
+            attrs: std::collections::HashMap::new(),
+            bin_attrs: std::collections::HashMap::new(),
+        };
+        for (name, value) in attrs {
+            entry
+                .attrs
+                .insert(name.to_string(), vec![value.to_string()]);
+        }
+        entry.bin_attrs.insert(
+            "objectGUID".to_string(),
+            vec![(1u8..=16).collect::<Vec<u8>>()],
+        );
+        entry
+    }
+
+    #[test]
+    fn employee_number_falls_back_and_contact_fields_are_read() {
+        let base = [("sAMAccountName", "hpotter"), ("userAccountControl", "512")];
+        let with = |extra: &[(&str, &str)]| {
+            let mut attrs = base.to_vec();
+            attrs.extend_from_slice(extra);
+            to_account(&entry(&attrs)).unwrap()
+        };
+
+        // Standart oznitelik doluysa o kullanilir
+        let standard = with(&[("employeeID", "4711"), ("employeeNumber", "yedek")]);
+        assert_eq!(standard.employee_number.as_deref(), Some("4711"));
+
+        // `employeeID` bossa `employeeNumber`'a duser (Hogwarts durumu)
+        let fallback = with(&[("employeeNumber", "00000000001")]);
+        assert_eq!(fallback.employee_number.as_deref(), Some("00000000001"));
+        assert_eq!(with(&[]).employee_number, None, "ikisi de boşsa boş kalır");
+
+        // Iletisim alanlari: cep ve sabit hat ayri okunur
+        let contact = with(&[
+            ("mail", "hpotter@hogwarts.local"),
+            ("telephoneNumber", "01632 960001"),
+        ]);
+        assert_eq!(contact.mail.as_deref(), Some("hpotter@hogwarts.local"));
+        assert_eq!(contact.telephone.as_deref(), Some("01632 960001"));
+        assert_eq!(contact.mobile, None);
     }
 
     #[test]

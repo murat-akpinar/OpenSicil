@@ -100,5 +100,14 @@ psql -d "$DB" -c "SELECT rpad(account_name, 14) || rpad(COALESCE(display_name,''
   FROM reconcile_findings ORDER BY container, account_name"
 
 echo
+echo "--- kişi alanları: 29 hesapta kaçı dolu? (ADR-106) ---"
+psql -d "$DB" -c "SELECT 'toplam          ' || count(*) FROM reconcile_findings \
+  UNION ALL SELECT 'mail            ' || count(*) FROM reconcile_findings WHERE mail <> '' \
+  UNION ALL SELECT 'mobile          ' || count(*) FROM reconcile_findings WHERE mobile <> '' \
+  UNION ALL SELECT 'telephoneNumber ' || count(*) FROM reconcile_findings WHERE telephone_number <> '' \
+  UNION ALL SELECT 'sicil           ' || count(*) FROM reconcile_findings WHERE employee_number <> '' \
+  UNION ALL SELECT 'departman       ' || count(*) FROM reconcile_findings WHERE department_name <> ''"
+
+echo
 echo "--- AD'ye yazıldı mı? (denetim kaydında worker niyeti olmamalı) ---"
 psql -d "$DB" -c "SELECT COALESCE((SELECT count(*)::text FROM audit_log WHERE operation_class IS NOT NULL), '0') || ' worker niyet satırı'"

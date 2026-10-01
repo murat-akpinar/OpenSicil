@@ -416,11 +416,36 @@ Kurallar:
 > 2. **Cep telefonu AD'den hiç okunmuyor.** Mutabakat taraması (`0019`) yalnızca `givenName`, `sn`, `employeeID`, `department` okuyor (ADR-102); `mobile`/`telephoneNumber`/`mail` kapsamda değil. Bu kutucuğun işi.
 > 3. **TC kimlik no AD'de yok.** Standart AD şemasında ulusal kimlik numarası alanı yoktur; kurum koyduysa `employeeID` ya da bir `extensionAttribute`'tadır ve bu dizinde `employeeID` **29 hesabın 0'ında** dolu. OpenSicil TC'yi şifreli + blind index'li tutar (ADR-010), yani AD'den gelse bile elle doğrulanması gerekir — kapsam kararı bu kutucukta verilir.
 
-- [ ] Sahiplenme AD'den cep telefonu ve e-posta da alır
+- [x] Sahiplenme AD'den cep telefonu ve e-posta da alır
   - Kabul: mutabakat taraması `mail`, `mobile` ve `telephoneNumber`'ı da okur ve bulguya yazar (migration `0020`, `ad::ACCOUNT_ATTRS` + `reconcile::Finding`); ekranda hangi hesapta hangi alanın geldiği görünür
   - Kabul: toplu sahiplenme bu değerleri kimliğe yazar — cep `+90…` E.164 biçimine uymuyorsa **boş bırakılır ve satırda "biçim uymadı" rozeti çıkar** (uydurma yok, `identity::validate` kuralı gevşetilmez); e-posta yine worker'ın işi (ADR-015), backend yalnızca `mail`'i ipucu olarak taşır
   - Kabul: TC kimlik no için karar notu yazılır: hangi öznitelikten okunacağı kurulum ayarı mı olacak, yoksa v1'de hiç okunmayacak mı ([ADR-010](decisions/010-kisisel-veri-kimlik-no-telefon.md) şifreleme kuralı değişmez)
   - Kabul: gerçek Hogwarts AD'sinde ölçülür — 29 hesapta `mail`/`mobile`/`telephoneNumber` kaçında dolu, nota yazılır
+  - Not (2026-10-01): [ADR-106](decisions/106-sahiplenmede-ad-kisi-alanlari.md) — `0020_reconcile_contact_attrs.sql` (`mail`, `mobile`, `telephone_number`), `ad::ACCOUNT_ATTRS` 9 → 13 öznitelik, `reconcile::Finding` üçünü taşıyor, mutabakat ekranının aday tablosunda iki yeni kolon (e-posta + telefon). **Üçüncü bir hata çıktı ve düzeltildi:** sicil `employeeID`'den okunuyordu, bu dizinde değer `employeeNumber`'da duruyor (ikisi AD'de farklı öznitelik) — artık `employeeID` boşsa `employeeNumber`'a düşüyor, kurulum ayarı açılmadı (ADR-106 madde 2). Telefon: cep varsa cep, yoksa sabit hat aday; `identity::valid_e164`'ten geçmeyen değer **yazılmaz**, satırda "biçim uymadı" rozeti çıkar (`Candidate::ad_phone`/`phone_ok`). E-postayı backend yazmıyor — adı ve e-postayı worker üretir (ADR-015) ve sahiplenmede AD'den boş alanları o dolduruyor (ADR-086); bulgudaki `mail` ekranda ipucu
+  - Ölçüm (2026-10-01, gerçek Hogwarts AD'si, `sh scripts/e2e-hogwarts.sh` — uygulamanın kendi tarama yolundan, 29 hesap, AD'ye **0 worker niyet satırı**): `mail` **29/29**, `telephoneNumber` **29/29**, `mobile` **0/29**, sicil **29/29** (bu değişiklikten önce 0/29), departman 29/29, `employeeID` 0/29. Hogwarts'ın sabit hattı (`01632 960001`) E.164 olmadığı için 29 hesabın hiçbirinde cep kimliğe yazılmayacak, hepsi "biçim uymadı" rozeti alacak — doğru davranış, numara uydurulmuyor
+  - Not (TC kararı): ADR-106 madde 5 — AD şemasında ulusal kimlik no alanı yok ve bu dizinde `employeeID` 0/29 dolu. Karar: **kurulum ayarı** ("TC kimlik no özniteliği", boş = hiç okunmaz, varsayılan boş) + yazma yönü var olan **hassas eşleme kapısından** geçer (ADR-029/082: izinli liste, `SENSITIVE_MAPPING_ENABLED`, yalnızca `admin`, açık onay, değer denetime yazılmaz). Uygulaması aşağıdaki kutucuk
+  - Not (1. sebep): "veri gelmedi" şikâyetinin asıl sebebi `DRY_RUN=true`'ydu (ADR-054 ilk kurulum varsayılanı; kuru modda sahiplenme bilerek reddedilir — ADR-086). Ayar değişmedi; docs/09 devreye alma listesine `DRY_RUN=false` adımı girecek (aşağıdaki kutucuk)
+  - Doğrulama (2026-10-01): backend **181** / worker **93** test; worker koşusu lab Samba **ve** gerçek Windows AD (`AD_WIN_*`) ile; fmt + clippy iki crate'te temiz; `sh scripts/build-css.sh` (45198 bayt, değişmedi) ve `sh scripts/check-glyphs.sh` geçti. Yeni testler: `ad::employee_number_falls_back_and_contact_fields_are_read` (saf, `SearchEntry`'den), `bulk_adopt::the_mobile_wins_and_a_non_e164_number_is_not_written` (saf tablo), DB testi artık telefonun kimliğe yazılmasını (Harry sabit hat → boş, Ron cep → yazıldı) ve e-postanın backend tarafından yazılmadığını doğruluyor
+
+- [ ] TC kimlik no özniteliği: kurulum ayarı (okuma) + hassas eşleme kaynağı (yazma) ([ADR-106](decisions/106-sahiplenmede-ad-kisi-alanlari.md) madde 5)
+  - Kabul: Yapılandırma sayfasında "TC kimlik no özniteliği" alanı; boş bırakılırsa tarama okumaz ve davranış bugünkü gibi kalır (varsayılan boş)
+  - Kabul: dolduğunda tarama o özniteliği okur, bulguya yazar; toplu sahiplenme değeri `national_id::parse`'tan geçirir — geçmeyen değer boş kalır ve satırda rozet çıkar, blind index çakışması hesabı atlatır
+  - Kabul: `national_id` eşleme kaynağı **hassas** işaretlenir (`mapping_rules.rs` ikizi); satır yalnızca `SENSITIVE_MAPPING_ENABLED=true` + `admin` + açık onayla açılabilir, kapalıyken iş müdahaleye düşer; worker denetim kaydına yalnızca öznitelik adını yazar, değeri yazmaz
+  - Kabul: gerçek Hogwarts AD'sinde ölçülür — ayar boşken 29 hesapta TC okunmuyor, ayar `extensionAttribute5`'e çekilince okunan değer sayısı nota yazılır
+- [ ] `docs/09` devreye alma listesine `DRY_RUN=false` adımı ([ADR-106](decisions/106-sahiplenmede-ad-kisi-alanlari.md) madde 6)
+  - Kabul: "İlk giriş" akışında, personel alınmadan önce `DRY_RUN=false` adımı ve neyin hâlâ yazılmadığı (gözlem modu) yazılır
+  - Not: ayar değişmiyor, yalnızca belge — kuru modda sahiplenmenin reddi bilinçli (ADR-054/086)
+
+## URL'de id yerine okunur ad
+
+> Fazlar arası iş, "Faz" olarak numaralanmaz. Kullanıcı isteği (2026-10-01): "url sevmedim `https://…/roles/17`, 10 17 yazıyor, ismi gelse daha iyi olmaz mı". Bugün rol, departman, hedef sistem ve kişi sayfaları birincil anahtarla adreslenir.
+
+- [ ] Rol ve departman adresleri okunur ada döner
+  - Kabul: `/roles/sistem-uzmani` gibi bir adres çalışır; eski `/roles/17` kalıcı yönlendirmeyle (301) yeni adrese gider, kayıtlı bağlantılar kırılmaz
+  - Kabul: ad üretimi ADR-011 normalleştirmesini **yeniden yazmaz**, var olan `username::normalize_component` kuralını kullanır (Türkçe küçük harf, aksan atma, `a-z0-9` dışı atılır)
+  - Kabul: slug tekilliği veritabanında zorlanır (UNIQUE); ad değişince slug değişir ve eski slug yönlendirme için saklanır ya da değişmez tutulur — hangisi seçildiği karara yazılır
+  - Kabul: kişi sayfası kapsam dışıdır; kişi adresi ad taşımaz (ad-soyad mükerrer olabiliyor, ADR-078 ve kişisel veri adreste görünmemeli)
+  - Not: karar dosyası yazılır — slug kimin ürettiği (backend mi worker mı), ad değişiminde ne olduğu, 301 tablosunun açılıp açılmadığı
 
 ## Faz 4: İşletme
 

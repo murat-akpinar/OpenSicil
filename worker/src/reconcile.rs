@@ -36,6 +36,11 @@ pub struct Finding {
     pub surname: Option<String>,
     pub employee_number: Option<String>,
     pub department_name: Option<String>,
+    /// AD'deki iletisim alanlari (ADR-106): ekran "hangi hesapta hangi alan
+    /// geldi" sorusunu cevaplar, toplu sahiplenme telefonu buradan alir.
+    pub mail: Option<String>,
+    pub mobile: Option<String>,
+    pub telephone: Option<String>,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -82,6 +87,9 @@ pub fn compare(accounts: &[DirectoryAccount], links: &[Link]) -> Vec<Finding> {
                 surname: account.surname.clone(),
                 employee_number: account.employee_number.clone(),
                 department_name: account.department.clone(),
+                mail: account.mail.clone(),
+                mobile: account.mobile.clone(),
+                telephone: account.telephone.clone(),
             }
         })
         .collect();
@@ -103,6 +111,9 @@ pub fn compare(accounts: &[DirectoryAccount], links: &[Link]) -> Vec<Finding> {
             surname: None,
             employee_number: None,
             department_name: None,
+            mail: None,
+            mobile: None,
+            telephone: None,
         });
     }
     findings.sort_by(|a, b| a.account_name.cmp(&b.account_name));
@@ -146,8 +157,9 @@ pub async fn store(
         sqlx::query(
             "INSERT INTO reconcile_findings (target_system_id, read_job_id, kind, \
              external_id, account_name, display_name, container, enabled, identity_id, \
-             given_name, surname, employee_number, department_name) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+             given_name, surname, employee_number, department_name, mail, mobile, \
+             telephone_number) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)",
         )
         .bind(target)
         .bind(read_job_id)
@@ -162,6 +174,9 @@ pub async fn store(
         .bind(&finding.surname)
         .bind(&finding.employee_number)
         .bind(&finding.department_name)
+        .bind(&finding.mail)
+        .bind(&finding.mobile)
+        .bind(&finding.telephone)
         .execute(&mut *tx)
         .await?;
     }
@@ -186,6 +201,9 @@ mod tests {
             surname: Some("Hogwarts".to_string()),
             employee_number: None,
             department: Some("Teachers".to_string()),
+            mail: Some(format!("{sam}@hogwarts.local")),
+            mobile: None,
+            telephone: Some("01632 960001".to_string()),
         }
     }
 
