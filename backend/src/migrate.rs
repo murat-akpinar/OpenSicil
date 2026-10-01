@@ -61,6 +61,8 @@ pub async fn run() -> ExitCode {
 // roldur, backend ve worker yalnizca burada verilenleri yapabilir. Yeni tablo
 // acan her migration buraya satir ekler; GRANT idempotent, her migrate'te yenilenir.
 // - _sqlx_migrations: acilis sema kontrolu (ADR-061 madde 3, db::check_schema_ready)
+// - app_settings: worker yalnizca hedef sistem baglanti kolonlarini okur (AD/Zimbra
+//   host, bind DN, sifreli parola); OIDC istemci sirri backend'de kalir (ADR-068)
 // - audit_log: yalnizca ekleme, performed_by ve id kolonlarina deger verilemez,
 //   UPDATE/DELETE yok; niyet sinifi (operation_class) ve sonuc yalnizca worker,
 //   aktor yalnizca backend (ADR-016/050/062: sayac worker niyetlerini sayar)
@@ -71,13 +73,16 @@ pub async fn run() -> ExitCode {
 // - catalog_items: yalnizca worker yazar, silmez (kayip isaretler); target_systems
 //   satirlari sabit, varsayilanlarini backend gunceller; yetki ogesi ve tek
 //   degerli ayar tablolari backend'in (ADR-015, docs/03)
-// - account_links: yalnizca worker (ADR-015); jobs: backend acar ve "tekrar dene"
-//   ister, durum/kira/sonuc yalnizca worker (ADR-052, ADR-062)
+// - account_links: yalnizca worker (ADR-015); jobs: backend ve worker'in
+//   zamanlayicisi (ADR-028, ADR-079) acar, backend "tekrar dene" ister,
+//   durum/kira/sonuc yalnizca worker (ADR-052, ADR-062)
 // - used_names: worker yakar (silmede), backend serbest birakir (ADR-035)
 const SERVICE_GRANTS: &str = "\
 GRANT SELECT ON _sqlx_migrations TO {backend}, {worker};
 GRANT SELECT, INSERT, UPDATE, DELETE ON bootstrap_account, bootstrap_sessions, app_settings, \
 oidc_auth_requests, operator_sessions TO {backend};
+GRANT SELECT (id, ad_host, ad_bind_dn, ad_service_password_enc, zimbra_url, \
+zimbra_admin_password_enc) ON app_settings TO {worker};
 GRANT SELECT ON audit_log, hourly_counter_usage TO {backend}, {worker};
 GRANT INSERT (event_type, detail, actor_subject, actor_username, identity_id, target_system_id) \
 ON audit_log TO {backend};
@@ -102,8 +107,9 @@ GRANT SELECT ON account_links, jobs TO {backend}, {worker};
 GRANT INSERT, UPDATE, DELETE ON account_links TO {worker};
 GRANT INSERT (identity_id, target_system_id, priority), UPDATE (priority, retry_requested) \
 ON jobs TO {backend};
-GRANT UPDATE (status, attempts, next_attempt_at, locked_by, locked_until, retry_requested, \
-last_error, result, finished_at) ON jobs TO {worker};
+GRANT INSERT (identity_id, target_system_id, priority), UPDATE (status, attempts, \
+next_attempt_at, locked_by, locked_until, retry_requested, last_error, result, finished_at) \
+ON jobs TO {worker};
 GRANT SELECT ON used_names TO {backend}, {worker};
 GRANT INSERT (name, kind, former_identity_id) ON used_names TO {worker};
 GRANT UPDATE (released_at, release_reason) ON used_names TO {backend};
@@ -706,6 +712,18 @@ mod tests {
         )
         .await;
 
+        // Worker hedef baglanti ayarlarini okur, OIDC sirrini okuyamaz (ADR-068).
+        sqlx::query("SELECT ad_host, ad_bind_dn, ad_service_password_enc FROM app_settings")
+            .execute(worker_pool)
+            .await
+            .expect("worker AD bağlantı ayarlarını okuyabilmeli");
+        assert_rejected(
+            worker_pool,
+            "SELECT oidc_client_secret_enc FROM app_settings WHERE $1 = $1",
+            &[catalog.ad],
+            "worker OIDC istemci sırrını okuyamamalı",
+        )
+        .await;
         sqlx::query(NEW_ITEM)
             .bind(catalog.ad)
             .execute(worker_pool)

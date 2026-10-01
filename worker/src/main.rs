@@ -13,6 +13,7 @@ mod engine;
 mod heartbeat;
 mod model;
 mod queue;
+mod scheduler;
 #[cfg(test)]
 mod test_support;
 mod username;
@@ -30,6 +31,8 @@ use tokio::sync::Notify;
 
 // ADR-028: kuyruk 5 sn'de bir yoklanir; ayri bildirim mekanizmasi yok.
 const POLL_INTERVAL: Duration = Duration::from_secs(5);
+// ADR-028: zamanlayici cozunurlugu 1 dakika; ilk tik acilista (kacirilan gecisler).
+const TICK_INTERVAL: Duration = Duration::from_secs(60);
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -198,10 +201,12 @@ async fn run() -> ExitCode {
     // kuyruk bosalinca 5 sn beklenir. Erisilemeyen hedefin isleri bir yoklama
     // suresi boyunca alinmaz, sonra tek isle yeniden yoklanir (ADR-052 madde 3).
     let mut unreachable: HashMap<i64, Instant> = HashMap::new();
+    let mut next_tick = Instant::now();
     while !stop.load(Ordering::SeqCst) {
         if let Err(e) = heartbeat::touch() {
             eprintln!("worker: nabız dosyasına yazılamadı: {e}");
         }
+        tick_if_due(&pool, &env.time_zone, &mut next_tick).await;
         let skip = unreachable_targets(&unreachable, Instant::now());
         match queue::claim(&pool, &worker_id, &skip).await {
             Ok(Some(job)) => {
@@ -216,6 +221,19 @@ async fn run() -> ExitCode {
         let _ = tokio::time::timeout(POLL_INTERVAL, wake.notified()).await;
     }
     ExitCode::SUCCESS
+}
+
+// Zamanlayici tiki (ADR-028): hata surec durdurmaz, sonraki tikte yeniden denenir.
+async fn tick_if_due(pool: &PgPool, time_zone: &str, next_tick: &mut Instant) {
+    if Instant::now() < *next_tick {
+        return;
+    }
+    *next_tick = Instant::now() + TICK_INTERVAL;
+    match scheduler::tick(pool, time_zone).await {
+        Ok(0) => {}
+        Ok(opened) => println!("worker: zamanlayıcı {opened} geçiş işi açtı"),
+        Err(e) => eprintln!("worker: zamanlayıcı tiki başarısız: {e}"),
+    }
 }
 
 fn unreachable_targets(marks: &HashMap<i64, Instant>, now: Instant) -> Vec<i64> {

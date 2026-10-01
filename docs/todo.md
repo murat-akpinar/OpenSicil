@@ -91,8 +91,9 @@ Kurallar:
   - Not: `manager` eşlemesi (ADR-040/041), üyelik farkı ve OU taşıma 3b/3c'de; zamanlayıcı (türetilen ≠ `applied_state` → iş) uçtan uca kutucuğuyla
 - [x] Kimlik kayıt formu + kişi sayfası + operatör dilinde hata + hedefteki fark görünümü (F-12)
   - Not: ADR-078 — form 3a alt kümesi (ipucu Faz 5, elle kullanıcı adı ve ek rol 3b, askı 3c); fark görünümü durum düzeyinde (türetilen ↔ `applied_state`), üyelik/öznitelik farkı 3b/3c; "neden bekliyor" (eşik/sayaç/onay) 3f
-- [ ] Uçtan uca: kayıt → AD'de pasif hesap → ekranda "açıldı"
+- [x] Uçtan uca: kayıt → AD'de pasif hesap → ekranda "açıldı"
   - Kabul: elle bir kayıt girilir, AD'de pasif hesap görünür, ekranda durum "açıldı" olur
+  - Not: `sh scripts/e2e-lab.sh` aynı yolu gerçek backend + worker + lab AD/Keycloak ile yürütür (ADR-079; 2026-10-01'de geçti: `uctan.uca`, UAC 514, sayfada "açıldı"/"bekliyor"/"uyumlu"). Zamanlayıcı (ADR-028/038) burada geldi: `worker/src/scheduler.rs`. Betik, worker rolünün `app_settings` okuma yetkisinin eksik olduğunu yakaladı; eklendi
 - [ ] Faz kapanışı: güvenlik ve test
   - (1a'daki kapanış şablonunun aynısı)
 

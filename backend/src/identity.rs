@@ -527,8 +527,8 @@ async fn load_accounts(
             target,
             diff: diff_text(state, external_id.is_some(), applied.as_deref()),
             external_id: external_id.unwrap_or_default(),
-            origin: origin.unwrap_or_default(),
-            mode: mode.unwrap_or_default(),
+            origin: origin.as_deref().map(link_label).unwrap_or_default(),
+            mode: mode.as_deref().map(link_label).unwrap_or_default(),
             applied_state: applied
                 .as_deref()
                 .map(label_of_key)
@@ -536,6 +536,18 @@ async fn load_accounts(
                 .to_string(),
         })
         .collect())
+}
+
+// account_links koken/mod anahtarlarinin ekran karsiligi (docs/03 hesap baglantisi).
+pub fn link_label(key: &str) -> String {
+    match key {
+        "provisioned" => "açıldı",
+        "adopted" => "sahiplenildi",
+        "managed" => "yönetiliyor",
+        "observed" => "gözlem",
+        other => other,
+    }
+    .to_string()
 }
 
 pub fn diff_text(state: LifecycleState, linked: bool, applied: Option<&str>) -> String {
@@ -732,6 +744,8 @@ mod tests {
             "hedefte bekliyor, olması gereken aktif"
         );
         assert!(diff_text(Departed, true, None).contains("henüz uygulanmadı"));
+        assert_eq!(link_label("provisioned"), "açıldı");
+        assert_eq!(link_label("x"), "x");
     }
 
     #[tokio::test]
