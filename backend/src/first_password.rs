@@ -128,6 +128,8 @@ struct FirstPasswordTemplate {
     username: String,
     email: String,
     pending: bool,
+    /// ADR-056: beklerken hedef islerinin ilerlemesi (AD hesabi, mailbox)
+    jobs: Vec<crate::identity::Job>,
     password: String,
     error: String,
 }
@@ -164,11 +166,18 @@ async fn show(
         username: username.unwrap_or_default(),
         email: email.unwrap_or_default(),
         pending: false,
+        jobs: Vec::new(),
         password: String::new(),
         error: String::new(),
     };
     match status {
-        Status::Pending => page.pending = true,
+        Status::Pending => {
+            page.pending = true;
+            page.jobs = match crate::identity::load_jobs(&state.pool, &state.time_zone, id).await {
+                Ok(jobs) => jobs,
+                Err(e) => return internal("işler okunamadı", e),
+            };
+        }
         Status::Ready(password) => {
             page.password = password;
             let detail = serde_json::json!({ "first_password_id": fp });

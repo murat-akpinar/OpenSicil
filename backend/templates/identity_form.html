@@ -102,5 +102,9 @@
     {% endif %}
   </div>
   <button class="w-full rounded py-2" style="background:#89b4fa; color:#1e1e2e;" type="submit">Kaydet</button>
+  {% if !editing %}
+  <button class="w-full rounded py-2 mt-2" style="background:#a6e3a1; color:#1e1e2e;" type="submit" name="issue_first_password" value="1">Kaydet ve ilk parolayı ver</button>
+  <p class="text-xs mt-1" style="color:#a6adc8;">Kişi masada bekliyorsa: başlangıç bugün ya da geçmişte olmalı; hesap açılır, parola bir kez gösterilir (ADR-056).</p>
+  {% endif %}
 </form>
 {% endblock %}

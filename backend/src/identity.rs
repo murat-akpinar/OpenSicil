@@ -48,6 +48,9 @@ pub struct IdentityForm {
     pub employment_type: String,
     #[serde(default)]
     pub start_date: String,
+    /// ADR-056: "Kaydet ve ilk parolayı ver" düğmesi; bos degilse istenmistir
+    #[serde(default)]
+    pub issue_first_password: String,
     #[serde(default)]
     pub end_date: String,
     // ADR-022: istege bagli elle kullanici adi; bossa sablon
@@ -177,12 +180,15 @@ impl From<sqlx::Error> for CreateError {
 }
 
 // Bitis gunu → bitis ani: ertesi gun 00:00, kurulum saat diliminde (ADR-038/039).
+// Kimlik, her hedefe tek kimlik isi ve (istenmisse) ilk parola istegi tek transaction'da
+// (ADR-056); kayit gorunuyorsa isi de vardir. Doner: (kimlik, ilk parola istegi).
 pub async fn create(
     pool: &PgPool,
     keys: &Keys<'_>,
     time_zone: &str,
     new: &NewIdentity,
-) -> Result<i64, CreateError> {
+    first_password_by: Option<&str>,
+) -> Result<(i64, Option<i64>), CreateError> {
     // On kontrol operatore erken ve net cevap verir; yaris durumunda UNIQUE indeks yakalar.
     if let Some(nid) = &new.national_id {
         if national_id::find_identity(pool, keys.blind_index, nid)
@@ -222,8 +228,42 @@ pub async fn create(
                 _ => CreateError::Db(e),
             })?;
     }
+    sqlx::query(
+        "INSERT INTO jobs (identity_id, target_system_id, priority) \
+         SELECT $1, id, $2 FROM target_systems ORDER BY id",
+    )
+    .bind(id)
+    .bind(crate::jobs::Priority::Single as i16)
+    .execute(&mut *tx)
+    .await?;
+    let first_password = match first_password_by {
+        Some(operator) => {
+            sqlx::query_scalar(
+                "INSERT INTO first_passwords (identity_id, target_system_id, requested_by) \
+                 SELECT $1, id, $2 FROM target_systems WHERE kind = 'ad' RETURNING id",
+            )
+            .bind(id)
+            .bind(operator)
+            .fetch_optional(&mut *tx)
+            .await?
+        }
+        None => None,
+    };
     tx.commit().await?;
-    Ok(id)
+    Ok((id, first_password))
+}
+
+// ADR-056: ilk parola yalnizca baslangici bugun ya da gecmiste olan kayda, kurum saatiyle.
+pub async fn starts_by_today(
+    pool: &PgPool,
+    start_date: &str,
+    time_zone: &str,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar("SELECT $1::date <= (now() AT TIME ZONE $2)::date")
+        .bind(start_date)
+        .bind(time_zone)
+        .fetch_one(pool)
+        .await
 }
 
 // Kimlik no yokken ad-soyad esleşmesi uyaridir, engel degil (docs/03).
@@ -1059,7 +1099,11 @@ pub fn split_error(last_error: &str) -> (String, String) {
     }
 }
 
-async fn load_jobs(pool: &PgPool, time_zone: &str, id: i64) -> Result<Vec<Job>, sqlx::Error> {
+pub(crate) async fn load_jobs(
+    pool: &PgPool,
+    time_zone: &str,
+    id: i64,
+) -> Result<Vec<Job>, sqlx::Error> {
     type Row = (
         i64,
         String,
@@ -1259,9 +1303,17 @@ mod tests {
         };
         let tz = "Europe/Istanbul";
 
-        let id = create(&pool, &keys, tz, &validate(&f).await_ok())
+        let (id, first_password) = create(&pool, &keys, tz, &validate(&f).await_ok(), Some("ik"))
             .await
             .unwrap();
+        let requested: Option<String> =
+            sqlx::query_scalar("SELECT requested_by FROM first_passwords WHERE id = $1")
+                .bind(first_password.expect("ilk parola isteği aynı transaction'da açılır"))
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(requested.as_deref(), Some("ik"));
+        // Isler zaten kayitla acildi; ikinci cagri yenisini acmaz (ON CONFLICT)
         enqueue_all_targets(&pool, id, crate::jobs::Priority::Single)
             .await
             .unwrap();
@@ -1287,7 +1339,7 @@ mod tests {
         f.given_name = "Başka".to_string();
         assert!(
             matches!(
-                create(&pool, &keys, tz, &validate(&f).await_ok()).await,
+                create(&pool, &keys, tz, &validate(&f).await_ok(), None).await,
                 Err(CreateError::DuplicateNationalId)
             ),
             "aynı kimlik no ikinci kez kaydedilemez"

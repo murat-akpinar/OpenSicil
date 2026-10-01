@@ -61,4 +61,5 @@
 - Ayrılışta gecikmeli parola sıfırlama, zamanlayıcı penceresi (ADR-033)
 - Yaklaşan bitişler listesi (F-36)
 - Ilk parola teslimi — AEAD ile şifreli, bir kez gösterim, yardım masası yetkisi, ilk girişte değiştirme ayarı (ADR-019/036/046/085)
+- Kaydet ve ilk parolayı ver tek adımı, teslim ekranı, N-13 ölçümü (ADR-056)
 

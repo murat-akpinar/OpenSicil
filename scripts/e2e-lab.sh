@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Uçtan uca lab doğrulaması (Faz 3a, ADR-079): kayıt → AD'de pasif hesap → ekranda "açıldı".
+# Uçtan uca lab doğrulaması (Faz 3a, ADR-079): kayıt → AD'de pasif hesap → ekranda "açıldı";
+# Faz 3d (ADR-056): "kaydet ve ilk parolayı ver" → parola ekranda, N-13 süresi ölçülür.
 # Gerekenler: opensicil-test-pg (15432), lab Keycloak (8081), lab Samba AD (6360,
 # seed.sh uygulanmış), samba-lab/tls (gen-tls.sh). Backend ve worker gerçek binary
 # olarak, servis rolleriyle çalışır; sonunda hesap ve veritabanı temizlenir.
@@ -16,7 +17,7 @@ COMMON=(OWNERSHIP_MODE_ENABLED=false HOURLY_DESTRUCTIVE_LIMIT=50 HOURLY_GRANT_LI
         HOURLY_FIRST_PASSWORD_LIMIT=50 EMERGENCY_QUOTA=5 SENSITIVE_MAPPING_ENABLED=false
         TZ=Europe/Istanbul AEAD_MASTER_KEY="$AEAD_MASTER_KEY" BLIND_INDEX_KEY="$BLIND_INDEX_KEY")
 WORK=$(mktemp -d)
-BACKEND_PID=""; WORKER_PID=""; USERNAME=""
+BACKEND_PID=""; WORKER_PID=""; USERNAME=""; USERNAME2=""
 
 psql() { docker exec -i opensicil-test-pg psql -U testuser -v ON_ERROR_STOP=1 -qtA "$@"; }
 cookie_of() { grep -i "^set-cookie: $1=" "$2" | head -1 | sed 's/^[Ss]et-[Cc]ookie: //; s/;.*//' | tr -d '\r'; }
@@ -24,6 +25,7 @@ cleanup() {
   [ -n "$WORKER_PID" ] && kill "$WORKER_PID" 2>/dev/null || true
   [ -n "$BACKEND_PID" ] && kill "$BACKEND_PID" 2>/dev/null || true
   [ -n "$USERNAME" ] && docker exec opensicil-samba-ad-1 samba-tool user delete "$USERNAME" >/dev/null 2>&1 || true
+  [ -n "$USERNAME2" ] && docker exec opensicil-samba-ad-1 samba-tool user delete "$USERNAME2" >/dev/null 2>&1 || true
   psql -d postgres -c "DROP DATABASE IF EXISTS $DB" >/dev/null 2>&1 || true
   rm -rf "$WORK"
 }
@@ -31,6 +33,10 @@ trap cleanup EXIT
 
 echo "1) binary'ler ve boş veritabanı"
 (cd backend && cargo build -q) && (cd worker && cargo build -q)
+# yarıda kalan önceki çalışmanın hesapları (ad şablonu sabit: uctan.uca, parola.teslim)
+for stale in uctan.uca parola.teslim; do
+  docker exec opensicil-samba-ad-1 samba-tool user delete "$stale" >/dev/null 2>&1 || true
+done
 psql -d postgres -c "DROP DATABASE IF EXISTS $DB" >/dev/null
 psql -d postgres -c "CREATE DATABASE $DB" >/dev/null
 # migrate ./migrations'ı çalışma dizininden okur (imajda WORKDIR backend'dir)
@@ -113,7 +119,34 @@ echo "9) Samba'da hesap pasif (userAccountControl 514)"
 UAC=$(docker exec opensicil-samba-ad-1 samba-tool user show "$USERNAME" | grep '^userAccountControl:' | awk '{print $2}')
 [ "$UAC" = "514" ] || { echo "beklenen 514, gelen: $UAC"; exit 1; }
 
+echo "10) 'Kaydet ve ilk parolayı ver' (ADR-056, N-13 ≤ 60 sn): bugün başlayan kayıt → parola ekranda"
+T0=$(date +%s)
+FP_URL=$(curl -s -o "$WORK/form2.html" -w '%{redirect_url}' -b "$OP" \
+  --data-urlencode given_name=Parola --data-urlencode surname=Teslim --data-urlencode national_id_country=TR \
+  --data-urlencode employee_number=E2E-2 --data-urlencode department_id="$DEPT" \
+  --data-urlencode primary_role_id="$ROLE" --data-urlencode employment_type=permanent \
+  --data-urlencode start_date="$(date +%F)" --data-urlencode issue_first_password=1 "$BASE/identities")
+case "$FP_URL" in */first-password/*) ;; *) echo "teslim sayfasına yönlenmedi: '$FP_URL'"; grep -o '<p[^>]*>[^<]*</p>' "$WORK/form2.html"; exit 1;; esac
+ID2=$(echo "$FP_URL" | sed 's#.*/identities/\([0-9]*\)/.*#\1#')
+USERNAME2=$(psql -d $DB -c "SELECT username FROM identities WHERE id = $ID2" || true)
+for _ in $(seq 1 30); do
+  curl -s -b "$OP" "$FP_URL" >"$WORK/fp.html"
+  grep -qE '[A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}' "$WORK/fp.html" && break
+  grep -q 'reddedildi\|sıfırlayın\|yanıt vermedi' "$WORK/fp.html" && { echo "ilk parola reddedildi:"; grep -o '<p[^>]*>[^<]*</p>' "$WORK/fp.html"; exit 1; }
+  sleep 2
+done
+PASSWORD=$(grep -oE '[A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}' "$WORK/fp.html" | head -1 || true)
+ELAPSED=$(( $(date +%s) - T0 ))
+[ -n "$PASSWORD" ] || { echo "parola ${ELAPSED} sn içinde görünmedi; sayfa:"; grep -o '<t[dr][^>]*>[^<]*' "$WORK/fp.html" | tr -d '\n'; echo; cat "$WORK/worker.log"; exit 1; }
+[ "$ELAPSED" -le 60 ] || { echo "N-13 aşıldı: ${ELAPSED} sn"; exit 1; }
+USERNAME2=$(psql -d $DB -c "SELECT username FROM identities WHERE id = $ID2")
+curl -s -b "$OP" "$FP_URL" >"$WORK/fp2.html"
+grep -q "$PASSWORD" "$WORK/fp2.html" && { echo "parola ikinci açılışta hâlâ görünüyor"; exit 1; }
+UAC2=$(docker exec opensicil-samba-ad-1 samba-tool user show "$USERNAME2" | grep '^userAccountControl:' | awk '{print $2}')
+[ "$UAC2" = "512" ] || { echo "beklenen 512 (bugün başladı), gelen: $UAC2"; exit 1; }
+echo "  N-13: kayıttan parolaya ${ELAPSED} sn; parola bir kez gösterildi; AD'de etkin hesap (UAC $UAC2)"
+
 echo
-echo "E2E TAMAM: kimlik #$ID ($USERNAME) → AD'de pasif hesap (UAC $UAC) → ekranda 'açıldı'"
+echo "E2E TAMAM: kimlik #$ID ($USERNAME) → AD'de pasif hesap (UAC $UAC) → ekranda 'açıldı'; kimlik #$ID2 ($USERNAME2) → tek adımda ilk parola (${ELAPSED} sn)"
 grep -o 'olması gereken[^<]*\|uyumlu\|bekliyor' "$WORK/page.html" | sort -u | sed 's/^/  sayfa: /'
 grep 'zamanlayıcı\|iş [0-9]* ' "$WORK/worker.log" | sed 's/^/  worker: /' || true

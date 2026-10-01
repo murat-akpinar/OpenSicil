@@ -607,12 +607,29 @@ async fn create(
             Err(e) => return internal("mükerrer kişi kontrolü", e),
         }
     }
+    // ADR-056: tek adim yalnizca bugun ya da gecmiste baslayan kayda ve ilk parola yetkisiyle
+    let issue = !form.issue_first_password.is_empty();
+    if issue {
+        if !allowed(&op, crate::first_password::AUTHORITIES) {
+            return forbidden();
+        }
+        match identity::starts_by_today(&state.pool, &new.start_date, &state.time_zone).await {
+            Ok(true) => {}
+            Ok(false) => {
+                let msg = "İlk parola yalnızca başlangıç tarihi bugün ya da geçmişte olan kayda verilir; önce kaydedin, kişi gelince kişi sayfasından isteyin".to_string();
+                return render_form(&state, form, msg, false, None).await;
+            }
+            Err(e) => return internal("tarih kontrolü", e),
+        }
+    }
     let keys = crate::national_id::Keys {
         aead: &state.aead_key,
         blind_index: &state.blind_index_key,
     };
-    let id = match identity::create(&state.pool, &keys, &state.time_zone, &new).await {
-        Ok(id) => id,
+    let requested_by = issue.then_some(op.username.as_str());
+    let created = identity::create(&state.pool, &keys, &state.time_zone, &new, requested_by).await;
+    let (id, first_password) = match created {
+        Ok(created) => created,
         Err(identity::CreateError::DuplicateNationalId) => {
             let msg = "Bu kimlik numarası zaten kayıtlı".to_string();
             return render_form(&state, form, msg, false, None).await;
@@ -627,6 +644,7 @@ async fn create(
         "start_date": new.start_date,
         "end_date": new.end_date,
         "national_id_set": new.national_id.is_some(),
+        "first_password_id": first_password,
     });
     audit_operator(
         &state,
@@ -636,13 +654,10 @@ async fn create(
         detail,
     )
     .await;
-    // Kayit tamam; is acilamazsa log'a duser, zamanlayici (uctan uca kutucugu) yakalar.
-    if let Err(e) =
-        identity::enqueue_all_targets(&state.pool, id, crate::jobs::Priority::Single).await
-    {
-        eprintln!("identity_web: iş açılamadı (kimlik {id}): {e}");
+    match first_password {
+        Some(fp) => Redirect::to(&format!("/identities/{id}/first-password/{fp}")).into_response(),
+        None => Redirect::to(&format!("/identities/{id}")).into_response(),
     }
-    Redirect::to(&format!("/identities/{id}")).into_response()
 }
 
 async fn show(
@@ -804,6 +819,36 @@ mod tests {
         let location = r.headers()["location"].to_str().unwrap().to_string();
         assert!(location.starts_with("/identities/"), "{location}");
         let id: i64 = location.rsplit('/').next().unwrap().parse().unwrap();
+
+        // ADR-056 tek adim: bugun/gecmis baslangic → teslim sayfasi; gelecek → form hatasi.
+        let r = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                "/identities",
+                &format!("{base}&confirm_duplicate=1&issue_first_password=1"),
+                &hr,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::SEE_OTHER);
+        let fp_location = r.headers()["location"].to_str().unwrap().to_string();
+        assert!(fp_location.contains("/first-password/"), "{fp_location}");
+        let future = base.replace("start_date=2026-10-01", "start_date=2099-01-01");
+        let r = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                "/identities",
+                &format!("{future}&confirm_duplicate=1&issue_first_password=1"),
+                &hr,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::OK);
+        assert!(body_string(r)
+            .await
+            .contains("başlangıç tarihi bugün ya da geçmişte"));
 
         // Gecersiz form: operator dilinde hata, kayit yok.
         let r = app

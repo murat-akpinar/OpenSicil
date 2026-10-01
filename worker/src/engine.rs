@@ -445,16 +445,7 @@ async fn provision(c: &AdJob<'_>, ldap: &mut Ldap, enabled: bool) -> Result<Stri
         ));
     }
     let guid = ad_account::guid_by_dn(ldap, &dn).await?;
-    sqlx::query(
-        "INSERT INTO account_links (identity_id, target_system_id, external_id, origin, mode) \
-         VALUES ($1, $2, $3, 'provisioned', 'managed')",
-    )
-    .bind(c.job.identity_id)
-    .bind(c.job.target_system_id)
-    .bind(&guid)
-    .execute(c.pool)
-    .await
-    .map_err(|e| JobError::Failed(format!("hesap bağlantısı yazılamadı: {e}")))?;
+    let link = insert_link(c, &guid).await?;
     let added = add_memberships(c, ldap, &dn).await?;
     if enabled {
         let op = WriteOp::SetEnabled {
@@ -464,10 +455,31 @@ async fn provision(c: &AdJob<'_>, ldap: &mut Ldap, enabled: bool) -> Result<Stri
         apply(c, ldap, op, OperationClass::Attribute).await?;
     }
     set_applied_state(c, state_name(c.desired.state)).await?;
+    // ADR-056: "kaydet ve ilk parolayi ver" istegi ayni iste, hesap acilir acilmaz
+    let first = issue_first_password(c, ldap, &dn, &link).await?;
     Ok(format!(
-        "hesap açıldı: {dn} (objectGUID {guid}), {added} grup, {}",
+        "hesap açıldı: {dn} (objectGUID {guid}), {added} grup, {}{first}",
         if enabled { "etkin" } else { "pasif" }
     ))
+}
+
+async fn insert_link(c: &AdJob<'_>, guid: &str) -> Result<LinkRow, JobError> {
+    sqlx::query(
+        "INSERT INTO account_links (identity_id, target_system_id, external_id, origin, mode) \
+         VALUES ($1, $2, $3, 'provisioned', 'managed')",
+    )
+    .bind(c.job.identity_id)
+    .bind(c.job.target_system_id)
+    .bind(guid)
+    .execute(c.pool)
+    .await
+    .map_err(|e| JobError::Failed(format!("hesap bağlantısı yazılamadı: {e}")))?;
+    Ok(LinkRow {
+        external_id: guid.to_string(),
+        applied_state: None,
+        password_reset_at_departure: false,
+        first_password_pwd_last_set: None,
+    })
 }
 
 async fn add_memberships(
@@ -1080,8 +1092,19 @@ mod tests {
             sensitive_mapping_enabled: false,
             first_login_change_required: change_required,
         };
+        // ADR-056: kayitla acilan istek hesap acilir acilmaz ayni iste karsilanir
+        let at_provision: i64 = sqlx::query_scalar(
+            "INSERT INTO first_passwords (identity_id, target_system_id, requested_by) \
+             VALUES ($1, $2, 'ik') RETURNING id",
+        )
+        .bind(seed.identity)
+        .bind(seed.ad)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         let live = run_job(&pool, &job, &env(false, true)).await.unwrap();
         assert!(live.starts_with("hesap açıldı"), "{live}");
+        assert!(live.contains("ilk parola verildi"), "{live}");
         let request = || {
             let pool = pool.clone();
             async move {
@@ -1122,6 +1145,12 @@ mod tests {
         assert_eq!(
             outcome(dry_request).await,
             (None, Some(first_password::REJECT_DRY_RUN.to_string()))
+        );
+
+        let (at_provision_password, _) = outcome(at_provision).await;
+        assert!(
+            at_provision_password.is_some(),
+            "açılışta verilen parola yazılmalı"
         );
 
         // acik mod: parola yazilir, pwdLastSet 0
@@ -1203,8 +1232,8 @@ mod tests {
         .unwrap();
         assert_eq!(
             (intents, leaked),
-            (2, 0),
-            "iki niyet, parola denetime girmez"
+            (3, 0),
+            "açılış + iki istek = üç niyet, parola denetime girmez"
         );
 
         test_support::delete_lab_accounts(&cfg, "parola.test*").await;
