@@ -1766,9 +1766,53 @@ mod tests {
             "açılış + iki istek = üç niyet, parola denetime girmez"
         );
 
+        // ADR-048/056: giris yapilmis hesabin kaydi iptal edilemez — iptal reddedilir,
+        // hesap silinmez, ayrilis olarak uygulanir (yukarida gercek bind yapildi).
+        sqlx::query(
+            "UPDATE identities SET cancelled = TRUE, end_at = now() - interval '1 hour' \
+             WHERE id = $1",
+        )
+        .bind(seed.identity)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let cancel = run_job(&pool, &job, &env(false, false)).await.unwrap();
+        assert!(cancel.contains("iptal reddedildi"), "{cancel}");
+        let verified: Option<bool> =
+            sqlx::query_scalar("SELECT verified_unused FROM account_links WHERE identity_id = $1")
+                .bind(seed.identity)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(verified, Some(false), "giriş yapılmış: doğrulanmadı");
+        let mut ldap = ad::connect(&cfg).await.unwrap();
+        assert!(
+            ad_account::find_by_guid(&mut ldap, &guid)
+                .await
+                .unwrap()
+                .is_some(),
+            "iptal reddedilince hesap silinmez"
+        );
+        ldap.unbind().await.ok();
+
         test_support::delete_lab_accounts(&cfg, "parola.test*").await;
         drop(pool);
         test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
+    // Testte hedefteki elle mudahaleyi taklit eder (ADR-032): UAC'yi dogrudan yazar.
+    async fn set_uac(ldap: &mut Ldap, dn: &str, value: &str) {
+        ldap.modify(
+            dn,
+            vec![ldap3::Mod::Replace(
+                "userAccountControl",
+                std::collections::HashSet::from([value]),
+            )],
+        )
+        .await
+        .unwrap()
+        .success()
+        .unwrap();
     }
 
     #[test]
@@ -1809,6 +1853,7 @@ mod tests {
         .await;
         test_support::point_model_at_real_catalog(&pool, &seed, &cfg).await;
         test_support::delete_lab_accounts(&cfg, "motor.test*").await;
+        test_support::delete_lab_accounts(&cfg, "ozel.testx*").await;
         sqlx::query("UPDATE identities SET given_name = 'Motor', surname = $2 WHERE id = $1")
             .bind(seed.identity)
             .bind(format!("Test{}", std::process::id() % 100_000))
@@ -1902,6 +1947,21 @@ mod tests {
             "hesap + grup + etkinleştirme; ikinci çalışma yazmadı"
         );
 
+        // ADR-032: hedefte elle pasiflestirilen hesap korunur — durum gecisi olmadigi
+        // icin motor yeniden etkinlestirmez. Testin kalani etkin hesap bekler: elle geri acilir.
+        set_uac(&mut ldap, &account.dn, "514").await;
+        let kept = run_job(&pool, &job, &env(false)).await.unwrap();
+        assert!(!kept.contains("etkinleştirildi"), "{kept}");
+        assert!(
+            !ad_account::find_by_guid(&mut ldap, &guid)
+                .await
+                .unwrap()
+                .unwrap()
+                .enabled,
+            "ADR-032: elle pasifleştirilen hesap korunur"
+        );
+        set_uac(&mut ldap, &account.dn, "512").await;
+
         // ADR-012/034/082: esleme — replace, "sadece bossa yaz" korur, hassas kaynak kapisi
         ldap.modify(
             &account.dn,
@@ -1917,18 +1977,24 @@ mod tests {
         sqlx::query(
             "INSERT INTO attribute_mappings (target_system_id, target_attribute, source_kind, source_text, write_if_empty) \
              VALUES ($1, 'description', 'constant', 'Personel', FALSE), \
-                    ($1, 'physicalDeliveryOfficeName', 'constant', 'Ankara', TRUE)",
+                    ($1, 'physicalDeliveryOfficeName', 'constant', 'Ankara', TRUE), \
+                    ($1, 'company', 'constant', 'Kurum', TRUE)",
         )
         .bind(seed.ad)
         .execute(&pool)
         .await
         .unwrap();
         let mapped = run_job(&pool, &job, &env(false)).await.unwrap();
-        assert!(mapped.contains("1 öznitelik güncellendi"), "{mapped}");
+        assert!(mapped.contains("2 öznitelik güncellendi"), "{mapped}");
         let attrs = ad_account::read_attributes(
             &mut ldap,
             &account.dn,
-            &["description", "physicalDeliveryOfficeName", "displayName"],
+            &[
+                "description",
+                "physicalDeliveryOfficeName",
+                "company",
+                "displayName",
+            ],
         )
         .await
         .unwrap();
@@ -1936,7 +2002,12 @@ mod tests {
         assert_eq!(
             attrs["physicalDeliveryOfficeName"],
             vec!["Elle"],
-            "boşsa yaz: korunur"
+            "boşsa yaz: dolu değer korunur"
+        );
+        assert_eq!(
+            attrs["company"],
+            vec!["Kurum"],
+            "ADR-034: boşsa yaz, boş özniteliği doldurur"
         );
         assert!(attrs["displayName"][0].starts_with("Motor Test"));
         sqlx::query(
@@ -2000,6 +2071,43 @@ mod tests {
         unsafe {
             std::env::set_var("AD_PASSIVE_OU", "OU=Pasif,OU=Personel,DC=opensicil,DC=lab");
         }
+
+        // ADR-053/059: tarihli aski — hesap pasiflesir ama uyelik ve OU korunur (ayrilis degil);
+        // aski kalkinca yeniden etkinlesir. Pasif OU tanimli, yine tasinmaz.
+        sqlx::query(
+            "UPDATE identities SET suspension_start = current_date - 1, \
+             suspension_end = current_date + 7 WHERE id = $1",
+        )
+        .bind(seed.identity)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let suspended = run_job(&pool, &job, &env(false)).await.unwrap();
+        assert!(suspended.contains("pasifleştirildi"), "{suspended}");
+        let on_leave = ad_account::find_by_guid(&mut ldap, &guid)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!on_leave.enabled, "askıda: hesap pasif");
+        assert!(
+            on_leave.member_of.iter().any(|g| g.contains("GG-Nobet")),
+            "askıda üyelik korunur: {:?}",
+            on_leave.member_of
+        );
+        assert!(
+            !on_leave.dn.to_ascii_lowercase().contains("ou=pasif"),
+            "askıda OU korunur: {}",
+            on_leave.dn
+        );
+        sqlx::query(
+            "UPDATE identities SET suspension_start = NULL, suspension_end = NULL WHERE id = $1",
+        )
+        .bind(seed.identity)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let lifted = run_job(&pool, &job, &env(false)).await.unwrap();
+        assert!(lifted.contains("etkinleştirildi"), "{lifted}");
 
         // ADR-040: rol artik "hesap acilsin = hayir" diyor; bagli hesap yine yonetilir.
         for sql in [
@@ -2167,6 +2275,15 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
+        // Ozel karakterli ad (virgul, tirnak, yildiz, parantez): CN kacislidir, DN ve arama
+        // filtresi bozulmaz; kullanici adi normallestirmeden sonra ozel.testx olur (ADR-011).
+        sqlx::query(
+            "UPDATE identities SET given_name = 'Öz*el', surname = 'Te,st\"(x)' WHERE id = $1",
+        )
+        .bind(seed.other_identity)
+        .execute(&pool)
+        .await
+        .unwrap();
         test_support::enqueue(&pool, seed.other_identity, seed.ad, 1).await;
         // ilk is hala kirali ("running"); claim siradaki acik isi, yani bunu verir
         let other_job = crate::queue::claim(&pool, "w1", &[])
@@ -2186,6 +2303,17 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
+        assert!(
+            other_dn.starts_with("CN=Öz*el Te\\,st\\\"(x)"),
+            "özel karakterli CN kaçışlı yazılır: {other_dn}"
+        );
+        let other_username: Option<String> =
+            sqlx::query_scalar("SELECT username FROM identities WHERE id = $1")
+                .bind(seed.other_identity)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(other_username.as_deref(), Some("ozel.testx"));
         ldap.delete(&other_dn).await.unwrap().success().unwrap();
         let lost = run_job(&pool, &other_job, &env(false)).await.unwrap();
         assert!(lost.contains("kayıp hesap"), "{lost}");

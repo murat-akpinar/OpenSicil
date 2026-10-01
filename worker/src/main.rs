@@ -193,23 +193,17 @@ fn worker_id() -> String {
     format!("{host}-{}", std::process::id())
 }
 
+// Acilistaki uc fallible adim (run()'u ≤50 satir tutar, security.md).
+async fn startup() -> Result<(Env, PgPool, Arc<AtomicBool>, Arc<Notify>), String> {
+    let env = load_env()?;
+    let pool = prepare_pool(&env.database_url).await?;
+    let (stop, wake) = spawn_sigterm_watcher()?;
+    Ok((env, pool, stop, wake))
+}
+
 async fn run() -> ExitCode {
-    let env = match load_env() {
-        Ok(env) => env,
-        Err(e) => {
-            eprintln!("{e}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let pool = match prepare_pool(&env.database_url).await {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("{e}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let (stop, wake) = match spawn_sigterm_watcher() {
-        Ok(pair) => pair,
+    let (env, pool, stop, wake) = match startup().await {
+        Ok(parts) => parts,
         Err(e) => {
             eprintln!("{e}");
             return ExitCode::FAILURE;

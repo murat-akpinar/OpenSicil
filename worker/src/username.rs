@@ -536,6 +536,24 @@ mod tests {
             ),
             "kullanılmış ad müdahaledir (ADR-042)"
         );
+        // ADR-035: serbest birakilan ad yeniden uretilir (yakma kaydi artik engellemez).
+        sqlx::query(
+            "INSERT INTO used_names (name, kind, released_at, release_reason) \
+             VALUES ('serbest.ad', 'username', now(), 'aynı kişi geri döndü')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            resolve(&pool, &mut ldap, &ctx, &candidate("serbest.ad", false))
+                .await
+                .unwrap(),
+            Resolution::Ok {
+                username: "serbest.ad".into(),
+                email_local: "serbest.ad".into()
+            },
+            "serbest bırakılan ad sonek almadan yeniden verilir"
+        );
         let unlinked = resolve(&pool, &mut ldap, &ctx, &candidate("mevcut.personel", false))
             .await
             .unwrap();
