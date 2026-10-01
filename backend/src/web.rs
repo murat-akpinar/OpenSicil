@@ -1,6 +1,5 @@
 use askama::Template;
-use axum::extract::{Form, FromRequestParts, Query, State};
-use axum::http::request::Parts;
+use axum::extract::{Form, Query, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
@@ -10,11 +9,10 @@ use sqlx::PgPool;
 
 use crate::cookie::{
     clear_cookie_header, get_cookie, set_cookie_header, OPERATOR_SESSION_COOKIE_NAME,
-    SESSION_COOKIE_NAME,
 };
 use crate::i18n::Lang;
-use crate::identity_web::OperatorSession;
-use crate::session::SESSION_LIFETIME_HOURS;
+use crate::identity_web::{allowed, forbidden, OperatorSession};
+use crate::operator_session::{AuthSource, Operator};
 
 const MIN_PASSWORD_LENGTH: usize = 12;
 
@@ -34,8 +32,9 @@ pub struct AppState {
 }
 
 // --- START FEATURE: bootstrap-admin ---
-// ADR-068: admin/admin bootstrap girisi, ilk girişte zorunlu parola değişimi,
-// yalnızca Yapılandırma sayfasına (AD/Zimbra/OIDC bağlantı ayarları) erişim.
+// ADR-068: admin/admin yerel hesabı, ilk girişte zorunlu parola değişimi.
+// ADR-095 madde 3: hesap artık kalıcı break-glass yolu ve Sistem yöneticisi
+// (`admin`) yetkisiyle gerçek bir operatör oturumu açar; form hiç gizlenmez.
 
 #[derive(Template)]
 #[template(path = "login.html")]
@@ -43,7 +42,6 @@ struct LoginTemplate {
     lang: Lang,
     error: String,
     oidc_configured: bool,
-    oidc_admin_verified: bool,
 }
 
 // --- START FEATURE: oidc-login ---
@@ -108,36 +106,13 @@ pub(crate) fn render<T: Template>(tmpl: &T) -> Response {
     }
 }
 
-// Gecersiz/eksik oturumda Yapilandirma ve parola degistirme ekranlarina hic girilmez.
-struct BootstrapSession;
+// Yapılandırma ve parola değiştirme Sistem yöneticisi yetkisi ister (ADR-005'teki
+// "hedef sistem ayarları" yetkisi); yerel hesap bu yetkiyle girer (ADR-095 madde 3).
+const CONFIG_AUTHORITIES: &[&str] = &[crate::oidc::ADMIN_AUTHORITY];
 
-impl IntoResponse for BootstrapSessionRejection {
-    fn into_response(self) -> Response {
-        Redirect::to("/login").into_response()
-    }
-}
-
-struct BootstrapSessionRejection;
-
-impl FromRequestParts<AppState> for BootstrapSession {
-    type Rejection = BootstrapSessionRejection;
-
-    async fn from_request_parts(
-        parts: &mut Parts,
-        state: &AppState,
-    ) -> Result<Self, Self::Rejection> {
-        let token =
-            get_cookie(&parts.headers, SESSION_COOKIE_NAME).ok_or(BootstrapSessionRejection)?;
-        let valid = crate::session::validate_session(&state.pool, &token)
-            .await
-            .unwrap_or(false);
-        if valid {
-            Ok(BootstrapSession)
-        } else {
-            Err(BootstrapSessionRejection)
-        }
-    }
-}
+// Yerel hesabin OIDC `sub`'u yok; denetim ve oturum satirinda kapiyi belli eden
+// sabit bir degerle durur (ADR-095 madde 5).
+const LOCAL_SUBJECT: &str = "local:admin";
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -181,7 +156,6 @@ async fn render_login(pool: &PgPool, lang: Lang, error: String) -> Response {
         lang,
         error,
         oidc_configured: settings.as_ref().is_some_and(crate::oidc::is_configured),
-        oidc_admin_verified: settings.as_ref().is_some_and(|s| s.oidc_admin_verified),
     })
 }
 
@@ -215,13 +189,17 @@ async fn login_submit(
     headers: HeaderMap,
     Form(form): Form<LoginForm>,
 ) -> Response {
+    use crate::bootstrap_account::LoginOutcome;
     let lang = Lang::from_headers(&headers);
     match crate::bootstrap_account::verify_login(&state.pool, &form.username, &form.password).await
     {
-        Ok(true) => {}
-        Ok(false) => {
+        Ok(LoginOutcome::Ok) => {}
+        Ok(LoginOutcome::BadCredentials) => {
             return render_login(&state.pool, lang, lang.t("err.bad_credentials").to_string())
                 .await;
+        }
+        Ok(LoginOutcome::Locked(minutes)) => {
+            return render_login(&state.pool, lang, lang.t1("err.account_locked", minutes)).await;
         }
         Err(e) => {
             eprintln!("web: giriş kontrolü başarısız: {e}");
@@ -229,26 +207,21 @@ async fn login_submit(
         }
     }
 
-    let token = match crate::session::create_session(&state.pool).await {
-        Ok(t) => t,
-        Err(e) => {
-            eprintln!("web: oturum oluşturulamadı: {e}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
+    // Yerel hesabın oturumu da operatör oturumudur (ADR-095 madde 5); yetkisi
+    // yalnızca Sistem yöneticisi — İK/denetçi/PII/helpdesk verilmez (madde 3).
+    let operator = Operator {
+        subject: LOCAL_SUBJECT.to_string(),
+        username: crate::bootstrap_account::BOOTSTRAP_USERNAME.to_string(),
+        email: String::new(),
+        authorities: vec![crate::oidc::ADMIN_AUTHORITY.to_string()],
+        auth_source: AuthSource::Local,
+        lang,
     };
-
-    with_session_cookie(&token, Redirect::to("/change-password"))
+    establish_operator_session(&state, operator).await
 }
 
 async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let mut response_headers = HeaderMap::new();
-    if let Some(token) = get_cookie(&headers, SESSION_COOKIE_NAME) {
-        let _ = crate::session::delete_session(&state.pool, &token).await;
-        response_headers.append(
-            header::SET_COOKIE,
-            cookie_header_value(&clear_cookie_header(SESSION_COOKIE_NAME)),
-        );
-    }
     if let Some(token) = get_cookie(&headers, OPERATOR_SESSION_COOKIE_NAME) {
         let _ = crate::operator_session::delete_session(&state.pool, &token).await;
         response_headers.append(
@@ -301,9 +274,7 @@ async fn oidc_callback(
     )
     .await
     {
-        Ok(result) => {
-            establish_operator_session(&state, Lang::from_headers(&headers), result).await
-        }
+        Ok(result) => establish_oidc_session(&state, Lang::from_headers(&headers), result).await,
         Err(e) => {
             eprintln!("web: oidc girişi başarısız: {e}");
             Redirect::to("/login").into_response()
@@ -312,8 +283,8 @@ async fn oidc_callback(
 }
 
 // id_token dogrulandiktan sonraki adim: ilk OpenSicil-Admins girisi isaretlenir
-// (ADR-068 madde 3), operator oturumu kurulur, cerez set edilir.
-async fn establish_operator_session(
+// (denetim bilgisi; ADR-095 madde 3 bunun form gizleme etkisini kaldirdi).
+async fn establish_oidc_session(
     state: &AppState,
     lang: Lang,
     result: crate::oidc::LoginResult,
@@ -328,13 +299,21 @@ async fn establish_operator_session(
         }
     }
 
-    let operator = crate::operator_session::Operator {
+    let operator = Operator {
         subject: result.subject,
-        username: result.username.clone(),
+        username: result.username,
         email: result.email,
-        authorities: result.authorities.clone(),
+        authorities: result.authorities,
+        auth_source: AuthSource::Oidc,
         lang,
     };
+    establish_operator_session(state, operator).await
+}
+
+// Uc kapinin ortak son adimi (ADR-095 madde 5): ayrilmis operator reddi,
+// oturum satiri, denetim kaydi, cerez ve giris sonrasi sayfa.
+async fn establish_operator_session(state: &AppState, operator: Operator) -> Response {
+    let lang = operator.lang;
     // ADR-059 madde 1: ayrilmis/askidaki operator oturum acamaz
     match crate::operator_guard::check_operator(&state.pool, &state.time_zone, &operator.username)
         .await
@@ -356,15 +335,27 @@ async fn establish_operator_session(
         }
     };
     audit_operator_login(state, &operator).await;
-    operator_home_with_cookie(state, &token, lang, result.username, result.authorities).await
+    // Yerel hesap ilk girişte parolasını değiştirmeden başka ekrana gitmez; ara
+    // katman da aynı kuralı her istekte uygular (operator_guard, ADR-095 madde 3).
+    if operator.auth_source == AuthSource::Local
+        && crate::bootstrap_account::must_change_password(&state.pool)
+            .await
+            .unwrap_or(false)
+    {
+        return with_operator_cookie(&token, Redirect::to("/change-password"));
+    }
+    operator_home_with_cookie(state, &token, lang, operator.username, operator.authorities).await
 }
 
-async fn audit_operator_login(state: &AppState, operator: &crate::operator_session::Operator) {
+async fn audit_operator_login(state: &AppState, operator: &Operator) {
     let actor = crate::audit::Actor {
         subject: Some(&operator.subject),
         username: &operator.username,
     };
-    let detail = serde_json::json!({ "authorities": operator.authorities });
+    let detail = serde_json::json!({
+        "authorities": operator.authorities,
+        "source": operator.auth_source.as_str(),
+    });
     if let Err(e) = crate::audit::record(
         &state.pool,
         &actor,
@@ -402,9 +393,12 @@ async fn operator_home_with_cookie(
 }
 // --- END FEATURE: oidc-login ---
 
-async fn change_password_form(_session: BootstrapSession, headers: HeaderMap) -> Response {
+async fn change_password_form(OperatorSession(operator): OperatorSession) -> Response {
+    if !allowed(&operator, CONFIG_AUTHORITIES) {
+        return forbidden(operator.lang);
+    }
     render(&ChangePasswordTemplate {
-        lang: Lang::from_headers(&headers),
+        lang: operator.lang,
         error: String::new(),
     })
 }
@@ -416,12 +410,14 @@ struct ChangePasswordForm {
 }
 
 async fn change_password_submit(
-    _session: BootstrapSession,
+    OperatorSession(operator): OperatorSession,
     State(state): State<AppState>,
-    headers: HeaderMap,
     Form(form): Form<ChangePasswordForm>,
 ) -> Response {
-    let lang = Lang::from_headers(&headers);
+    if !allowed(&operator, CONFIG_AUTHORITIES) {
+        return forbidden(operator.lang);
+    }
+    let lang = operator.lang;
     if form.new_password != form.confirm_password {
         return render(&ChangePasswordTemplate {
             lang,
@@ -438,44 +434,29 @@ async fn change_password_submit(
         eprintln!("web: parola değiştirilemedi: {e}");
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
-    audit_bootstrap(
-        &state.pool,
+    // Denetim satiri yazilamazsa islem geri alinmaz (parola zaten degisti), yalnizca
+    // log'a duser; docs/07 sirasi "once yaz" yalnizca worker'in hedef yazmalari icin.
+    crate::identity_web::audit_operator(
+        &state,
+        &operator,
         crate::audit::BOOTSTRAP_PASSWORD_CHANGED,
+        None,
         serde_json::json!({}),
     )
     .await;
     Redirect::to("/config").into_response()
 }
 
-// Denetim satiri yazilamazsa islem geri alinmaz (ayar zaten kaydedildi), yalnizca
-// log'a duser; docs/07 sirasi "once yaz" yalnizca worker'in hedef yazmalari icin.
-async fn audit_bootstrap(pool: &PgPool, event_type: &str, detail: serde_json::Value) {
-    let actor = crate::audit::Actor {
-        subject: None,
-        username: crate::bootstrap_account::BOOTSTRAP_USERNAME,
-    };
-    if let Err(e) = crate::audit::record(pool, &actor, event_type, None, detail).await {
-        eprintln!("web: denetim kaydı yazılamadı ({event_type}): {e}");
-    }
-}
-
 async fn config_form(
-    _session: BootstrapSession,
+    OperatorSession(operator): OperatorSession,
     State(state): State<AppState>,
-    headers: HeaderMap,
 ) -> Response {
-    match crate::bootstrap_account::must_change_password(&state.pool).await {
-        Ok(true) => return Redirect::to("/change-password").into_response(),
-        Ok(false) => {}
-        Err(e) => {
-            eprintln!("web: hesap durumu okunamadı: {e}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
+    if !allowed(&operator, CONFIG_AUTHORITIES) {
+        return forbidden(operator.lang);
     }
-
     match crate::settings::load(&state.pool).await {
         Ok(s) => render(&ConfigTemplate {
-            lang: Lang::from_headers(&headers),
+            lang: operator.lang,
             ad_host: s.ad_host,
             ad_bind_dn: s.ad_bind_dn,
             ad_service_password_set: s.ad_service_password_set,
@@ -505,10 +486,13 @@ struct ConfigForm {
 }
 
 async fn config_submit(
-    _session: BootstrapSession,
+    OperatorSession(operator): OperatorSession,
     State(state): State<AppState>,
     Form(form): Form<ConfigForm>,
 ) -> Response {
+    if !allowed(&operator, CONFIG_AUTHORITIES) {
+        return forbidden(operator.lang);
+    }
     let secrets_updated: Vec<&str> = [
         ("ad_service_password", &form.ad_service_password),
         ("zimbra_admin_password", &form.zimbra_admin_password),
@@ -541,7 +525,14 @@ async fn config_submit(
     }
     if let Ok(after) = crate::settings::load(&state.pool).await {
         let detail = crate::audit::settings_change_detail(&before, &after, &secrets_updated);
-        audit_bootstrap(&state.pool, crate::audit::SETTINGS_CHANGED, detail).await;
+        crate::identity_web::audit_operator(
+            &state,
+            &operator,
+            crate::audit::SETTINGS_CHANGED,
+            None,
+            detail,
+        )
+        .await;
     }
     Redirect::to("/config").into_response()
 }
@@ -598,14 +589,14 @@ fn cookie_header_value(value: &str) -> HeaderValue {
     HeaderValue::from_str(value).expect("cerez basligi gecersiz karakter icermez")
 }
 
-fn with_session_cookie(token: &str, redirect: Redirect) -> Response {
+fn with_operator_cookie(token: &str, redirect: Redirect) -> Response {
     let mut headers = HeaderMap::new();
     headers.insert(
         header::SET_COOKIE,
         cookie_header_value(&set_cookie_header(
-            SESSION_COOKIE_NAME,
+            OPERATOR_SESSION_COOKIE_NAME,
             token,
-            SESSION_LIFETIME_HOURS * 3600,
+            crate::operator_session::SESSION_LIFETIME_HOURS * 3600,
         )),
     );
     (headers, redirect).into_response()
@@ -652,6 +643,7 @@ mod tests {
             username: "dil.operatoru".to_string(),
             email: "dil@example.org".to_string(),
             authorities: vec!["hr".to_string()],
+            auth_source: AuthSource::Oidc,
             lang: Lang::Tr,
         };
         let token = crate::operator_session::create_session(&pool, &operator)
@@ -729,6 +721,7 @@ mod tests {
             username: "kok.operatoru".to_string(),
             email: "kok@example.org".to_string(),
             authorities: vec!["hr".to_string()],
+            auth_source: AuthSource::Oidc,
             lang: Lang::Tr,
         };
         let token = crate::operator_session::create_session(&pool, &operator)
@@ -807,7 +800,7 @@ mod tests {
             email: "ayse@example.com".to_string(),
             authorities: vec!["hr".to_string()],
         };
-        let response = establish_operator_session(&state, Lang::En, result).await;
+        let response = establish_oidc_session(&state, Lang::En, result).await;
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
 
         let sessions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM operator_sessions")
@@ -885,7 +878,9 @@ mod tests {
         crate::migrate::seed_bootstrap_account(&pool)
             .await
             .expect("bootstrap hesabı seed edilemedi");
-        let app = test_app(pool.clone());
+        // Gercek router: "parolayi degistirmeden baska ekran yok" kurali ara
+        // katmanda (operator_guard), rotalarin kendisinde degil (ADR-095 madde 3).
+        let app = crate::server::build_router(test_state(pool.clone(), "https://localhost"));
 
         // Yanlis parola: hata gosterilir, cerez kurulmaz.
         let response = app
@@ -987,6 +982,26 @@ mod tests {
         assert!(!body.contains("cok-gizli-ad"));
         assert!(!body.contains("cok-gizli-zimbra"));
         assert!(!body.contains("cok-gizli-oidc"));
+
+        // ADR-095 madde 3/5: yerel hesap gercek bir operator oturumudur, yetkisi
+        // yalnizca Sistem yoneticisi ve oturum satiri kapiyi tasir.
+        let session: (Vec<String>, String, String) = sqlx::query_as(
+            "SELECT authorities, auth_source, subject FROM operator_sessions LIMIT 1",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(session.0, vec![crate::oidc::ADMIN_AUTHORITY.to_string()]);
+        assert_eq!(session.1, "local");
+        assert_eq!(session.2, LOCAL_SUBJECT);
+        let login_source: String = sqlx::query_scalar(
+            "SELECT detail->>'source' FROM audit_log WHERE event_type = $1 ORDER BY id DESC LIMIT 1",
+        )
+        .bind(crate::audit::OPERATOR_LOGIN)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(login_source, "local", "break-glass kullanımı denetimde");
 
         // Cikis cerezi gecersiz kilar; sonraki istek yeniden girise yonlendirir.
         let response = app
@@ -1169,8 +1184,8 @@ mod tests {
         assert!(body.contains("test-admin"));
         assert!(body.contains("admin"));
 
-        // 5) test-admin OpenSicil-Admins'te oldugu icin admin dogrulama isareti kuruldu;
-        // /login artik bootstrap formunu gizliyor.
+        // 5) test-admin OpenSicil-Admins'te oldugu icin admin dogrulama isareti
+        // kuruldu (denetim bilgisi), ama ADR-095: yerel form artik gizlenmiyor.
         let settings = crate::settings::load(&pool).await.unwrap();
         assert!(settings.oidc_admin_verified);
 
@@ -1180,7 +1195,10 @@ mod tests {
             .await
             .unwrap();
         let body = body_string(response).await;
-        assert!(!body.contains(r#"name="username""#));
+        assert!(
+            body.contains(r#"name="username""#),
+            "kendi giriş formumuz hiçbir koşulda gizlenmez (ADR-095)"
+        );
         assert!(body.contains("/oidc/login"));
 
         // 6) operatör oturumu cerezle geri geliyor.

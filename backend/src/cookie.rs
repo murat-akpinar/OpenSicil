@@ -1,6 +1,6 @@
 use axum::http::HeaderMap;
 
-pub const SESSION_COOKIE_NAME: &str = "opensicil_bootstrap_session";
+// Tek oturum cerezi: uc giris kapisi da ayni cerezi kullanir (ADR-095 madde 5).
 pub const OPERATOR_SESSION_COOKIE_NAME: &str = "opensicil_operator_session";
 
 // HttpOnly: JS/XSS okuyamaz. Secure: yalnizca TLS uzerinden gider (ADR-066, nginx'te sonlanir).
@@ -46,10 +46,10 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(
             axum::http::header::COOKIE,
-            HeaderValue::from_static("a=1; opensicil_bootstrap_session=abc123; b=2"),
+            HeaderValue::from_static("a=1; opensicil_operator_session=abc123; b=2"),
         );
         assert_eq!(
-            get_cookie(&headers, SESSION_COOKIE_NAME),
+            get_cookie(&headers, OPERATOR_SESSION_COOKIE_NAME),
             Some("abc123".to_string())
         );
     }
@@ -57,6 +57,6 @@ mod tests {
     #[test]
     fn get_cookie_returns_none_when_missing() {
         let headers = HeaderMap::new();
-        assert_eq!(get_cookie(&headers, SESSION_COOKIE_NAME), None);
+        assert_eq!(get_cookie(&headers, OPERATOR_SESSION_COOKIE_NAME), None);
     }
 }

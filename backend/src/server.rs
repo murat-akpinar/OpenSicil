@@ -9,7 +9,7 @@ use crate::logging;
 use crate::web::{self, AppState};
 
 // Operator reddi (ADR-059) web rotalarinin tamamini sarar: her istekte kimlik durumu.
-fn build_router(state: AppState) -> Router {
+pub(crate) fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/api/health", get(health::health))
         .with_state(state.pool.clone())
@@ -177,6 +177,7 @@ mod tests {
             username: username.to_string(),
             email: format!("{username}@example.com"),
             authorities: vec!["hr".to_string()],
+            auth_source: crate::operator_session::AuthSource::Oidc,
             lang: crate::i18n::DEFAULT,
         };
         let departed_token =

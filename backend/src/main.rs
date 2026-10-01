@@ -30,7 +30,6 @@ mod operator_session;
 mod org;
 mod org_web;
 mod server;
-mod session;
 mod settings;
 #[cfg(test)]
 mod test_support;

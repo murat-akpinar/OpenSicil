@@ -84,4 +84,5 @@
 - Bekleme sebebi, kalan süre ve onaylayacak grup ekranda (F-12)
 - Okuma şeridi — katalog yenileme ayrı görevde, sayaca dokunmaz (ADR-094)
 - Gezinme sol sidebar'a taşındı
+- Tek oturum mekanizması, yerel giriş kalıcı break-glass oldu (ADR-095)
 

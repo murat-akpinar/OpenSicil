@@ -121,6 +121,9 @@ pub async fn enforce(
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
+    if let Some(redirect) = password_change_due(&state, &operator, request.uri().path()).await {
+        return redirect;
+    }
     match check_operator(&state.pool, &state.time_zone, &operator.username).await {
         Ok(Verdict::Allowed) => next.run(request).await,
         Ok(Verdict::Rejected(reason)) => {
@@ -132,6 +135,32 @@ pub async fn enforce(
         Err(e) => {
             eprintln!("operator_guard: kimlik durumu okunamadı: {e}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+// Parola degisimine izin verilen yollar: formun kendisi ve cikis.
+const PASSWORD_CHANGE_PATHS: &[&str] = &["/change-password", "/logout"];
+
+// ADR-095 madde 3: yerel hesap ilk girisinde parolasini degistirmeden baska
+// hicbir ekrani goremez. Yalnizca yerel oturumda sorulur (AD/OIDC parolasi
+// bizde degil), bu yuzden ek sorgu diger kapilari yavaslatmaz.
+async fn password_change_due(
+    state: &AppState,
+    operator: &crate::operator_session::Operator,
+    path: &str,
+) -> Option<Response> {
+    if operator.auth_source != crate::operator_session::AuthSource::Local
+        || PASSWORD_CHANGE_PATHS.contains(&path)
+    {
+        return None;
+    }
+    match crate::bootstrap_account::must_change_password(&state.pool).await {
+        Ok(true) => Some(axum::response::Redirect::to("/change-password").into_response()),
+        Ok(false) => None,
+        Err(e) => {
+            eprintln!("operator_guard: yerel hesap durumu okunamadı: {e}");
+            Some(StatusCode::INTERNAL_SERVER_ERROR.into_response())
         }
     }
 }

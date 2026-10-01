@@ -84,7 +84,7 @@ pub async fn run() -> ExitCode {
 //   red nedenini yalnizca worker yazar (ADR-036/085)
 const SERVICE_GRANTS: &str = "\
 GRANT SELECT ON _sqlx_migrations TO {backend}, {worker};
-GRANT SELECT, INSERT, UPDATE, DELETE ON bootstrap_account, bootstrap_sessions, app_settings, \
+GRANT SELECT, INSERT, UPDATE, DELETE ON bootstrap_account, app_settings, \
 oidc_auth_requests, operator_sessions TO {backend};
 GRANT SELECT (id, ad_host, ad_bind_dn, ad_service_password_enc, zimbra_url, \
 zimbra_admin_password_enc) ON app_settings TO {worker};

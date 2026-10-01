@@ -996,6 +996,7 @@ mod tests {
             username: username.to_string(),
             email: format!("{username}@example.org"),
             authorities: authorities.iter().map(|a| a.to_string()).collect(),
+            auth_source: crate::operator_session::AuthSource::Oidc,
             lang: crate::i18n::DEFAULT,
         };
         let token = crate::operator_session::create_session(pool, &operator)

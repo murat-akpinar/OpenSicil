@@ -53,10 +53,11 @@ BACKEND_PID=$!
 for _ in $(seq 1 30); do curl -sf "$BASE/api/health" >/dev/null && break; sleep 1; done
 curl -sf "$BASE/api/health" >/dev/null || { cat "$WORK/backend.log"; exit 1; }
 
-echo "3) bootstrap admin ile Yapılandırma: lab AD + lab Keycloak"
+echo "3) yerel admin ile Yapılandırma: lab AD + lab Keycloak"
+# ADR-095: yerel giris de operator oturumu uretir, tek cerez var.
 curl -s -D "$WORK/h" -o /dev/null -d 'username=admin&password=admin' "$BASE/login"
-BOOT=$(cookie_of opensicil_bootstrap_session "$WORK/h")
-[ -n "$BOOT" ] || { echo "bootstrap girişi başarısız"; cat "$WORK/h"; exit 1; }
+BOOT=$(cookie_of opensicil_operator_session "$WORK/h")
+[ -n "$BOOT" ] || { echo "yerel giriş başarısız"; cat "$WORK/h"; exit 1; }
 curl -s -o /dev/null -b "$BOOT" -d 'new_password=e2e-bootstrap-parola-1&confirm_password=e2e-bootstrap-parola-1' "$BASE/change-password"
 curl -s -o /dev/null -b "$BOOT" \
   --data-urlencode "ad_host=localhost:6360" \

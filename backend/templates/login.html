@@ -6,7 +6,7 @@
 {% if !error.is_empty() %}
 <p class="alert alert-err">{{ error }}</p>
 {% endif %}
-{% if !oidc_admin_verified %}
+{# ADR-095: kendi giris ekranimiz asil kapi, hicbir kosulda gizlenmez #}
 <form method="post" action="/login">
   <div class="field">
     <label class="label" for="username">{{ lang.t("login.username") }}</label>
@@ -19,8 +19,7 @@
   <button class="btn btn-primary w-full" type="submit">{{ lang.t("login.submit") }}</button>
   <p class="hint">{{ lang.t("login.bootstrap_hint") }}</p>
 </form>
-{% endif %}
 {% if oidc_configured %}
-<a href="/oidc/login" class="btn btn-ok w-full{% if !oidc_admin_verified %} mt-4{% endif %}">{{ lang.t("login.oidc") }}</a>
+<a href="/oidc/login" class="btn btn-ok mt-4 w-full">{{ lang.t("login.oidc") }}</a>
 {% endif %}
 {% endblock %}

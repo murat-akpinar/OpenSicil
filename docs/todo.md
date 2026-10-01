@@ -190,6 +190,30 @@ Kurallar:
   - Not (2026-10-01): ADR-088 kabuğu "üst bar + gezinme" diye tarif ediyordu ama kararın maddelerinde yön yoktu — yeni ADR gerekmedi. `base.html`'de `{% block nav %}` üst bardan çıkıp `.shell` flex satırına `<aside>` olarak girdi; CSS'te `.nav` → `.side` (dar ekranda satır, `md:` sonrası sütun), `.page`'in `mx-auto max-w-6xl`'i `.shell`'e taşındı. 18 şablon kabuğu miras aldığı için hiçbirine dokunulmadı. `sh scripts/build-css.sh` ile çıktı yenilendi
   - Doğrulama: backend 135 test (lab Keycloak dahil), worker 67; fmt + clippy temiz; çalışan compose yığınında `test-hr` ile OIDC girişi yapılıp operatör ana sayfası çekildi: `class="shell"` 1, `class="side"` 1, `class="nav-link"` 6
 
+## Giriş: kendi ekranımız ([ADR-095](decisions/095-giris-kendi-ekranimiz-ad-bind-asil.md))
+
+> Fazlar arası iş, "Faz" olarak numaralanmaz. Kullanıcı isteği (2026-10-01): "neden Keycloak bağladın, direkt kendi login ekranımız olmalıydı; insanlar isterse Keycloak tarzı bir şeyi entegre etmeye müsait olurdu". [ADR-095](decisions/095-giris-kendi-ekranimiz-ad-bind-asil.md) [ADR-005](decisions/005-yonetim-girisi-oidc.md)'in giriş yolu kararının yerine geçti: asıl kapı AD bind, yanında kalıcı yerel break-glass hesabı, OIDC opsiyonel. Yetki modeli ve görev ayrılığı kuralları ADR-005'ten aynen devam eder.
+
+- [x] Tek oturum mekanizması ve yerel kapının genişlemesi ([ADR-095](decisions/095-giris-kendi-ekranimiz-ad-bind-asil.md) madde 3 ve 5)
+  - Kabul: yerel `admin` hesabı `operator_sessions` satırı üretir ve `admin` yetkisiyle gerçek operatör olur; İK/denetçi/PII/helpdesk yetkisi almaz
+  - Kabul: `bootstrap_sessions` tablosu ve `session.rs` silinir, tek oturum çerezi kalır; `operator_guard` yerel hesabı (eşleşen kimliği olmadığı için) geçirir
+  - Kabul: `operator_sessions.auth_source` (`ad`/`local`/`oidc`) yazılır; `operator.login` denetim satırı kaynağı taşır
+  - Kabul: 5 başarısız yerel denemeden sonra 15 dk kilit; kilit süresi dolunca doğru parola girebiliyor — testli
+  - Kabul: ilk OIDC yöneticisi girdikten sonra yerel form **gizlenmez** (ADR-068'in o maddesi kalkar); yerel hesabı kapatma yalnızca başka çalışan kapı varsa kabul edilir
+  - Not (2026-10-01): `0017_single_session.sql` (`operator_sessions.auth_source` + `bootstrap_account.failed_attempts`/`locked_until`, `bootstrap_sessions` düştü); `session.rs` ve bootstrap çerezi silindi, `cookie.rs`'te tek ad kaldı. `bootstrap_account::verify_login` artık `LoginOutcome` (Ok / BadCredentials / Locked(dk)) döndürüyor, sayaç veritabanında artıyor (iki eşzamanlı deneme birbirini yemez), başarılı girişte ve parola değişiminde sıfırlanıyor. `/change-password` ve `/config` `BootstrapSession` yerine `OperatorSession` + `admin` yetkisi istiyor; ayar değişikliği denetim satırının aktörü artık gerçek operatör (`identity_web::audit_operator`), `audit_bootstrap` silindi. "Parolanı değiştirmeden gezinemezsin" kuralı `operator_guard::password_change_due`'da — tek yerde, bütün rotalar için; bu yüzden akış testi `server::build_router`'ı (gerçek router) kullanıyor. `config.html` gezinmeyi ve dil seçicisini artık kapatmıyor. `scripts/e2e-lab.sh` tek çereze göre güncellendi
+  - Not: yerel hesabın yetki listesi tek elemanlı (`admin`) ama bugünkü kodda `admin` İK ekranlarını da açıyor (ADR-078 kayıt `hr`/`admin`, ADR-085 ilk parola `hr`/`helpdesk`/`admin`) — yani hesap pratikte tam yetkili. ADR-095 madde 3 bunu kabul edilen risk olarak yazdı (break-glass'ın işi bozulmuş kurulumu düzeltmek); ilk yazılan "günlük iş yerel hesaptan yapılamaz" cümlesi testle yanlışlandığı için düzeltildi
+  - Doğrulama: backend 135 test (lab Keycloak dahil) + yeni iki test (kilit senaryosu, dakika yuvarlama); fmt ve clippy temiz. Akış testi yerel girişin `admin` yetkili `local` kaynaklı operatör oturumu açtığını, `operator.login` denetim satırının `source = local` taşıdığını ve parola değişmeden `/config`'in `/change-password`'e düştüğünü doğruluyor
+- [ ] AD bind kapısı ve yetkilerin AD gruplarından okunması ([ADR-095](decisions/095-giris-kendi-ekranimiz-ad-bind-asil.md) madde 1, 2, 6)
+  - Kabul: giriş formuna AD kullanıcı adı + parolası girilince LDAPS üstünden `simple_bind` ile doğrulanır; parola hiçbir yere yazılmaz ve loglanmaz
+  - Kabul: yetkiler operatörün AD grup üyeliğinden (iç içe dahil) `authorities_for_groups` ile okunur — OIDC ile aynı fonksiyon, ikinci eşleme yok
+  - Kabul: kimlik eşleşmesi `sAMAccountName`/`objectGUID` ile doğrudan yapılır; ayrılmış/askıdaki operatör bu kapıda da reddedilir
+  - Kabul: servis hesabı ya da DC erişilemezse ekranda "AD'ye ulaşılamıyor" yazar ve yerel kapı çalışmaya devam eder — giriş sessizce başarısız olmaz
+  - Kabul: lab Samba'ya karşı test — doğru parola girer, yanlış parola reddedilir, yönetim grubunda olmayan kullanıcı girer ama hiçbir ekranı göremez
+  - Not: backend'e `ldap3` bağımlılığı girer (ADR-069'da seçilmiş crate, bugüne kadar yalnızca worker'da); `ad.rs`'in tamamı kopyalanmaz, yalnızca kimlik doğrulama dilimi (`ad_auth.rs`)
+- [ ] Kapanış: güvenlik ve test
+  - (1a'daki kapanış şablonunun aynısı)
+  - Kabul: `docs/09-kurulum.md` "İlk giriş" akışı OIDC'yi ön koşul olmaktan çıkarır; `docs/06-guvenlik.md`, `README.md` ve `README_ENG.md` kimlik doğrulama bölümleri ADR-095'e göre güncellenir
+
 ## Faz 4: İşletme
 
 > Zimbra v1'den sonra geldiği için ([ADR-090](decisions/090-zimbra-v1-sonrasina-alindi.md)) mutabakat raporu ve metrik ucu v1'de yalnızca AD'yi kapsar; eksik kapsam ekranda/raporda belirtilir.

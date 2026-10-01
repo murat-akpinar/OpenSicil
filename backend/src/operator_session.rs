@@ -1,5 +1,6 @@
-// --- START FEATURE: oidc-login ---
-// OIDC ile girmis operatorun oturumu; bootstrap_sessions'tan bagimsiz (ADR-073).
+// --- START FEATURE: operator-login ---
+// Operator oturumu; uc kapi (AD bind, yerel break-glass, OIDC) ayni satiri
+// uretir ve hangi kapidan acildigi `auth_source`'ta durur (ADR-095 madde 5).
 
 use sqlx::PgPool;
 
@@ -8,11 +9,41 @@ use crate::token::{generate_token, hash_token};
 
 pub const SESSION_LIFETIME_HOURS: i64 = 8;
 
+/// Oturumun acildigi kapi (ADR-095). Veritabaninda CHECK ile ayni uc deger.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthSource {
+    Ad,
+    Local,
+    Oidc,
+}
+
+impl AuthSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AuthSource::Ad => "ad",
+            AuthSource::Local => "local",
+            AuthSource::Oidc => "oidc",
+        }
+    }
+
+    fn parse(value: &str) -> Result<Self, sqlx::Error> {
+        match value {
+            "ad" => Ok(AuthSource::Ad),
+            "local" => Ok(AuthSource::Local),
+            "oidc" => Ok(AuthSource::Oidc),
+            other => Err(sqlx::Error::Decode(
+                format!("bilinmeyen auth_source: {other}").into(),
+            )),
+        }
+    }
+}
+
 pub struct Operator {
     pub subject: String,
     pub username: String,
     pub email: String,
     pub authorities: Vec<String>,
+    pub auth_source: AuthSource,
     /// Arayuz dili tercihi; oturum satirinda saklanir (ADR-089)
     pub lang: Lang,
 }
@@ -20,14 +51,16 @@ pub struct Operator {
 pub async fn create_session(pool: &PgPool, operator: &Operator) -> Result<String, sqlx::Error> {
     let token = generate_token();
     sqlx::query(
-        "INSERT INTO operator_sessions (token_hash, subject, username, email, authorities, lang, expires_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, now() + make_interval(hours => $7))",
+        "INSERT INTO operator_sessions \
+         (token_hash, subject, username, email, authorities, auth_source, lang, expires_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, now() + make_interval(hours => $8))",
     )
     .bind(hash_token(&token))
     .bind(&operator.subject)
     .bind(&operator.username)
     .bind(&operator.email)
     .bind(&operator.authorities)
+    .bind(operator.auth_source.as_str())
     .bind(operator.lang.code())
     .bind(SESSION_LIFETIME_HOURS as i32)
     .execute(pool)
@@ -35,23 +68,27 @@ pub async fn create_session(pool: &PgPool, operator: &Operator) -> Result<String
     Ok(token)
 }
 
+type SessionRow = (String, String, String, Vec<String>, String, String);
+
 pub async fn validate_session(pool: &PgPool, token: &str) -> Result<Option<Operator>, sqlx::Error> {
-    let row: Option<(String, String, String, Vec<String>, String)> = sqlx::query_as(
-        "SELECT subject, username, email, authorities, lang FROM operator_sessions \
+    let row: Option<SessionRow> = sqlx::query_as(
+        "SELECT subject, username, email, authorities, auth_source, lang FROM operator_sessions \
          WHERE token_hash = $1 AND expires_at > now()",
     )
     .bind(hash_token(token))
     .fetch_optional(pool)
     .await?;
-    Ok(
-        row.map(|(subject, username, email, authorities, lang)| Operator {
-            subject,
-            username,
-            email,
-            authorities,
-            lang: Lang::from_code(&lang),
-        }),
-    )
+    let Some((subject, username, email, authorities, auth_source, lang)) = row else {
+        return Ok(None);
+    };
+    Ok(Some(Operator {
+        subject,
+        username,
+        email,
+        authorities,
+        auth_source: AuthSource::parse(&auth_source)?,
+        lang: Lang::from_code(&lang),
+    }))
 }
 
 /// Dil secicisi: tercih bu oturum icin kalicidir (ADR-089).
@@ -82,6 +119,7 @@ mod tests {
             username: "test-admin".to_string(),
             email: "test-admin@example.org".to_string(),
             authorities: vec!["admin".to_string(), "hr".to_string()],
+            auth_source: crate::operator_session::AuthSource::Oidc,
             lang: crate::i18n::DEFAULT,
         }
     }
@@ -131,4 +169,4 @@ mod tests {
         crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
     }
 }
-// --- END FEATURE: oidc-login ---
+// --- END FEATURE: operator-login ---

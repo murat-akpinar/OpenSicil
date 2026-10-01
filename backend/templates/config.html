@@ -1,10 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ lang.t("config.title") }} — OpenSicil{% endblock %}
-{# Bootstrap hesabı yalnızca bu sayfayı görür (ADR-068): gezinme çubuğu yok.
-   Dil seçicisi de yok (ADR-089): operatör oturumu olmadan tercih saklanmaz,
-   dil tarayıcının Accept-Language başlığından gelir. #}
-{% block nav %}{% endblock %}
-{% block lang_switch %}{% endblock %}
+{# ADR-095: sayfa artık Sistem yöneticisi yetkisiyle açılıyor (yerel hesap da bu
+   yetkiyle giriyor), kabuğun gezinmesi ve dil seçicisi olduğu gibi kalır. #}
 {% block page_class %}page-narrow{% endblock %}
 {% block content %}
 <div class="page-head">
