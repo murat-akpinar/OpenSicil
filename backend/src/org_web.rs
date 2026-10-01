@@ -204,7 +204,9 @@ fn save_error(e: SaveError, what: &str) -> Result<&'static str, Box<Response>> {
 struct RolesTemplate {
     shell: Shell,
     lang: Lang,
-    roles: Vec<org::RoleRow>,
+    sections: Vec<org::RoleSection>,
+    /// Hic rol yoksa ekran bolum tablolari yerine bos durumu basar
+    any: bool,
     kinds: &'static [&'static str],
     error: String,
     can_edit: bool,
@@ -375,7 +377,8 @@ async fn render_roles(state: &AppState, op: &Operator, error: String) -> Respons
         Ok(roles) => render(&RolesTemplate {
             lang: op.lang,
             shell: Shell::of(op),
-            roles,
+            any: !roles.is_empty(),
+            sections: org::role_sections(roles),
             kinds: &org::ROLE_KINDS,
             error,
             can_edit: allowed(op, WRITE_AUTHORITIES),
@@ -1139,9 +1142,10 @@ mod tests {
         let page =
             body_string(send("GET", "/departments".into(), String::new(), auditor.clone()).await)
                 .await;
+        // Girinti artik `— ` on eki degil derinlik sinifi (CSP: satir ici stil yok).
         assert!(
             page.contains(&format!(
-                "— <a class=\"link\" href=\"/departments/{child_id}\">BT"
+                "<span class=\"tree-d2\"><a class=\"link\" href=\"/departments/{child_id}\">BT"
             )),
             "{page}"
         );

@@ -5,36 +5,14 @@
   <h1 class="h1">{{ lang.t("nav.roles") }}</h1>
 </div>
 {% if !error.is_empty() %}<p class="alert alert-err">{{ error }}</p>{% endif %}
-{% if roles.is_empty() %}
-<div class="empty mb-6">
-  <span class="ico-tile ico-tile-lg"><i class="ico ico-key" aria-hidden="true"></i></span>
-  <p class="empty-title">{{ lang.t("roles.empty") }}</p>
-  <p class="empty-hint">{{ lang.t("roles.empty_hint") }}</p>
-</div>
-{% else %}
-<div class="card mb-6 overflow-x-auto p-0">
-  <table class="tbl">
-    <thead><tr><th>{{ lang.t("field.kind") }}</th><th>{{ lang.t("field.name") }}</th><th>{{ lang.t("field.title") }}</th><th>{{ lang.t("field.items") }}</th></tr></thead>
-    <tbody>
-    {% for r in roles %}
-      <tr>
-        <td>{{ lang.key("rolekind", r.kind) }}</td>
-        <td><a class="link" href="/roles/{{ r.id }}">{{ r.name }}</a></td>
-        <td>{{ r.title }}</td>
-        <td class="muted">{{ r.entitlements }}</td>
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table>
-</div>
-{% endif %}
+
 {% if can_edit %}
-<div class="card">
-  <div class="card-head">
+<details class="card mb-6">
+  <summary class="summary-row">
     <span class="ico-tile"><i class="ico ico-plus" aria-hidden="true"></i></span>
-    <h2 class="h2">{{ lang.t("roles.new") }}</h2>
-  </div>
-  <form method="post" action="/roles" class="grid items-end gap-3 sm:grid-cols-3">
+    <span class="h2">{{ lang.t("roles.new") }}</span>
+  </summary>
+  <form method="post" action="/roles" class="mt-4 grid items-end gap-3 sm:grid-cols-3">
     <div>
       <label class="label" for="kind">{{ lang.t("field.kind") }}</label>
       <select class="input" id="kind" name="kind">
@@ -51,6 +29,52 @@
     </div>
     <button class="btn btn-primary sm:col-span-3" type="submit">{{ lang.t("common.save") }}</button>
   </form>
+</details>
+{% endif %}
+
+{% if !any %}
+<div class="empty">
+  <span class="ico-tile ico-tile-lg"><i class="ico ico-key" aria-hidden="true"></i></span>
+  <p class="empty-title">{{ lang.t("roles.empty") }}</p>
+  <p class="empty-hint">{{ lang.t("roles.empty_hint") }}</p>
 </div>
+{% else %}
+{# Tur basina ayri bolum: birincil ve ek rol ayni tabloda karismasin, turun
+   ne ise yaradigi veri gelince de ekranda kalsin #}
+{% for s in sections %}
+<section class="card mb-6">
+  <div class="card-head">
+    <span class="ico-tile"><i class="ico ico-key" aria-hidden="true"></i></span>
+    <div>
+      <h2 class="h2">{{ lang.key("rolekind", s.kind) }} {{ lang.t("roles.role_word") }}</h2>
+      <p class="hint">{{ lang.key("rolekind_hint", s.kind) }}</p>
+    </div>
+  </div>
+  {% if s.roles.is_empty() %}
+  <p class="muted text-sm">{{ lang.t("roles.section_empty") }}</p>
+  {% else %}
+  <div class="overflow-x-auto">
+    <table class="tbl">
+      <thead><tr>
+        <th>{{ lang.t("field.name") }}</th>
+        {% if s.kind == "primary" %}<th>{{ lang.t("field.title") }}</th>{% endif %}
+        <th class="num">{{ lang.t("roles.group_count") }}</th>
+        <th class="num">{{ lang.t("def.people") }}</th>
+      </tr></thead>
+      <tbody>
+      {% for r in s.roles %}
+        <tr>
+          <td><a class="link" href="/roles/{{ r.id }}">{{ r.name }}</a></td>
+          {% if s.kind == "primary" %}<td class="muted">{% if r.title.is_empty() %}—{% else %}{{ r.title }}{% endif %}</td>{% endif %}
+          <td class="num muted">{{ r.entitlements }}</td>
+          <td class="num">{{ r.people }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</section>
+{% endfor %}
 {% endif %}
 {% endblock %}

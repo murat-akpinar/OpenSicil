@@ -112,4 +112,5 @@
 - Müdahale bekleyen işler listesi ve panel şeridinde kısa yol
 - Sahiplenmede AD'den e-posta, telefon ve sicil alanları
 - Tekil sahiplenmede sicil ve telefon AD'den gelir
+- Rol ve departman listeleri bölümlere ve gerçek ağaca geçti
 

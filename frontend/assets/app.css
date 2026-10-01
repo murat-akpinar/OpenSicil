@@ -896,6 +896,47 @@
   .tbl tbody tr:hover {
     @apply bg-bg;
   }
+  /* Sayi kolonu: saga dayali ve esit genislikli rakam, goz asagi kayarken
+     basamaklar ustuste gelsin */
+  .tbl th.num,
+  .tbl td.num {
+    @apply text-right tabular-nums;
+  }
+
+  /* Agac girintisi: derinlik satir ici stille degil sinifla veriliyor (CSP,
+     ADR-088). Kok 1; `org::MAX_DEPTH` 8 oldugu icin sekiz basamak var */
+  .tree-d1 {
+    @apply block;
+  }
+  .tree-d2 {
+    @apply block border-l border-line pl-3 ml-1;
+  }
+  .tree-d3 {
+    @apply block border-l border-line pl-3 ml-5;
+  }
+  .tree-d4 {
+    @apply block border-l border-line pl-3 ml-9;
+  }
+  .tree-d5 {
+    @apply block border-l border-line pl-3 ml-13;
+  }
+  .tree-d6 {
+    @apply block border-l border-line pl-3 ml-17;
+  }
+  .tree-d7 {
+    @apply block border-l border-line pl-3 ml-21;
+  }
+  .tree-d8 {
+    @apply block border-l border-line pl-3 ml-25;
+  }
+
+  /* Katlanir kart basligi: <details><summary> satiri karti acip kapatir */
+  .summary-row {
+    @apply flex cursor-pointer list-none items-center gap-3;
+  }
+  .summary-row::-webkit-details-marker {
+    display: none;
+  }
 
   /* --- durum etiketleri --- */
   .badge {

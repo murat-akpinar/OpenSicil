@@ -171,6 +171,7 @@ mod tests {
             &["permanent", "contract", "intern", "outsourced"],
         ),
         ("rolekind", &["base", "primary", "additional"]),
+        ("rolekind_hint", &["base", "primary", "additional"]),
         ("usedkind", &["username", "email"]),
         (
             "upcomingkind",

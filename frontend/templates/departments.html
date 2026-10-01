@@ -5,35 +5,14 @@
   <h1 class="h1">{{ lang.t("nav.departments") }}</h1>
 </div>
 {% if !error.is_empty() %}<p class="alert alert-err">{{ error }}</p>{% endif %}
-{% if departments.is_empty() %}
-<div class="empty mb-6">
-  <span class="ico-tile ico-tile-lg"><i class="ico ico-sitemap" aria-hidden="true"></i></span>
-  <p class="empty-title">{{ lang.t("departments.empty") }}</p>
-  <p class="empty-hint">{{ lang.t("departments.empty_hint") }}</p>
-</div>
-{% else %}
-<div class="card mb-6 overflow-x-auto p-0">
-  <table class="tbl">
-    <thead><tr><th>{{ lang.t("field.name") }}</th><th>{{ lang.t("field.code") }}</th><th>{{ lang.t("field.items") }}</th></tr></thead>
-    <tbody>
-    {% for d in departments %}
-      <tr>
-        <td>{{ d.indent }}<a class="link" href="/departments/{{ d.id }}">{{ d.name }}</a></td>
-        <td class="muted">{{ d.code }}</td>
-        <td class="muted">{{ d.entitlements }}</td>
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table>
-</div>
-{% endif %}
+
 {% if can_edit %}
-<div class="card">
-  <div class="card-head">
+<details class="card mb-6">
+  <summary class="summary-row">
     <span class="ico-tile"><i class="ico ico-plus" aria-hidden="true"></i></span>
-    <h2 class="h2">{{ lang.t("departments.new") }}</h2>
-  </div>
-  <form method="post" action="/departments" class="grid items-end gap-3 sm:grid-cols-3">
+    <span class="h2">{{ lang.t("departments.new") }}</span>
+  </summary>
+  <form method="post" action="/departments" class="mt-4 grid items-end gap-3 sm:grid-cols-3">
     <div>
       <label class="label" for="name">{{ lang.t("field.name") }}</label>
       <input class="input" type="text" id="name" name="name" required>
@@ -51,6 +30,45 @@
     </div>
     <button class="btn btn-primary sm:col-span-3" type="submit">{{ lang.t("common.save") }}</button>
   </form>
+</details>
+{% endif %}
+
+{% if departments.is_empty() %}
+<div class="empty">
+  <span class="ico-tile ico-tile-lg"><i class="ico ico-sitemap" aria-hidden="true"></i></span>
+  <p class="empty-title">{{ lang.t("departments.empty") }}</p>
+  <p class="empty-hint">{{ lang.t("departments.empty_hint") }}</p>
 </div>
+{% else %}
+<section class="card">
+  <div class="card-head">
+    <span class="ico-tile"><i class="ico ico-sitemap" aria-hidden="true"></i></span>
+    <div>
+      <h2 class="h2">{{ lang.t("departments.tree") }}</h2>
+      <p class="hint">{{ lang.t("departments.tree_hint") }}</p>
+    </div>
+  </div>
+  <div class="overflow-x-auto">
+    <table class="tbl">
+      <thead><tr>
+        <th>{{ lang.t("field.name") }}</th>
+        <th>{{ lang.t("field.code") }}</th>
+        <th class="num">{{ lang.t("departments.group_count") }}</th>
+        <th class="num">{{ lang.t("def.people_subtree") }}</th>
+      </tr></thead>
+      <tbody>
+      {# Girinti CSS'ten (`tree-d<derinlik>`): satir ici stil CSP'de yasak #}
+      {% for d in departments %}
+        <tr>
+          <td><span class="tree-d{{ d.depth }}"><a class="link" href="/departments/{{ d.id }}">{{ d.name }}</a></span></td>
+          <td class="muted">{% if d.code.is_empty() %}—{% else %}{{ d.code }}{% endif %}</td>
+          <td class="num muted">{{ d.entitlements }}</td>
+          <td class="num">{{ d.people }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
 {% endif %}
 {% endblock %}

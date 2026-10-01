@@ -34,26 +34,64 @@ pub struct RoleRow {
     pub name: String,
     pub title: String,
     pub entitlements: i64,
+    /// Bu rolu tasiyan silinmemis kimlik sayisi; kural `affected_identities` ile
+    /// ayni (temel rol → herkes, birincil → `primary_role_id`, ek → atama).
+    pub people: i64,
+}
+
+/// Tur basina bolum: ekran birincil ile ek rolu ayri tablolarda gosterir ve
+/// turun ne ise yaradigini bolum basliginda yazar.
+pub struct RoleSection {
+    pub kind: &'static str,
+    pub roles: Vec<RoleRow>,
 }
 
 pub async fn list_roles(pool: &PgPool) -> Result<Vec<RoleRow>, sqlx::Error> {
-    let rows: Vec<(i64, String, String, Option<String>, i64)> = sqlx::query_as(
+    let rows: Vec<(i64, String, String, Option<String>, i64, i64)> = sqlx::query_as(
         "SELECT r.id, r.kind, r.name, r.title, \
-         (SELECT COUNT(*) FROM role_entitlements e WHERE e.role_id = r.id) \
+         (SELECT COUNT(*) FROM role_entitlements e WHERE e.role_id = r.id), \
+         CASE r.kind \
+           WHEN 'base' THEN (SELECT COUNT(*) FROM identities i WHERE i.deleted_at IS NULL) \
+           WHEN 'primary' THEN (SELECT COUNT(*) FROM identities i \
+             WHERE i.deleted_at IS NULL AND i.primary_role_id = r.id) \
+           ELSE (SELECT COUNT(DISTINCT a.identity_id) FROM identity_additional_roles a \
+             JOIN identities i ON i.id = a.identity_id \
+             WHERE a.role_id = r.id AND i.deleted_at IS NULL) \
+         END \
          FROM roles r ORDER BY r.kind, r.name",
     )
     .fetch_all(pool)
     .await?;
     Ok(rows
         .into_iter()
-        .map(|(id, kind, name, title, entitlements)| RoleRow {
+        .map(|(id, kind, name, title, entitlements, people)| RoleRow {
             id,
             kind,
             name,
             title: title.unwrap_or_default(),
             entitlements,
+            people,
         })
         .collect())
+}
+
+/// Rolleri `ROLE_KINDS` sirasinda bolumlere ayirir. Bos bolum de doner: ekran
+/// "temel rol tanimlanmadi" diyebilsin, aciklama veri gelince kaybolmasin.
+/// `roles.kind` veritabaninda CHECK ile bu uc degerle sinirli, yani satir dusmez.
+pub fn role_sections(roles: Vec<RoleRow>) -> Vec<RoleSection> {
+    let mut sections: Vec<RoleSection> = ROLE_KINDS
+        .iter()
+        .map(|kind| RoleSection {
+            kind,
+            roles: Vec::new(),
+        })
+        .collect();
+    for role in roles {
+        if let Some(section) = sections.iter_mut().find(|s| s.kind == role.kind) {
+            section.roles.push(role);
+        }
+    }
+    sections
 }
 
 // ADR-007: temel rol tek (kismi tekil indeks), unvan yalnizca birincilde (CHECK).
@@ -362,22 +400,37 @@ pub struct DepartmentRow {
     pub id: i64,
     pub name: String,
     pub code: String,
+    /// `<select>` icin metin girintisi: option'a CSS uygulanamaz
     pub indent: String,
+    /// Tabloda girinti sinifi icin: kok 1
+    pub depth: i64,
     pub entitlements: i64,
+    /// Alt agac dahil silinmemis kimlik sayisi — `affected_identities`'in
+    /// departman kuralinin (`down` CTE) saydigi kume.
+    pub people: i64,
 }
 
 // Agac, kokten yapraga; ayni seviyede ada gore (recursive CTE, ADR-017).
+// ponytail: `reach` her (ata, torun) ciftini uretiyor — departman sayisi onlarca
+// oldugu surece ucuz; binlere cikarsa sayim ayri bir ozete tasinir.
 pub async fn list_departments(pool: &PgPool) -> Result<Vec<DepartmentRow>, sqlx::Error> {
-    type Row = (i64, String, Option<String>, i64, i64);
+    type Row = (i64, String, Option<String>, i64, i64, i64);
     let rows: Vec<Row> = sqlx::query_as(
         "WITH RECURSIVE tree AS ( \
            SELECT id, name, code, 1::bigint AS depth, ARRAY[lower(name)] AS path FROM departments \
            WHERE parent_id IS NULL \
            UNION ALL \
            SELECT d.id, d.name, d.code, t.depth + 1, t.path || lower(d.name) \
-           FROM departments d JOIN tree t ON d.parent_id = t.id WHERE t.depth < $1) \
-         SELECT id, name, code, depth, \
-           (SELECT COUNT(*) FROM department_entitlements e WHERE e.department_id = tree.id) \
+           FROM departments d JOIN tree t ON d.parent_id = t.id WHERE t.depth < $1), \
+         reach AS ( \
+           SELECT id AS root, id AS node, 1::bigint AS depth FROM departments \
+           UNION ALL \
+           SELECT r.root, d.id, r.depth + 1 FROM departments d \
+           JOIN reach r ON d.parent_id = r.node WHERE r.depth < $1) \
+         SELECT tree.id, tree.name, tree.code, tree.depth, \
+           (SELECT COUNT(*) FROM department_entitlements e WHERE e.department_id = tree.id), \
+           (SELECT COUNT(*) FROM identities i WHERE i.deleted_at IS NULL \
+              AND i.department_id IN (SELECT node FROM reach WHERE root = tree.id)) \
          FROM tree ORDER BY path",
     )
     .bind(MAX_DEPTH)
@@ -385,13 +438,17 @@ pub async fn list_departments(pool: &PgPool) -> Result<Vec<DepartmentRow>, sqlx:
     .await?;
     Ok(rows
         .into_iter()
-        .map(|(id, name, code, depth, entitlements)| DepartmentRow {
-            id,
-            name,
-            code: code.unwrap_or_default(),
-            indent: "— ".repeat((depth - 1) as usize),
-            entitlements,
-        })
+        .map(
+            |(id, name, code, depth, entitlements, people)| DepartmentRow {
+                id,
+                name,
+                code: code.unwrap_or_default(),
+                indent: "— ".repeat((depth - 1) as usize),
+                depth,
+                entitlements,
+                people,
+            },
+        )
         .collect())
 }
 
@@ -811,7 +868,9 @@ mod tests {
         .unwrap();
         let tree = list_departments(&pool).await.unwrap();
         assert_eq!(tree[0].name, "Ankara");
+        assert_eq!(tree[0].depth, 1);
         assert_eq!(tree[1].indent, "— ");
+        assert_eq!(tree[1].depth, 2, "ekran girintiyi bu derinlikten veriyor");
         assert_eq!(tree[1].code, "BT");
         assert_eq!(
             load_department(&pool, child)
@@ -842,6 +901,35 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(jobs, 4, "iki kimlik x iki hedef, acik is tekrar acilmaz");
+
+        // Listelerdeki kisi sayisi `affected_identities` kuralini izler:
+        // temel rol herkesi, birincil rol kadrosunu, ek rol atamayi sayar;
+        // departman alt agaci sayar (kimlik 0 artik `BT`'de).
+        let extra = create_role(&pool, "additional", "Nöbet", "").await.unwrap();
+        sqlx::query("INSERT INTO identity_additional_roles (identity_id, role_id) VALUES ($1, $2)")
+            .bind(ids[1])
+            .bind(extra)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let people =
+            |rows: &[RoleRow], name: &str| rows.iter().find(|r| r.name == name).unwrap().people;
+        let roles = list_roles(&pool).await.unwrap();
+        assert_eq!(people(&roles, "Herkes"), 2, "temel rol herkesi sayar");
+        assert_eq!(people(&roles, "Test Rolü"), 2, "ikisinin de kadrosu");
+        assert_eq!(people(&roles, "Sistem Uzmanı"), 0, "kimsede yok");
+        assert_eq!(people(&roles, "Nöbet"), 1, "tek atama");
+        let sections = role_sections(roles);
+        assert_eq!(sections.len(), ROLE_KINDS.len(), "bos bolum de doner");
+        assert!(sections
+            .iter()
+            .all(|s| s.roles.iter().all(|r| r.kind == s.kind)));
+        let tree = list_departments(&pool).await.unwrap();
+        let dept = |name: &str| tree.iter().find(|d| d.name == name).unwrap().people;
+        assert_eq!(dept("Ankara"), 1, "alt agactaki kimlik koke de sayilir");
+        assert_eq!(dept("Bilgi İşlem"), 1);
+        assert_eq!(dept("Test Birimi"), 1, "digeri hala orada");
+        assert_eq!(dept("Seviye 0"), 0);
 
         // Hedef varsayilanlari.
         let mut target = list_targets(&pool).await.unwrap().remove(0);
