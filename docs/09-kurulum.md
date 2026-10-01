@@ -20,6 +20,9 @@
 | Confidential öznitelik | Kimlik numarası AD'ye yazılacaksa `employeeNumber` kullanılır ve confidential işaretlenir; `employeeID` işaretlenemez. İşaretlenmemişse kimlik numarasını domain'deki **herkes okur ve hiçbir şey hata vermez**; eşlemeyi açmadan önce kontrol edin: `Get-ADObject "CN=Employee-Number,$((Get-ADRootDSE).schemaNamingContext)" -Properties searchFlags` değerinde 128 (0x80) biti olmalı ([docs/05](05-active-directory.md#hassas-öznitelikler)). Adımlar: `<lab'da doldurulur>` ([ADR-010](decisions/010-kisisel-veri-kimlik-no-telefon.md)) |
 
 ### Zimbra
+
+> Zimbra v1 kapsamında değildir ([ADR-090](decisions/090-zimbra-v1-sonrasina-alindi.md)): bu ön koşullar Zimbra bölümü yapıldığında, v1.x'te geçerli olur. v1 kurulumunda atlanır.
+
 | Ön koşul | Not |
 |---|---|
 | Admin portu 7071 yalnızca worker'ın IP'sine açık | İnternete asla |
@@ -46,7 +49,7 @@ zmprov gd <alanadı> zimbraAuthFallbackToLocal      # boş ya da FALSE olmalı
 zmprov mc <cos> zimbraFeatureChangePasswordEnabled FALSE
 ```
 
-DC'nin CA sertifikası Zimbra'nın güven deposuna eklenir. Kullanıcılar için değişen tek şey, postaya artık Windows parolasıyla girmeleridir; telefon ve Outlook/IMAP istemcilerinde kayıtlı parola bir kez güncellenir. Geri düşme varsayılan olarak kapalıdır; açılmışsa herkesin eski Zimbra parolası ikinci bir geçerli parola olarak kalır, o yüzden değer kontrol edilir. Geçişten önce bir yönetici hesabının yerel doğrulamalı bir alan adında durduğundan emin olun; aksi halde kendinizi de kilitlersiniz. Adımlar `<lab'da doğrulanır — Faz 1d>`. Bu geçiş OpenIAM'den bağımsızdır ve tek başına kazançtır: tek parola, AD'de kapatılan hesabın postaya da girememesi.
+DC'nin CA sertifikası Zimbra'nın güven deposuna eklenir. Kullanıcılar için değişen tek şey, postaya artık Windows parolasıyla girmeleridir; telefon ve Outlook/IMAP istemcilerinde kayıtlı parola bir kez güncellenir. Geri düşme varsayılan olarak kapalıdır; açılmışsa herkesin eski Zimbra parolası ikinci bir geçerli parola olarak kalır, o yüzden değer kontrol edilir. Geçişten önce bir yönetici hesabının yerel doğrulamalı bir alan adında durduğundan emin olun; aksi halde kendinizi de kilitlersiniz. Adımlar `<lab'da doğrulanır — Zimbra bölümü>`. Bu geçiş OpenIAM'den bağımsızdır ve tek başına kazançtır: tek parola, AD'de kapatılan hesabın postaya da girememesi.
 
 ### Kimlik sağlayıcı (OIDC)
 - Groups claim token'da olmalı; altı yönetim grubu ([ADR-005](decisions/005-yonetim-girisi-oidc.md), [ADR-019](decisions/019-ilk-parola-teslimi.md)).

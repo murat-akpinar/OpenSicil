@@ -5,7 +5,7 @@ Kurallar:
 - Her kutucukta en az bir ölçülebilir kabul kriteri vardır.
 - **Her fazın (ve alt fazın, ek hedef sistemin) son kutucuğu güvenlik ve test kapanışıdır.** Atlanamaz, geçmeden sonraki faza geçilmez.
 - Kapanış kutucuğundaki `<...>` yer tutucuları, `docs/08-gereksinimler.md` → 🟡 Kurulumda kararlaştırılacak listesindeki test/format/lint/kapsam kararları verilince doldurulur.
-- **Ek Hedef Sistem** bölümleri (Zimbra ve ileride Carbonio) "Faz" olarak numaralanmaz: AD (Faz 3) çekirdektir, hedef sistemler onun üstüne eklenir. Ama Faz 4 (İşletme) ve Faz 5 (Mevcut kurum), ilgili hedef sistem bitmeden o sistemi kapsamaz — bkz. her ikisinin başındaki not.
+- **Ek Hedef Sistem** bölümleri (Zimbra ve ileride Carbonio) "Faz" olarak numaralanmaz ve **dosyanın sonunda, beş fazdan sonra durur**: AD (Faz 3) çekirdektir, v1 yalnızca AD'dir, hedef sistemler v1.x'te onun üstüne eklenir ([ADR-090](decisions/090-zimbra-v1-sonrasina-alindi.md)). v1'de mutabakat, metrik ve içe aktarma yalnızca AD'yi kapsar; eksik kapsam ekranda ve raporda belirtilir.
 
 ## Faz 1: Altyapı
 
@@ -47,16 +47,6 @@ Kurallar:
 - [x] midPoint denemesi ([ADR-002](decisions/002-hazir-urun-yerine-gelistirme.md))
   - Kabul: lab AD'ye karşı en fazla 1 gün denenir; sonuç ADR-002'nin altına yeni bir karar dosyası olarak yazılır
 - [x] Faz kapanışı: güvenlik ve test
-  - (1a'daki kapanış şablonunun aynısı)
-
-### 1d. Zimbra keşfi
-- [ ] Lab Zimbra'sı ayağa kalkar (sürüm kurulumda kararlaştırılan)
-  - Kabul: JSON Admin API'ye oturum açılıyor
-- [ ] `curl` ile `CreateAccount`, `ModifyAccount`, `DeleteAccount`, liste üyeliği denenir
-  - Kabul: dördü de başarıyla çalışıyor; OpenSicil admin hesabı yönetilen alan adının dışında duruyor ([ADR-057](decisions/057-birincil-kaynak-dogrulamasi.md))
-- [ ] `docs/08`'deki Faz 1d lab sorularının sekizi cevaplanır
-  - Kabul: cevaplar `docs/11-dogrulama-notlari.md`'ye yazıldı; ADR-045/049 ve `docs/06` gerekirse güncellendi
-- [ ] Faz kapanışı: güvenlik ve test
   - (1a'daki kapanış şablonunun aynısı)
 
 ## Faz 2: Kayıt ve model
@@ -185,24 +175,9 @@ Kurallar:
   - Not: security.md gözden geçirmesinde iki bulgu düzeltildi: (1) `web::local_path` `/\host` ile başlayan Referer'ı yerel sayıyordu — tarayıcı ters bölüyü bölü gibi okuduğu için açık yönlendirme oluyordu, artık reddediliyor (test eklendi); (2) i18n bu fazda `first_password::show`'u 51, `identity_web::create`'i 55 satıra çıkarmıştı — `FirstPasswordTemplate::new`, `form_error` (altı yerde tekrar eden iki satırlık hata render'ı) ve `duplicate_person` ayrıldı
   - Not: 50 satır sınırını aşan dört fonksiyon bu fazdan önce de aşıyordu, devredildi (önceki kapanışların sayımı yalnızca `engine::sources`'ı yakalamıştı): `backend/src/identity.rs::load_accounts` (53), `worker/src/engine.rs::sources` (52), `worker/src/engine.rs::issue_first_password` (55), `worker/src/model.rs::load_link` (51). Dördü de doğrusal, bilişsel karmaşıklığı düşük; aşım rustfmt'in çok satırlı imza/destructuring düzeninden geliyor. Kapsam dışı oldukları için bu kutucukta bölünmediler, 3f kapanışında bölünür
 
-## Ek Hedef Sistem: Zimbra
-
-> AD (Faz 3) çekirdektir; bu bölüm onun üstüne eklenir, "Faz" olarak numaralanmaz. Ama Faz 4 (İşletme) ve Faz 5 (Mevcut kurum) bu bölüm bitmeden Zimbra'yı kapsamaz — mutabakat raporu ve sahiplenme yalnızca AD üstünde çalışır.
-
-- [ ] Kayıtlı yanıt stub'ı ile connector testleri ([ADR-027](decisions/027-test-stratejisi-ve-lab.md))
-- [ ] Gerçek Zimbra connector'ı: parolasız hesap açma ([ADR-057](decisions/057-birincil-kaynak-dogrulamasi.md))
-- [ ] COS ve dağıtım listesi kataloğu, liste üyeliği yönetimi
-- [ ] Yaşam döngüsü karşılıkları: hesap aç/girişe kapat/sil
-- [ ] Ayrılışta kullanıcının kendi yönlendirme/filtresi temizlenir, gecikmeli otomatik yanıt, devir yöneticisine yönlendirme ([ADR-045](decisions/045-ayrilan-postasi-yonlendirme.md), [ADR-049](decisions/049-ayrilan-postasi-kullanici-yonlendirmesi-ve-gecikme.md))
-- [ ] Ad üretimine Zimbra çakışma kontrolü eklenir; erişilemezken atlanır ([ADR-058](decisions/058-zimbra-erisilemezken-ad-uretimi.md))
-- [ ] Kapanış: güvenlik ve test
-  - (1a'daki kapanış şablonunun aynısı)
-
-<!-- İleride: Ek Hedef Sistem: Carbonio CE (F-41, v1.x adayı) — lab doğrulaması sonrası buraya aynı yapıda eklenir. -->
-
 ## Faz 4: İşletme
 
-> Zimbra bölümü bitmemişse mutabakat raporu ve metrik ucu yalnızca AD'yi kapsar; eksik kapsam ekranda/raporda belirtilir.
+> Zimbra v1'den sonra geldiği için ([ADR-090](decisions/090-zimbra-v1-sonrasina-alindi.md)) mutabakat raporu ve metrik ucu v1'de yalnızca AD'yi kapsar; eksik kapsam ekranda/raporda belirtilir.
 
 - [ ] Okuma şeridi: mutabakat, katalog yenileme, toplu yönetime alma fark hesabı ayrı görevde, sayaca dokunmaz ([ADR-051](decisions/051-okuma-seridi.md))
 - [ ] Mutabakat raporu: gece ve istendiğinde, "yeniden uygula" ile (F-13)
@@ -218,7 +193,7 @@ Kurallar:
 
 ## Faz 5: Mevcut kurum
 
-> Sahiplenme ve mutabakat Zimbra hesaplarını da kapsaması için Zimbra bölümünün bitmiş olması gerekir.
+> Sahiplenme ve mutabakat v1'de yalnızca AD hesaplarını kapsar; Zimbra hesapları Zimbra bölümünde eklenir ([ADR-090](decisions/090-zimbra-v1-sonrasina-alindi.md)).
 
 - [ ] CSV ile toplu kimlik içe aktarma (kolon ve ipucu kuralları — [ADR-023](decisions/023-ice-aktarma-ipucu-ve-kolon-kurallari.md), [ADR-030](decisions/030-ayrilisi-geri-alma-yikici.md))
 - [ ] Sicil no değişimi önerisi, tarihli ek role dokunmama kuralı ([ADR-055](decisions/055-netlestirmeler-onay-csv-operator-parola.md))
@@ -226,4 +201,31 @@ Kurallar:
   - Not: tekil sahiplenme 3e'de zaten var
 - [ ] Faz kapanışı: güvenlik ve test
   - (1a'daki kapanış şablonunun aynısı)
-  - Kabul ek: "v1 hazır" — ilk beş faz + Zimbra bölümü sıfırdan kurulan ve mevcut personeli olan kurum için tek başına kullanılabilir
+  - Kabul ek: **"v1 hazır"** — ilk beş faz, sıfırdan kurulan ve mevcut personeli olan kurum için AD üstünde tek başına kullanılabilir ([ADR-090](decisions/090-zimbra-v1-sonrasina-alindi.md): Zimbra v1'e dahil değil)
+
+---
+
+## Ek Hedef Sistem: Zimbra
+
+> **v1'den sonra.** AD (Faz 3) çekirdektir, v1 yalnızca AD'dir; bu bölüm v1.x'in ilk işidir ve beş faz bittikten sonra başlar ([ADR-090](decisions/090-zimbra-v1-sonrasina-alindi.md)). "Faz" olarak numaralanmaz. Tasarım hazır ve dondurulmuş durumda: [docs/06](06-zimbra.md), [docs/09](09-kurulum.md) Zimbra ön koşulları, [docs/08](08-gereksinimler.md)'in sekiz Zimbra lab sorusu, ADR-024/045/049/057/058. Bu bölüm bitince mutabakat, metrik ucu, sahiplenme ve CSV Zimbra'yı da kapsayacak şekilde genişler.
+
+### Keşif (eski Faz 1d; hiç yapılmadı, buraya taşındı)
+- [ ] Lab Zimbra'sı ayağa kalkar (OSE 10 paketi yok: üçüncü taraf derleme ya da ayrı VM — [ADR-069](decisions/069-kurulum-crate-ve-arac-secimleri.md))
+  - Kabul: JSON Admin API'ye oturum açılıyor
+- [ ] `curl` ile `CreateAccount`, `ModifyAccount`, `DeleteAccount`, liste üyeliği denenir
+  - Kabul: dördü de başarıyla çalışıyor; OpenSicil admin hesabı yönetilen alan adının dışında duruyor ([ADR-057](decisions/057-birincil-kaynak-dogrulamasi.md))
+- [ ] `docs/08`'deki Zimbra lab sorularının sekizi cevaplanır
+  - Kabul: cevaplar `docs/11-dogrulama-notlari.md`'ye yazıldı; ADR-045/049 ve `docs/06` gerekirse güncellendi
+
+### Connector ve yaşam döngüsü
+- [ ] Kayıtlı yanıt stub'ı ile connector testleri ([ADR-027](decisions/027-test-stratejisi-ve-lab.md))
+- [ ] Gerçek Zimbra connector'ı: parolasız hesap açma ([ADR-057](decisions/057-birincil-kaynak-dogrulamasi.md))
+- [ ] COS ve dağıtım listesi kataloğu, liste üyeliği yönetimi
+- [ ] Yaşam döngüsü karşılıkları: hesap aç/girişe kapat/sil
+- [ ] Ayrılışta kullanıcının kendi yönlendirme/filtresi temizlenir, gecikmeli otomatik yanıt, devir yöneticisine yönlendirme ([ADR-045](decisions/045-ayrilan-postasi-yonlendirme.md), [ADR-049](decisions/049-ayrilan-postasi-kullanici-yonlendirmesi-ve-gecikme.md))
+- [ ] Ad üretimine Zimbra çakışma kontrolü eklenir; erişilemezken atlanır ([ADR-058](decisions/058-zimbra-erisilemezken-ad-uretimi.md))
+- [ ] Mutabakat, metrik ucu, sahiplenme ve CSV Zimbra'yı kapsayacak şekilde genişletilir (Faz 4 ve Faz 5'ten devredilen eksik kapsam)
+- [ ] Kapanış: güvenlik ve test
+  - (1a'daki kapanış şablonunun aynısı)
+
+<!-- İleride: Ek Hedef Sistem: Carbonio CE (F-41, v1.x adayı) — lab doğrulaması sonrası buraya aynı yapıda eklenir. -->

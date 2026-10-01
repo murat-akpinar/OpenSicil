@@ -19,6 +19,7 @@
 - MidPoint denemesi yapıldı, ADR-002 kararı degismedi
 - Gösterge panelini v1 kapsamına ekle (ADR-076)
 - Arayüz kabuğu kutucuğu işaretlendi, durum notu
+- Zimbra v1'den sonraya alındı, todo.md'nin sonuna taşındı (ADR-090)
 
 ### Testler
 
