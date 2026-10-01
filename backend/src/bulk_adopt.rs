@@ -100,8 +100,10 @@ pub struct Batch {
     pub primary_role_id: i64,
     pub employment_type: String,
     pub start_date: String,
-    /// AD'deki departman eslesmeyince kullanilacak departman
-    pub fallback_department_id: i64,
+    /// AD'deki departman eslesmeyince kullanilacak departman. Bos birakilabilir:
+    /// AD'nin kendi departmani agacta bulunuyorsa zaten o kullanilir, eslesmeyen
+    /// hesap da uydurma departmanla acilmaktansa atlanir.
+    pub fallback_department_id: Option<i64>,
 }
 
 #[derive(Default)]
@@ -166,7 +168,8 @@ async fn create_one(
     let (given_name, surname) = candidate.names();
     let department = candidate
         .department_id
-        .unwrap_or(batch.fallback_department_id);
+        .or(batch.fallback_department_id)
+        .ok_or("err.department_required")?;
     let form = IdentityForm {
         given_name,
         surname,
@@ -313,11 +316,35 @@ mod tests {
             aead: &[7u8; crate::crypto::KEY_LEN],
             blind_index: &[9u8; crate::crypto::KEY_LEN],
         };
+        // Departman bos birakilabilir: eslesmeyen hesap uydurma departmanla
+        // acilmaktansa atlanir, eslesenler icin alan hic gerekmez
+        let no_fallback = Batch {
+            primary_role_id: role,
+            employment_type: "permanent".to_string(),
+            start_date: "2026-10-01".to_string(),
+            fallback_department_id: None,
+        };
+        let unmatched = adopt(
+            &pool,
+            &keys,
+            "Europe/Istanbul",
+            target,
+            &[ron.id],
+            &no_fallback,
+        )
+        .await
+        .unwrap_or_else(|_| panic!("toplu sahiplenme başarısız"));
+        assert!(unmatched.created.is_empty());
+        assert_eq!(
+            unmatched.skipped,
+            vec![("ron.weasley".to_string(), "err.department_required")]
+        );
+
         let batch = Batch {
             primary_role_id: role,
             employment_type: "permanent".to_string(),
             start_date: "2026-10-01".to_string(),
-            fallback_department_id: department,
+            fallback_department_id: Some(department),
         };
         let selected: Vec<i64> = found.iter().map(|c| c.id).collect();
         let outcome = adopt(&pool, &keys, "Europe/Istanbul", target, &selected, &batch)

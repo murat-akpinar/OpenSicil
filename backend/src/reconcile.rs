@@ -297,11 +297,9 @@ async fn adopt(
 
 /// Partinin ortak alanlari; AD'de karsiligi olmayan ya da guvenilmeyen degerler.
 fn batch_from(f: &crate::org_web::Fields) -> Result<crate::bulk_adopt::Batch, &'static str> {
-    let department = f
-        .get("department_id")
-        .trim()
-        .parse::<i64>()
-        .map_err(|_| "err.department_required")?;
+    // Departman isteğe bağlı: AD'nin kendi `department` değeri ağaçta bulunuyorsa
+    // o kullanılır, bu alan yalnızca eşleşmeyen satırlar için (ADR-102).
+    let department = f.opt_i64("department_id");
     let role = f
         .get("primary_role_id")
         .trim()

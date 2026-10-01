@@ -85,7 +85,7 @@ impl Fields {
             .collect()
     }
 
-    fn opt_i64(&self, key: &str) -> Option<i64> {
+    pub(crate) fn opt_i64(&self, key: &str) -> Option<i64> {
         self.get(key).trim().parse().ok()
     }
 

@@ -64,8 +64,8 @@
       </div>
       <div class="field">
         <label class="label" for="adopt-dept">{{ lang.t("adopt.fallback_department") }}</label>
-        <select class="input" id="adopt-dept" name="department_id" required>
-          <option value="">{{ lang.t("common.select") }}</option>
+        <select class="input" id="adopt-dept" name="department_id">
+          <option value="">—</option>
           {% for d in departments %}<option value="{{ d.id }}">{{ d.label }}</option>{% endfor %}
         </select>
         <span class="hint">{{ lang.t("adopt.fallback_department_hint") }}</span>
