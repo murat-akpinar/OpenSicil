@@ -118,19 +118,19 @@ Birincil rol  →  Departman  →  Üst departmanlar (yakından köke)  →  Hed
 - Katalog, worker'ın hedef sistemi okumasıyla dolar. Sadece yönetilen kapsamın içindeki nesneler katalog olabilir ([ADR-014](decisions/014-yonetim-kapsami-ve-toplu-degisiklik-freni.md)).
 - Her öğe değişmeyen ID'siyle tutulur (AD'de objectGUID). Ad ve DN sadece gösterim içindir ve katalog yenilendikçe güncellenir. Bir OU yeniden adlandırılsa veya grup taşınsa bile roller bozulmaz.
 - Hedef sistemde artık bulunamayan öğe **kayıp** olarak işaretlenir. Onu kullanan roller ekranda uyarı gösterir, motor bu öğe için işlem üretmez. v1'de kayıp öğe her rolde elle değiştirilir; tek işlemde yenisiyle değiştirme v2'dedir (F-39).
-- Ayrıcalıklı gruplar ve OpenIAM'in kendi yönetim grupları kataloğa **hiç alınamaz**.
+- Ayrıcalıklı gruplar ve OpenSicil'in kendi yönetim grupları kataloğa **hiç alınamaz**.
 
 ## Motor neye dokunur
 
 Yalnızca iki koşul birlikte sağlandığında işlem yapılır:
 
-1. **Hesap bağlı ve yönetiliyor:** OpenIAM'in açtığı ya da sahiplenip yönetime aldığı hesap. **Gözlem** modundaki bağlantıda motor farkı hesaplar ve gösterir ama uygulamaz ([ADR-018](decisions/018-ice-aktarma-ve-sahiplenme.md)).
+1. **Hesap bağlı ve yönetiliyor:** OpenSicil'in açtığı ya da sahiplenip yönetime aldığı hesap. **Gözlem** modundaki bağlantıda motor farkı hesaplar ve gösterir ama uygulamaz ([ADR-018](decisions/018-ice-aktarma-ve-sahiplenme.md)).
 2. **Öğe katalogda:** Grup veya liste katalogda kayıtlı.
 
 Sonuçları:
-- Katalogdaki bir gruba elle eklenmiş, OpenIAM'e bağlı olmayan kişilere dokunulmaz. Mevcut personel bu sayede ilk gün kesinti yaşamaz.
+- Katalogdaki bir gruba elle eklenmiş, OpenSicil'e bağlı olmayan kişilere dokunulmaz. Mevcut personel bu sayede ilk gün kesinti yaşamaz.
 - Bağlı bir hesaba katalog dışından elle eklenmiş gruplar kaldırılmaz, mutabakat raporunda görünür.
-- Bağlı bir hesaba katalogdaki bir grup elle eklenmişse ve rolünde yoksa, o kimlik için worker bir sonraki kez çalıştığında kaldırılır. Katalogdaki öğeler için kaynak OpenIAM'dir. Kişi sayfası bu üyelikleri "elle eklenmiş, sonraki işte kaldırılacak" olarak gösterir; kalıcı olacaksa role ya da bitiş tarihli ek role alınır.
+- Bağlı bir hesaba katalogdaki bir grup elle eklenmişse ve rolünde yoksa, o kimlik için worker bir sonraki kez çalıştığında kaldırılır. Katalogdaki öğeler için kaynak OpenSicil'dir. Kişi sayfası bu üyelikleri "elle eklenmiş, sonraki işte kaldırılacak" olarak gösterir; kalıcı olacaksa role ya da bitiş tarihli ek role alınır.
 - Hedefte elle pasifleştirilmiş bağlı hesap geri açılmaz; etkinleştirme yalnızca kimlik durumu geçişinde yapılır, hesap mutabakatta "elle pasifleştirilmiş" olarak görünür ([ADR-032](decisions/032-elle-pasiflestirme-korunur.md)).
 - Hesaplanamayan bileşene dokunulmaz: hedefte bulunamayan bağlı hesap yeniden açılmaz ("kayıp hesap" bulgusu; Recycle Bin'den geri alınırsa GUID aynıdır ve bağlantı canlanır), bu hedefte hesabı olmayan etkin yöneticinin `manager` özniteliği temizlenmez ([ADR-040](decisions/040-motor-belirsiz-degere-dokunmaz.md)).
 

@@ -19,7 +19,7 @@ Yeni bir olgu hatırlandığında önce buraya **olgu olarak** yazılır ("bizde
 |---|---|---|---|
 | 1 | Kişi işe gelir; İK ad, soyad, kimlik no, telefon ve birimi girer, "parolanız bu" der; kişi o dakikadan itibaren çalışabilmelidir. Ürünün hedef sahnesi budur | Tek adımlı "kaydet ve ilk parolayı ver", okunabilir parola, N-13 ([ADR-056](decisions/056-ise-baslama-gunu-akisi.md)). Replikasyon ve ilk giriş kanalı ürünün dışında ([docs/09](09-kurulum.md#aynı-dakika-giriş)) | karar (yazıldı) |
 | 2 | BT, AD'de hesabı **elle** açar; sonra Zimbra admin panelinden **aynı adla** mailbox'ı elle açar | Ürünün var olma nedeni. Mevcut hesaplar CSV + sahiplenmeyle bağlanır; adlar aynı olduğu için ipucu `kullanıcıadı` ve `kullanıcıadı@alanadı` ([docs/09](09-kurulum.md#bugün-hesapları-elle-açan-kurum)) | karşılanıyor |
-| 3 | Zimbra'da hesap açılırken **parola belirlenmez**; adlar aynı olduğu için giriş LDAP üzerinden AD'de doğrulanır | [ADR-009](decisions/009-parola-yonetimi.md) ön koşulu sağlanıyor. Bu pratik tasarımı düzeltti: OpenIAM de Zimbra hesabını **parolasız** açar; yerel parolası olmayan hesapta geri düşecek bir şey yoktur ([ADR-057](decisions/057-birincil-kaynak-dogrulamasi.md)) | karar (yazıldı) |
+| 3 | Zimbra'da hesap açılırken **parola belirlenmez**; adlar aynı olduğu için giriş LDAP üzerinden AD'de doğrulanır | [ADR-009](decisions/009-parola-yonetimi.md) ön koşulu sağlanıyor. Bu pratik tasarımı düzeltti: OpenSicil de Zimbra hesabını **parolasız** açar; yerel parolası olmayan hesapta geri düşecek bir şey yoktur ([ADR-057](decisions/057-birincil-kaynak-dogrulamasi.md)) | karar (yazıldı) |
 
 ## Henüz bilinmeyenler
 
@@ -40,7 +40,7 @@ Bir sonraki gözden geçirmeden önce doldurulursa bulgular tahmine değil olguy
 - [ ] Soyadı değişen personelin hesabı ve adresi bugün elle yeniden adlandırılıyor mu, takma ad mı ekleniyor ([docs/09](09-kurulum.md#ayarlar-ve-öneriler) "soyad değişimi" notu; F-25 v2'de)
 - [ ] AD hesabı olup mailbox'ı olmayan (ya da tersi) personel var mı; yönetime almada rolün "hesap açılsın" ayarı buna göre verilir ([docs/04](04-yasam-dongusu.md#mevcut-personel-içe-aktarma-ve-sahiplenme))
 - [ ] Uzun izne (doğum, askerlik, ücretsiz izin) çıkanın hesabı bugün kapatılıyor mu; kapatılmıyorsa askı bu kurumda kullanılmaz ([ADR-053](decisions/053-tarihli-aski.md))
-- [ ] OpenIAM'in çalışacağı sunucunun ve PostgreSQL'in yedeğini kim, ne sıklıkla alacak ([docs/09](09-kurulum.md#yedekten-dönüş))
+- [ ] OpenSicil'in çalışacağı sunucunun ve PostgreSQL'in yedeğini kim, ne sıklıkla alacak ([docs/09](09-kurulum.md#yedekten-dönüş))
 
 ## Sahne yürütme sonuçları (son tarama, 2026-09-19)
 
@@ -57,7 +57,7 @@ On sahne tasarımın içinden adım adım yürütüldü (form alanı → kayıt 
 | 7 | BT, AD'de elle değişiklik yaptı | Grup, taşıma, kapatma, silme karşılanıyor. Sessiz kalan: **elle yeniden adlandırma** (v1'de soyad değişimi yok; eşlenmiş `mail` eski adrese geri yazılır) | doküman: [docs/09](09-kurulum.md#ayarlar-ve-öneriler) "soyad değişimi" notu |
 | 8 | İlk kurulum günü: 300 kişi, hesaplar iki tarafta elle ve aynı adla | Kuru modda delegasyon **sınanamaz** (yazma yok); doküman sınanır diyordu. İpucu kolonunu BT hazırlar | doküman: [docs/09](09-kurulum.md#ayarlar-ve-öneriler) kuru çalıştırma satırı |
 | 9 | Zimbra 4 saat kapalıyken 5 kişi işe başladı | 1. sahneyle aynı bağ: posta sunucusu arızası Windows girişini kesiyordu | karar: [ADR-058](decisions/058-zimbra-erisilemezken-ad-uretimi.md) |
-| 10 | OpenIAM sunucusu çöktü, dünkü yedekten dönüldü | 3. adım "sahiplenin" diyordu, kuru mod sahiplenmeyi reddeder. Yedeğin var olduğu varsayılıyordu, ön koşul yazılı değildi | doküman: [docs/09](09-kurulum.md#yedekten-dönüş), [docs/09](09-kurulum.md#sunucu) |
+| 10 | OpenSicil sunucusu çöktü, dünkü yedekten dönüldü | 3. adım "sahiplenin" diyordu, kuru mod sahiplenmeyi reddeder. Yedeğin var olduğu varsayılıyordu, ön koşul yazılı değildi | doküman: [docs/09](09-kurulum.md#yedekten-dönüş), [docs/09](09-kurulum.md#sunucu) |
 
 **Varsayım denetimi** (yanlışsa sessiz bozulanlar): `lastLogonTimestamp`'ın domain'de kapatılmış olması (`msDS-LogonTimeSyncInterval = 0`) → worker açılışta reddeder ([ADR-060](decisions/060-lastlogontimestamp-on-kosulu-acilista-dogrulanir.md)); `employeeNumber`'ın confidential işaretlenmemiş olması → kontrol komutu [docs/09](09-kurulum.md#active-directory); hibritte pasif OU'nun Entra Connect kapsamı dışında olması, break-glass yöneticinin olmaması, `zimbraAuthFallbackToLocal = TRUE` → docs/09'da tek komut ya da tek soruyla kontrol, ürün denetlemez. Gürültülü bozulanlar (LDAPS, delegasyon, kapsam DN'leri, 7071, admin hesabı, groups claim) bulgu değildir.
 
@@ -65,7 +65,7 @@ On sahne tasarımın içinden adım adım yürütüldü (form alanı → kayıt 
 
 Görüldü, tartıldı, kural yapılmadı. Yeni bir olgu gerektirirse yeniden açılır.
 
-- **Worker'ın açılışta Zimbra alan adı ayarlarını okuması** (`zimbraAuthMech`, geri düşme): tek komutla kontrol docs/09'da var; ayrılanı OpenIAM zaten `locked` yapar, kalan risk yalnızca AD'de elle pasifleştirilen hesaptır.
+- **Worker'ın açılışta Zimbra alan adı ayarlarını okuması** (`zimbraAuthMech`, geri düşme): tek komutla kontrol docs/09'da var; ayrılanı OpenSicil zaten `locked` yapar, kalan risk yalnızca AD'de elle pasifleştirilen hesaptır.
 - **Break-glass yöneticinin worker tarafından denetlenmesi:** IdP'deki yerel hesap worker'dan görünmez, yanlış alarm üretir.
 - **[ADR-048](decisions/048-kayit-iptali-hedefte-dogrulanir.md)'in "AD bağlantısı yoksa `zimbraLastLogonTimestamp`" dalı:** parola AD'de doğrulandığı için yalnızca Zimbra hesabı olan kimlik pratikte giriş yapamaz; dal neredeyse ölü koddur. Faz 3c'de silinmesi değerlendirilir, zararı yok.
 - **Kayıt formu varsayılanları:** hedef sahne beş alan sayar (1. olgu), form sekiz ister (birincil rol, çalışma tipi, başlangıç tarihi). Başlangıç = bugün ve çalışma tipi = kadrolu varsayılanı Faz 3a arayüz işidir; birincil rolü İK seçer (unvan).

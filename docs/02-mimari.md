@@ -2,17 +2,17 @@
 
 ## Ürün nerede duruyor
 
-OpenIAM üç soruyu birbirinden ayırır ve sadece birincisini cevaplar:
+OpenSicil üç soruyu birbirinden ayırır ve sadece birincisini cevaplar:
 
 | Soru | Kim cevaplar |
 |---|---|
-| **Bu kişi hangi sistemlerde hangi hesap ve yetkilere sahip olmalı?** | **OpenIAM** |
+| **Bu kişi hangi sistemlerde hangi hesap ve yetkilere sahip olmalı?** | **OpenSicil** |
 | Bu kişi gerçekten o kişi mi (giriş, MFA)? | IdP: Keycloak, Entra ID, AD'nin kendisi |
 | Bu istek bu uygulamaya geçebilir mi? | Uygulamanın kendisi veya OpenBerat gibi bir IAP |
 
 ```mermaid
 flowchart LR
-    ik["İK / BT operatörü"] -->|OIDC ile giriş| openiam["OpenIAM"]
+    ik["İK / BT operatörü"] -->|OIDC ile giriş| openiam["OpenSicil"]
     openiam -->|"hesap, OU, grup"| ad[("Active Directory")]
     openiam -->|"mailbox, COS, liste"| zimbra[("Zimbra")]
     ad -->|"LDAP federation"| kc["Keycloak (IdP)"]
@@ -21,7 +21,7 @@ flowchart LR
     berat -->|"AD grubuna göre izin"| apps["Uygulamalar"]
 ```
 
-OpenIAM uygulamalara doğrudan dokunmaz. Uygulama erişimi AD grubu üzerinden verilir ([ADR-008](decisions/008-uygulama-yetkileri-ad-gruplari.md)). OpenBerat bu desenin bir örneğidir, ön koşulu değildir.
+OpenSicil uygulamalara doğrudan dokunmaz. Uygulama erişimi AD grubu üzerinden verilir ([ADR-008](decisions/008-uygulama-yetkileri-ad-gruplari.md)). OpenBerat bu desenin bir örneğidir, ön koşulu değildir.
 
 ## Bileşenler
 
@@ -62,7 +62,7 @@ Kayıt ile uygulama birbirinden ayrıdır. AD başarılı olup Zimbra başarıs�
 
 ## Olması gereken durum motoru
 
-OpenIAM'de "işe giriş kodu", "ayrılış kodu" ya da "rol değişikliği kodu" yoktur. Tek bir hesaplama vardır:
+OpenSicil'de "işe giriş kodu", "ayrılış kodu" ya da "rol değişikliği kodu" yoktur. Tek bir hesaplama vardır:
 
 ```
 kimlik (tarihler ve işaretlerden türetilen durum, departman, birincil rol, süresi dolmamış ek roller)
@@ -142,14 +142,14 @@ Bir uygulamaya yetki vermenin dört yolu vardır. v1 sadece birincisini kullanı
 
 ### Örnek: OpenBerat
 
-OpenBerat yetkileri `OpenBerat-` önekli AD gruplarından okur. OpenIAM tarafında yapılacak tek şey bu grupları kataloğa almak ve rollere eklemektir:
+OpenBerat yetkileri `OpenBerat-` önekli AD gruplarından okur. OpenSicil tarafında yapılacak tek şey bu grupları kataloğa almak ve rollere eklemektir:
 
 | Rol | AD grupları | Sonuç |
 |---|---|---|
 | Sistem Uzmanı | `GG-Sistem-Uzmanlari`, `GG-VPN`, `OpenBerat-IT` | OpenBerat portalında BT uygulamaları görünür |
 | Muhasebe Uzmanı | `GG-Muhasebe`, `OpenBerat-Finance` | OpenBerat portalında finans uygulamaları görünür |
 
-Ayrılışta OpenIAM AD hesabını kapatır ve grupları kaldırır. OpenBerat da erişimi kendi ölçtüğü süre içinde keser (OpenBerat N-03: en fazla 6 dakika). Acil ayrılışta OpenBerat'ın kill switch'ini çağırmak v2 işidir ([docs/08](08-gereksinimler.md)).
+Ayrılışta OpenSicil AD hesabını kapatır ve grupları kaldırır. OpenBerat da erişimi kendi ölçtüğü süre içinde keser (OpenBerat N-03: en fazla 6 dakika). Acil ayrılışta OpenBerat'ın kill switch'ini çağırmak v2 işidir ([docs/08](08-gereksinimler.md)).
 
 ## Bilerek yazılmayanlar
 

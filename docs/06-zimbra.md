@@ -6,18 +6,18 @@
 |---|---|
 | Worker'dan Zimbra admin portuna (**7071**, HTTPS) erişim; port başka hiçbir yere açık değil | Admin API bu porttadır |
 | Yönetilen domain'de **parola kontrolünün AD'ye devredilmiş olması** (`zimbraAuthMech = ad` ya da `ldap`). E-posta yerel kısmı her zaman kullanıcı adına eşitse bind DN şablonu (`%u@<ad-alanadı>`) yeter ve iki mekanizma da olur. Yerel kısım kullanıcı adından farklı olabiliyorsa mekanizma **`ldap` olmalıdır**: arama filtresi (`zimbraAuthLdapSearchFilter=(mail=%n)`, arama için AD'de salt okuma bir hesap) **`ad` mekanizmasında yok sayılır** | Tek parola AD'de ([ADR-009](decisions/009-parola-yonetimi.md)). Zimbra kodu filtreyi yalnızca `AuthMech.ad != authMech` iken uygular; `%n` her zaman hesabın birincil adresidir (kullanıcının yazdığı değil), AD `mail` özniteliğiyle eşleşir ([Kaynaklar](#kaynaklar)) |
-| Yönetilen domain'de `zimbraAuthFallbackToLocal`'ın **`TRUE` yapılmamış olması** ve COS'ta webmail'den **parola değiştirmenin kapalı olması** (`zimbraFeatureChangePasswordEnabled = FALSE`; isteğe bağlı olarak kurumun AD parola sayfasını gösteren `zimbraChangePasswordURL`) | Geri düşme **varsayılan olarak kapalıdır** (öznitelik boşsa kod `false` okur); risk yalnızca birisi açmışsa vardır. Açıksa: webmail'den parola değiştirmek AD'ye değil Zimbra'nın yerel `userPassword`'üne yazar ve o parola, AD hesabı kapatıldıktan sonra da (SOC'un gece pasifleştirmesi dahil, [ADR-032](decisions/032-elle-pasiflestirme-korunur.md)) postaya girer; yerel paroladan AD doğrulamasına sonradan geçmiş kurumda herkesin eski parolası da aynı şekilde çalışır. Zimbra yönetici kılavuzu AD doğrulaması kullanılıyorsa parola değiştirmenin COS'ta kapatılmasını zaten şart koşar. Yerel parolası hiç olmayan hesapta geri düşme hiçbir koşulda başarılı olamaz; OpenIAM hesapları bu yüzden **parolasız** açar ([ADR-057](decisions/057-birincil-kaynak-dogrulamasi.md)) |
+| Yönetilen domain'de `zimbraAuthFallbackToLocal`'ın **`TRUE` yapılmamış olması** ve COS'ta webmail'den **parola değiştirmenin kapalı olması** (`zimbraFeatureChangePasswordEnabled = FALSE`; isteğe bağlı olarak kurumun AD parola sayfasını gösteren `zimbraChangePasswordURL`) | Geri düşme **varsayılan olarak kapalıdır** (öznitelik boşsa kod `false` okur); risk yalnızca birisi açmışsa vardır. Açıksa: webmail'den parola değiştirmek AD'ye değil Zimbra'nın yerel `userPassword`'üne yazar ve o parola, AD hesabı kapatıldıktan sonra da (SOC'un gece pasifleştirmesi dahil, [ADR-032](decisions/032-elle-pasiflestirme-korunur.md)) postaya girer; yerel paroladan AD doğrulamasına sonradan geçmiş kurumda herkesin eski parolası da aynı şekilde çalışır. Zimbra yönetici kılavuzu AD doğrulaması kullanılıyorsa parola değiştirmenin COS'ta kapatılmasını zaten şart koşar. Yerel parolası hiç olmayan hesapta geri düşme hiçbir koşulda başarılı olamaz; OpenSicil hesapları bu yüzden **parolasız** açar ([ADR-057](decisions/057-birincil-kaynak-dogrulamasi.md)) |
 | Yönetilen domain'de **auto-provisioning'in kapalı olması** | İki ayrı hesap açan olursa çakışma çıkar (aşağıda) |
-| OpenIAM'e özel bir admin hesabı | [Admin hesabı](#admin-hesabı) |
+| OpenSicil'e özel bir admin hesabı | [Admin hesabı](#admin-hesabı) |
 
-Parola kontrolü AD'ye devredilse bile hesabın Zimbra'da da var olması gerekir. Zimbra dokümanı bunu açıkça söyler: kullanıcılar hem Zimbra'nın kendi LDAP'ında hem harici dizinde bulunmalıdır. OpenIAM'in Zimbra'da hesap açmasının nedeni budur.
+Parola kontrolü AD'ye devredilse bile hesabın Zimbra'da da var olması gerekir. Zimbra dokümanı bunu açıkça söyler: kullanıcılar hem Zimbra'nın kendi LDAP'ında hem harici dizinde bulunmalıdır. OpenSicil'in Zimbra'da hesap açmasının nedeni budur.
 
-Zimbra AD'de doğrularken hesabı ya bind DN şablonundan (`zimbraAuthLdapBindDn`; `%n` = birincil adres, `%u` = yerel kısım, `%d` = alan adı, `%D` = `dc=…` biçimi) ya da arama filtresinden bulur. E-posta yerel kısmı kullanıcı adından farklı olabilir: uzunluk kısaltmasında `a.karaosmanoglu` / `abdurrahman.karaosmanoglu` ([ADR-011](decisions/011-kullanici-adi-ve-eposta.md)); bind DN şablonu bu durumda yanlış hesabı arar. Kısaltma üretebilen şablonlarda ön koşul bu yüzden **`ldap` mekanizması** ve `mail` üzerinden arama filtresidir; AD `mail` özniteliği varsayılan eşlemede zaten yazılır. Hesap başına `zimbraAuthLdapExternalDn` ikisini de ezer; bazı kurumlar bağlamayı böyle yapar. OpenIAM bu özniteliği v1'de yazmaz; öyle çalışan bir kurum çıkarsa motorun bağlı AD hesabından okuyup yazdığı bir öznitelik olarak eklenir (eşleme satırıyla asla: hesabın doğrulamasını başka bir AD hesabına bağlamak mailbox'ı devretmektir). Şablonu kısaltma üretmeyen ve mevcut bind şablonuyla çalışan kurum hiçbir şeyi değiştirmek zorunda değildir.
+Zimbra AD'de doğrularken hesabı ya bind DN şablonundan (`zimbraAuthLdapBindDn`; `%n` = birincil adres, `%u` = yerel kısım, `%d` = alan adı, `%D` = `dc=…` biçimi) ya da arama filtresinden bulur. E-posta yerel kısmı kullanıcı adından farklı olabilir: uzunluk kısaltmasında `a.karaosmanoglu` / `abdurrahman.karaosmanoglu` ([ADR-011](decisions/011-kullanici-adi-ve-eposta.md)); bind DN şablonu bu durumda yanlış hesabı arar. Kısaltma üretebilen şablonlarda ön koşul bu yüzden **`ldap` mekanizması** ve `mail` üzerinden arama filtresidir; AD `mail` özniteliği varsayılan eşlemede zaten yazılır. Hesap başına `zimbraAuthLdapExternalDn` ikisini de ezer; bazı kurumlar bağlamayı böyle yapar. OpenSicil bu özniteliği v1'de yazmaz; öyle çalışan bir kurum çıkarsa motorun bağlı AD hesabından okuyup yazdığı bir öznitelik olarak eklenir (eşleme satırıyla asla: hesabın doğrulamasını başka bir AD hesabına bağlamak mailbox'ı devretmektir). Şablonu kısaltma üretmeyen ve mevcut bind şablonuyla çalışan kurum hiçbir şeyi değiştirmek zorunda değildir.
 
 ## Sürüm ve edisyon
 
 - Zimbra'nın resmi açık kaynak kurulum paketleri **8.8.15'te bitti** (teknik rehberlik sonu 2024-12-31); Zimbra 9'un ikilileri yalnızca Network Edition lisansıyla verildi. 9.0 ve 10.x açık kaynak olarak **sadece kaynak kod**dur ve `zm-build` ile derlenir (son: 10.1.20, 2026-07-20; 10.0 hattının genel desteği 2025-06-30'da bitti). Hazır 10.x paketleri Zimbra'nın desteklemediği üçüncü taraf derlemelerdir.
-- OpenIAM belirli bir sürüme değil, **Admin SOAP API işlemlerine** bağlıdır. Kullanılan işlemler 10.1 API referansında mevcut.
+- OpenSicil belirli bir sürüme değil, **Admin SOAP API işlemlerine** bağlıdır. Kullanılan işlemler 10.1 API referansında mevcut.
 - Lab seçenekleri bu yüzden üçtür: kaynaktan derlenmiş 10.1, üçüncü taraf 10.1 derlemesi, ya da Carbonio CE. Kurulumda kararlaştırılır ([docs/08](08-gereksinimler.md)).
 - **Carbonio CE (Zextras) aynı Admin SOAP API'sini korur:** resmi API referansı `CreateAccount`'u `urn:zimbraAdmin` ad alanında listeler, kaynak kodu `/service/admin/soap/` ucunu ve 7071 portunu taşır. v1'de doğrulanmış hedef değildir; aynı connector'la desteklenmesi v1.x adayıdır (F-41, [ADR-057](decisions/057-birincil-kaynak-dogrulamasi.md)). Paketli ve bakımı süren tek açık kaynak dal bu olduğu için Zimbra OSE kullanan kurumların göç yönü burasıdır.
 
@@ -49,9 +49,9 @@ Zimbra AD'de doğrularken hesabı ya bind DN şablonundan (`zimbraAuthLdapBindDn
 
 **Açık oturumlar:** Durum `active` dışına çıkınca mevcut oturum jetonu bir sonraki SOAP/REST isteğinde `AUTH_EXPIRED("account not active")` ile reddedilir; IMAP her komuttan önce durumu yeniden kontrol eder ve bağlantıyı düşürür. İstisna: komut göndermeden `IDLE`'da bekleyen IMAP bağlantısı bir sonraki komuta kadar açık kalır. İki kontrol de mailbox sunucusunun önbellekteki hesap nesnesini okur; çok sunuculu kurulumda gecikme önbellek süresi kadardır (lab'da ölçülür).
 
-### OpenIAM durumlarının karşılığı
+### OpenSicil durumlarının karşılığı
 
-| OpenIAM | Zimbra | Not |
+| OpenSicil | Zimbra | Not |
 |---|---|---|
 | bekliyor | `locked` | Başlangıçtan önce gelen posta kaybolmaz |
 | aktif | `active` | |
@@ -59,7 +59,7 @@ Zimbra AD'de doğrularken hesabı ya bind DN şablonundan (`zimbraAuthLdapBindDn
 | ayrıldı | `locked` (varsayılan) veya `closed` | Kurulum ayarı. `locked`ta posta gelmeye devam eder; motor 24 saat sonra otomatik yanıt yazar, ayar açıksa devir yöneticisinin bağlı adresine yönlendirir ([ADR-045](decisions/045-ayrilan-postasi-yonlendirme.md), [ADR-049](decisions/049-ayrilan-postasi-kullanici-yonlendirmesi-ve-gecikme.md)); `closed` gönderene hata döndürür, yönlendirme yazılmaz. İki durumda da kullanıcının kendi yönlendirmesi ve filtresi ayrılış anında temizlenir |
 | silindi | hesap silinir | Varsayılan olarak otomatik silinmez; "silinmeyi bekliyor" listesinden onayla silinir, arşivleme onaydan önce kurumun işidir ([ADR-024](decisions/024-hedef-sistem-basina-saklama-suresi.md)) |
 
-**`lockout` sapma sayılmaz.** Olması gereken durum `active` iken hesap `lockout` durumundaysa OpenIAM dokunmaz. AD'deki kilitlenme kuralıyla aynı gerekçe: kaba kuvvet korumasını ortadan kaldırmamak.
+**`lockout` sapma sayılmaz.** Olması gereken durum `active` iken hesap `lockout` durumundaysa OpenSicil dokunmaz. AD'deki kilitlenme kuralıyla aynı gerekçe: kaba kuvvet korumasını ortadan kaldırmamak.
 
 Elle verilmiş `locked`, `closed` veya `maintenance` da geri alınmaz: hesap yalnızca kimlik durumu geçişinde `active` yapılır ([ADR-032](decisions/032-elle-pasiflestirme-korunur.md)).
 
@@ -78,15 +78,15 @@ Elle verilmiş `locked`, `closed` veya `maintenance` da geri alınmaz: hesap yal
 
 - Yetki devri (sadece belirli domain üzerinde yetkili admin) **resmi olarak Network Edition özelliğidir**.
 - Topluluk kaynaklarında, `domainAdminRights` yetkisiyle oluşturulan domain adminlerinin OSE 8.x'te çalıştığı raporlanıyor. Bu yol resmi olarak desteklenmiyor.
-- **OpenIAM'in admin hesabı yönetilen alan adında durmaz.** 9.0.0 P40, 10.0.8 ve sonrasında admin hesapları da `zimbraAuthFallbackToLocal`'a uyar; AD doğrulamalı bir alan adındaki admin hesabı artık yerel parolasıyla giremez (eski sürümlerde girebiliyordu). Hesap, yerel doğrulamalı ayrı bir alan adında açılır; ya da yönetilen alan adında yönetici bağlamı için `zimbraAuthMechAdmin = zimbra` verilir.
-- v1 kararı: Varsayılan olarak **OpenIAM'e özel bir global admin hesabı** kullanılır. Riski sınırlayan şeyler şunlardır: port kısıtı, yönetilen domain kapsamının worker'da uygulanması ve hesabın başka hiçbir işte kullanılmaması. Domain admin ile çalışma, lab'da seçilen sürümde doğrulanırsa desteklenen bir seçenek olarak eklenir.
+- **OpenSicil'in admin hesabı yönetilen alan adında durmaz.** 9.0.0 P40, 10.0.8 ve sonrasında admin hesapları da `zimbraAuthFallbackToLocal`'a uyar; AD doğrulamalı bir alan adındaki admin hesabı artık yerel parolasıyla giremez (eski sürümlerde girebiliyordu). Hesap, yerel doğrulamalı ayrı bir alan adında açılır; ya da yönetilen alan adında yönetici bağlamı için `zimbraAuthMechAdmin = zimbra` verilir.
+- v1 kararı: Varsayılan olarak **OpenSicil'e özel bir global admin hesabı** kullanılır. Riski sınırlayan şeyler şunlardır: port kısıtı, yönetilen domain kapsamının worker'da uygulanması ve hesabın başka hiçbir işte kullanılmaması. Domain admin ile çalışma, lab'da seçilen sürümde doğrulanırsa desteklenen bir seçenek olarak eklenir.
 
 ## Bilerek kullanılmayan yollar
 
 | Yol | Neden kullanılmıyor |
 |---|---|
-| **Zimbra auto-provisioning** (EAGER, LAZY, MANUAL; 8.0'dan beri) | Hesabı AD'den kendisi açar ama **hiçbir modu hesabı kapatmaz veya silmez**. COS, liste ve durum yönetimi de yapmaz. OpenIAM'le birlikte açık kalırsa aynı kişi için iki ayrı hesap açan olur |
-| **Zimbra'nın iç LDAP'ına doğrudan yazmak** | midPoint'in Zimbra rehberi bu yolu kullanıyor. Resmi Admin API'yi atladığı için OpenIAM kullanmaz |
+| **Zimbra auto-provisioning** (EAGER, LAZY, MANUAL; 8.0'dan beri) | Hesabı AD'den kendisi açar ama **hiçbir modu hesabı kapatmaz veya silmez**. COS, liste ve durum yönetimi de yapmaz. OpenSicil'le birlikte açık kalırsa aynı kişi için iki ayrı hesap açan olur |
+| **Zimbra'nın iç LDAP'ına doğrudan yazmak** | midPoint'in Zimbra rehberi bu yolu kullanıyor. Resmi Admin API'yi atladığı için OpenSicil kullanmaz |
 | **`zmprov` komutunu SSH ile çalıştırmak** | Sunucuya kabuk erişimi, metin çıktısı ayrıştırma ve komut enjeksiyonu riski |
 | **ConnId Zimbra Bundle** | Java ve neredeyse bakımsız ([docs/01](01-mevcut-cozumler.md)) |
 

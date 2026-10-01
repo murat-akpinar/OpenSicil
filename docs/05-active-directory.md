@@ -6,17 +6,17 @@ Windows Server AD ve Samba AD için geçerlidir. Farklılıklar lab'da ölçüle
 
 | Ön koşul | Neden |
 |---|---|
-| Domain controller'da **LDAPS (636)** ve worker'ın güvendiği bir CA sertifikası | Parola yalnızca şifreli bağlantıda yazılabilir; OpenIAM düz LDAP konuşmaz (N-10) |
-| OpenIAM'e özel bir **servis hesabı** ve aşağıdaki delegasyonlar | En az yetki. Parolası süresiz ("never expires") ya da yazılı rotasyon adımı: `.env` güncellenir, worker yeniden başlar. Süresi dolan parola ya da CA sertifikası worker'ı **sessizce** durdurur; metrik ucundaki "hedef sistem başına son başarılı bağlantı" değerine alarm kurulur ([docs/02](02-mimari.md#ölçek-ve-dağıtım)) |
+| Domain controller'da **LDAPS (636)** ve worker'ın güvendiği bir CA sertifikası | Parola yalnızca şifreli bağlantıda yazılabilir; OpenSicil düz LDAP konuşmaz (N-10) |
+| OpenSicil'e özel bir **servis hesabı** ve aşağıdaki delegasyonlar | En az yetki. Parolası süresiz ("never expires") ya da yazılı rotasyon adımı: `.env` güncellenir, worker yeniden başlar. Süresi dolan parola ya da CA sertifikası worker'ı **sessizce** durdurur; metrik ucundaki "hedef sistem başına son başarılı bağlantı" değerine alarm kurulur ([docs/02](02-mimari.md#ölçek-ve-dağıtım)) |
 | **Yönetilen kullanıcı OU'ları**, isteğe bağlı bir **pasif OU**, **yönetilen grup OU'ları** | Worker bu kapsamın dışına yazmaz ([ADR-014](decisions/014-yonetim-kapsami-ve-toplu-degisiklik-freni.md)) |
 | Gruplar bir **OU** içinde | `CN=Users`, `CN=Builtin` ve `OU=Domain Controllers` yönetilen kapsam olamaz ([Yasaklı gruplar](#yasaklı-gruplar)). Gruplar `CN=Users` içindeyse önce bir OU'ya taşınır |
-| **Break-glass yönetici:** en az bir `OpenIAM-Admins` üyesi yönetilen kapsam dışında | Yanlış bir ayrılış veya askı yöneticilerin OIDC girişini kilitlemesin ([docs/07](07-guvenlik-ve-kvkk.md#yönetici-hesapları)) |
+| **Break-glass yönetici:** en az bir `OpenSicil-Admins` üyesi yönetilen kapsam dışında | Yanlış bir ayrılış veya askı yöneticilerin OIDC girişini kilitlemesin ([docs/07](07-guvenlik-ve-kvkk.md#yönetici-hesapları)) |
 | **AD Recycle Bin** açık (önerilir) | Yanlış silinen bir hesap geri alınabilir |
 
 ## Bağlantı
 
 - Rust `ldap3` crate'i (0.12) ile yalnızca LDAPS kullanılır. Sertifika doğrulaması kapatılamaz (`set_no_tls_verify` hiç çağrılmaz; varsayılanı zaten `false`); CA sertifikası kuruluma dosya olarak verilir ve `set_connector` / `set_config` ile yüklenir. Crate gereken bütün işlemleri destekler ([docs/11](11-dogrulama-notlari.md)); üç uygulama kuralı vardır: her arama `EntriesOnly` adaptöründen geçer (domain kökünden yapılan ad çakışması araması yönlendirme döndürür, crate'in açık hatası #156 bunda panikler); `objectGUID` hem `bin_attrs` hem `attrs` haritasında aranır; `dn_escape` bütün DN'e değil tek RDN değerine uygulanır.
-- Servis hesabıyla TLS üzerinden simple bind yapılır. DC'de "LDAP imzalama zorunlu" ve `LdapEnforceChannelBinding = 2` olsa da çalışır: Microsoft'un ifadesiyle TLS kanalı imzalama şartını karşılar, channel binding ayarının "TLS üstünde simple bind" oturumuna etkisi yoktur (yalnızca TLS üstündeki SASL bind'ı etkiler); imzalama zorunluluğu düz 389 üstündeki simple bind'ı reddeder, OpenIAM onu zaten konuşmaz.
+- Servis hesabıyla TLS üzerinden simple bind yapılır. DC'de "LDAP imzalama zorunlu" ve `LdapEnforceChannelBinding = 2` olsa da çalışır: Microsoft'un ifadesiyle TLS kanalı imzalama şartını karşılar, channel binding ayarının "TLS üstünde simple bind" oturumuna etkisi yoktur (yalnızca TLS üstündeki SASL bind'ı etkiler); imzalama zorunluluğu düz 389 üstündeki simple bind'ı reddeder, OpenSicil onu zaten konuşmaz.
 - DC adresi **sıralı** bir listedir: ilk adres tercihli DC'dir (öneri: PDC emulator ya da worker'a en yakın site'taki DC), sonrakiler yedektir. Bir iş baştan sona **tek DC'ye, tek bağlantıyla** konuşur; hesabı bir DC'de açıp gruba başka bir DC'de eklemek replikasyon gecikmesinde "nesne yok" hatası üretir. Yedek DC'ye yalnızca işler arasında ve yalnızca tercihli DC'ye bağlanılamadığında geçilir; tur atılmaz ([ADR-016](decisions/016-hedef-olcek-ve-olcekte-calisma.md)). Aksi halde aynı kimliğin art arda iki işi farklı DC'lerden bayat okur ve pasifleştirme gibi işlemleri denetim kaydına iki kez yazar.
 - Yönetilen OU'lar ortam değişkeninde DN olarak verilir; worker başlangıçta her DN'i objectGUID'e çözer, çözemezse AD connector'ı başlamaz, çalışırken GUID'i kullanır. DC'ye o an erişilemiyorsa süreç çıkmaz: connector bekler ve bu kontrolleri bağlantı gelince yapar; Zimbra işleri sürer ([ADR-061](decisions/061-dagitim-sozlesmesi-compose-ve-kubernetes.md)). OU yeniden adlandırılsa kapsam bozulmaz. Aynı açılış kontrolünde domain kökünün `msDS-LogonTimeSyncInterval` değeri okunur; `0` ise (`lastLogonTimestamp` kapatılmış) connector başlamaz ([ADR-060](decisions/060-lastlogontimestamp-on-kosulu-acilista-dogrulanir.md)).
 - Tüm aramalar sayfalıdır; AD tek aramada varsayılan olarak en fazla 1.000 nesne döndürür.
@@ -25,12 +25,12 @@ Windows Server AD ve Samba AD için geçerlidir. Farklılıklar lab'da ölçüle
 ## İşlemler
 
 ### Hesap açma
-Kullanıcı adı ve e-posta AD'ye yazılmadan önce veritabanına kaydedilir; yeniden denemede yeniden üretilmez. Üretilen taban ad AD'de OpenIAM'e bağlı olmayan bir hesapta varsa `n + 1` denenmez, iş "müdahale gerekiyor" durumuna düşer ([ADR-022](decisions/022-kullanici-adi-elle-giris-ve-cakisma.md)). Hesap açma saatlik verme sayacına tabidir ([ADR-050](decisions/050-verme-sayaci-ve-is-butunlugu.md)).
+Kullanıcı adı ve e-posta AD'ye yazılmadan önce veritabanına kaydedilir; yeniden denemede yeniden üretilmez. Üretilen taban ad AD'de OpenSicil'e bağlı olmayan bir hesapta varsa `n + 1` denenmez, iş "müdahale gerekiyor" durumuna düşer ([ADR-022](decisions/022-kullanici-adi-elle-giris-ve-cakisma.md)). Hesap açma saatlik verme sayacına tabidir ([ADR-050](decisions/050-verme-sayaci-ve-is-butunlugu.md)).
 
 **Hedef akış tek bir `add`'dir** ([ADR-057](decisions/057-birincil-kaynak-dogrulamasi.md)): eşlenmiş öznitelikler, `unicodePwd`, `userAccountControl = 514` (normal hesap + pasif), `pwdLastSet = 0` ve biliniyorsa `accountExpires` aynı istekte gönderilir; ardından objectGUID okunup kaydedilir ve grup üyelikleri eklenir. MS-ADTS bunu `user` sınıfı için yasaklamaz, Samba kaynak kodu kabul eder; Faz 1c iki dizinde de çalıştırarak doğrular. AD parolayı reddederse hesap **hiç oluşmaz**; yarım hesap kalmaz. Aşağıdaki dört adım, tek `add` bir dizinde reddedilirse geri dönülecek yoldur; bilinen kusuru, hesap "parola gerekmez" bayrağıyla açıldığı için AD'nin 3. adımda parola politikasını **hiç uygulamamasıdır**.
 
 1. Kullanıcı nesnesi, eşlenmiş özniteliklerle yönetilen OU'da oluşturulur. `userAccountControl` verilmez. AD bu durumda hesabı **pasif ve "parola gerekmez" bayrağıyla** oluşturur (`0x222`).
-2. objectGUID **hemen** okunup OpenIAM'e kaydedilir. Sonraki adımlar yarıda kalırsa yeniden deneme hesabı bu bağlantıyla bulur; "parola gerekmez" bayrağı hâlâ duruyorsa 3. ve 4. adımlar tekrarlanır.
+2. objectGUID **hemen** okunup OpenSicil'e kaydedilir. Sonraki adımlar yarıda kalırsa yeniden deneme hesabı bu bağlantıyla bulur; "parola gerekmez" bayrağı hâlâ duruyorsa 3. ve 4. adımlar tekrarlanır.
 3. Parola ayrı bir değişiklik işlemiyle yazılır. AD karmaşıklık kuralı parolada `sAMAccountName`'i ve görünen adın üç harften uzun parçalarını yasaklar; rastgele parola "ali" ya da "can" içerebilir. Kısıt ihlalinde worker yeni parola üretip en fazla 3 kez yeniden dener ([ADR-055](decisions/055-netlestirmeler-onay-csv-operator-parola.md)). Değer tırnak içindeki parolanın UTF-16LE kodlamasıdır ve bağlantı şifreli olmalıdır. Bu adımda yazılan parola kimseye gösterilmez ve ardından `pwdLastSet = 0` yapılır ([ADR-009](decisions/009-parola-yonetimi.md)).
 4. `userAccountControl` "normal hesap + pasif" yapılır. **"Parola gerekmez" bayrağı kaldırılır**; bu bayrak kalırsa hesap boş parolayla kalabilir.
 5. Bitiş tarihi biliniyorsa `accountExpires` yazılır.
@@ -44,10 +44,10 @@ CN varsayılan olarak `{given} {surname}` olur. Hedef OU'da aynı CN varsa `{giv
 ### Etkinleştirme ve pasifleştirme
 - `userAccountControl` içindeki pasif bayrağı açılır veya kapatılır. Etkinleştirme yalnızca kimlik durumu geçişinde yapılır; elle pasifleştirilmiş hesap, kimlik durumu değişmeden açılan işlerde pasif kalır ve mutabakata düşer ([ADR-032](decisions/032-elle-pasiflestirme-korunur.md)). Pasifleştirme yönünde istisna yoktur.
 - `accountExpires` olması gereken durumun parçasıdır: bitiş tarihi değişince yeniden yazılır, kaldırılınca süresiz (`0`) yazılır; stajyerin kadroya geçişinde eski staj bitişi hesapta kalmaz ([ADR-059](decisions/059-netlestirmeler-operator-geri-alma-aski-bitisi-accountexpires.md)).
-- Hesap kilitlenmesi (`lockoutTime`, yanlış parola denemeleri) ayrı bir durumdur. **OpenIAM kilitli hesabı açmaz ve bunu sapma saymaz.** Aksi halde kaba kuvvet korumasını ortadan kaldırırdı.
+- Hesap kilitlenmesi (`lockoutTime`, yanlış parola denemeleri) ayrı bir durumdur. **OpenSicil kilitli hesabı açmaz ve bunu sapma saymaz.** Aksi halde kaba kuvvet korumasını ortadan kaldırırdı.
 
 ### İlk parola
-Worker önce `pwdLastSet` ve `lastLogonTimestamp` okur. Hesap yalnızca **hiç kullanılmamışsa** ilk parola alır: `pwdLastSet` kontrolü tutuyor (açık modda 0, kapalı modda worker'ın yazdığı değer — [ADR-019](decisions/019-ilk-parola-teslimi.md)) **ve** `lastLogonTimestamp` boş. `lastLogonTimestamp` ilk girişte yazılır ve replikasyona girer; yardım masasının AD'de "sonraki girişte değiştir" işaretlemesi (`pwdLastSet = 0`) kullanımdaki hesabı OpenIAM için "kullanılmamış" yapamaz. İkinci yol, ayrılışı geri alınan kimliktir: bağlantıda worker'ın "ayrılışta parola sıfırlandı" işareti varsa ve `pwdLastSet` kontrolü tutuyorsa ilk parola verilir ([ADR-046](decisions/046-kullanilmamis-hesap-lastlogontimestamp.md)). Başka her durumda iş reddedilir ([ADR-009](decisions/009-parola-yonetimi.md)). Teslim edilen parola okunabilir biçimdedir: 16 karakter, tireyle ayrılmış dört dörtlü, karışan karakterler (`0 O o 1 l I`) olmadan; İK'nın sesli okuduğu ya da kâğıda yazdığı parola ilk denemede doğru yazılabilmelidir ([ADR-056](decisions/056-ise-baslama-gunu-akisi.md)). `unicodePwd` yönetici sıfırlaması olarak tek bir replace işlemiyle yazılır. "İlk girişte değiştir" ayarı açıksa (varsayılan) ardından `pwdLastSet = 0` yapılır ve kullanıcı ilk girişte parolasını değiştirmek zorundadır; kapalıysa AD'nin yazdığı `pwdLastSet` okunup bağlantıya kaydedilir ([ADR-019](decisions/019-ilk-parola-teslimi.md)).
+Worker önce `pwdLastSet` ve `lastLogonTimestamp` okur. Hesap yalnızca **hiç kullanılmamışsa** ilk parola alır: `pwdLastSet` kontrolü tutuyor (açık modda 0, kapalı modda worker'ın yazdığı değer — [ADR-019](decisions/019-ilk-parola-teslimi.md)) **ve** `lastLogonTimestamp` boş. `lastLogonTimestamp` ilk girişte yazılır ve replikasyona girer; yardım masasının AD'de "sonraki girişte değiştir" işaretlemesi (`pwdLastSet = 0`) kullanımdaki hesabı OpenSicil için "kullanılmamış" yapamaz. İkinci yol, ayrılışı geri alınan kimliktir: bağlantıda worker'ın "ayrılışta parola sıfırlandı" işareti varsa ve `pwdLastSet` kontrolü tutuyorsa ilk parola verilir ([ADR-046](decisions/046-kullanilmamis-hesap-lastlogontimestamp.md)). Başka her durumda iş reddedilir ([ADR-009](decisions/009-parola-yonetimi.md)). Teslim edilen parola okunabilir biçimdedir: 16 karakter, tireyle ayrılmış dört dörtlü, karışan karakterler (`0 O o 1 l I`) olmadan; İK'nın sesli okuduğu ya da kâğıda yazdığı parola ilk denemede doğru yazılabilmelidir ([ADR-056](decisions/056-ise-baslama-gunu-akisi.md)). `unicodePwd` yönetici sıfırlaması olarak tek bir replace işlemiyle yazılır. "İlk girişte değiştir" ayarı açıksa (varsayılan) ardından `pwdLastSet = 0` yapılır ve kullanıcı ilk girişte parolasını değiştirmek zorundadır; kapalıysa AD'nin yazdığı `pwdLastSet` okunup bağlantıya kaydedilir ([ADR-019](decisions/019-ilk-parola-teslimi.md)).
 
 `lastLogonTimestamp` iki varsayıma dayanır ([ADR-060](decisions/060-lastlogontimestamp-on-kosulu-acilista-dogrulanir.md)). Birincisi, domain kökündeki `msDS-LogonTimeSyncInterval` `0` ise öznitelik **hiç yazılmaz** ve her hesap kullanılmamış görünür; worker bu değeri açılışta okur ve `0` ise AD connector'ı başlamaz. İkincisi, öznitelik replike olur ama acil replikasyona girmez: başka site'taki DC'de yapılan ilk giriş tercihli DC'de site'lar arası replikasyon süresi kadar görünmez. "İlk girişte değiştir" açıkken bu pencereyi `pwdLastSet` kapatır (parola değişimi PDC emulator'a hemen iletilir); ayar kapalıyken pencere kabul edilmiş bir sınırdır ([docs/09](09-kurulum.md#active-directory)).
 
@@ -71,7 +71,7 @@ Eşlenmiş öznitelik replace ile yazılır. Kaynak boşsa öznitelik silinir ([
 Saklama süresi dolunca hesap GUID'den çözülen DN ile silinir. Recycle Bin açıksa geri alınabilir.
 
 ### Kayıp hesap
-Bağlı hesap GUID ile bulunamıyorsa (biri elle silmiş) motor o hedef için işlem üretmez ve yeniden açmaz; mutabakat "kayıp hesap" bulgusu verir. Kurum hesabı Recycle Bin'den geri alırsa GUID aynıdır ve bağlantı kendiliğinden canlanır; Sistem yöneticisi "bağlantıyı kopar ve yeniden aç" derse aynı kullanıcı adıyla yeni hesap açılır (yeni SID). OpenIAM'in kendi sildiği hesap bağlantıda "silindi" işaretlidir ve geri almada yeniden açılır ([ADR-040](decisions/040-motor-belirsiz-degere-dokunmaz.md), [ADR-024](decisions/024-hedef-sistem-basina-saklama-suresi.md)).
+Bağlı hesap GUID ile bulunamıyorsa (biri elle silmiş) motor o hedef için işlem üretmez ve yeniden açmaz; mutabakat "kayıp hesap" bulgusu verir. Kurum hesabı Recycle Bin'den geri alırsa GUID aynıdır ve bağlantı kendiliğinden canlanır; Sistem yöneticisi "bağlantıyı kopar ve yeniden aç" derse aynı kullanıcı adıyla yeni hesap açılır (yeni SID). OpenSicil'in kendi sildiği hesap bağlantıda "silindi" işaretlidir ve geri almada yeniden açılır ([ADR-040](decisions/040-motor-belirsiz-degere-dokunmaz.md), [ADR-024](decisions/024-hedef-sistem-basina-saklama-suresi.md)).
 
 ### Kapsam dışına taşınmış hesap
 Bağlı hesap GUID ile bulunur ama DN'i yönetilen kullanıcı OU'larının altında değilse (biri elle taşımış) motor hiçbir işlem üretmez; kaynak konteynerde silme yetkisi yoktur ve kapsam kuralı geçerlidir ([ADR-014](decisions/014-yonetim-kapsami-ve-toplu-degisiklik-freni.md)). Mutabakat "kapsam dışı hesap" bulgusu üretir; operatör hesabı yönetilen bir OU'ya geri taşır, sonraki iş normal devam eder. İş başarılı bitmez, "müdahale gerekiyor"a düşer ve zamanlayıcı yenisini açmaz. Kimlik `ayrıldı` ise hesap **açık kalmıştır** (terfi edip BT OU'suna taşınan kişinin ayrılışı tipik örnektir): "ayrılmış ama kapatılamamış" metriği bunu sayar, alarm oraya kurulur ([ADR-052](decisions/052-uygulanamayan-fark.md)).
@@ -95,7 +95,7 @@ Kesin delegasyon adımları kurulum dokümanında, lab'da çalıştırılarak ya
 
 ## Yasaklı gruplar
 
-AD'nin **korunan hesap ve grupları** SDProp süreciyle PDC emulator üzerinde varsayılan olarak 60 dakikada bir AdminSDHolder'daki izinlere sıfırlanır. Bu yüzden bu gruplara verilen delegasyon kalıcı olmaz. OpenIAM buna güvenmez, bu grupları açıkça reddeder.
+AD'nin **korunan hesap ve grupları** SDProp süreciyle PDC emulator üzerinde varsayılan olarak 60 dakikada bir AdminSDHolder'daki izinlere sıfırlanır. Bu yüzden bu gruplara verilen delegasyon kalıcı olmaz. OpenSicil buna güvenmez, bu grupları açıkça reddeder.
 
 Gruplar **ada göre değil SID'e göre** tanınır; Türkçe Windows'ta grup adları farklıdır.
 
@@ -117,9 +117,9 @@ Gruplar **ada göre değil SID'e göre** tanınır; Türkçe Windows'ta grup adl
 | Key Admins | domain RID 526 |
 | Enterprise Key Admins | domain RID 527 |
 
-Ayrıca `adminCount` özniteliği dolu olan her grup reddedilir; SDProp bu özniteliği izinlerini değiştirdiği nesnelere yazar. Öznitelik yapışkandır: gruptan çıkarılan nesnede kendiliğinden temizlenmez. SDProp'u beklememek için yukarıdaki grupların ve OpenIAM yönetim gruplarının iç içe üyesi olan gruplar da reddedilir. Worker bunları `LDAP_MATCHING_RULE_IN_CHAIN` (`memberOf:1.2.840.113556.1.4.1941:=<grup DN>`) ile tek aramada bulur. OpenIAM'in yönetim grupları da reddedilir ([ADR-005](decisions/005-yonetim-girisi-oidc.md)). Sorgunun sonucu worker belleğinde grup başına 5 dakika önbelleklenir; kontrol yine her işlemden önce yapılır ([ADR-016](decisions/016-hedef-olcek-ve-olcekte-calisma.md)).
+Ayrıca `adminCount` özniteliği dolu olan her grup reddedilir; SDProp bu özniteliği izinlerini değiştirdiği nesnelere yazar. Öznitelik yapışkandır: gruptan çıkarılan nesnede kendiliğinden temizlenmez. SDProp'u beklememek için yukarıdaki grupların ve OpenSicil yönetim gruplarının iç içe üyesi olan gruplar da reddedilir. Worker bunları `LDAP_MATCHING_RULE_IN_CHAIN` (`memberOf:1.2.840.113556.1.4.1941:=<grup DN>`) ile tek aramada bulur. OpenSicil'in yönetim grupları da reddedilir ([ADR-005](decisions/005-yonetim-girisi-oidc.md)). Sorgunun sonucu worker belleğinde grup başına 5 dakika önbelleklenir; kontrol yine her işlemden önce yapılır ([ADR-016](decisions/016-hedef-olcek-ve-olcekte-calisma.md)).
 
-`CN=Users`, `CN=Builtin` ve `OU=Domain Controllers` yönetilen kapsam olarak verilemez; verilirse worker başlamaz. DnsAdmins gibi sabit RID'i olmayan, `adminCount` taşımayan ama yetki yükseltmeye açık gruplar varsayılan olarak bu konteynerlerde durur; SID ile tanınamazlar. Kurulum dokümanı bu yüzden `CN=Users`'tan yalnızca OpenIAM'in yöneteceği grupların taşınmasını ister ([docs/09](09-kurulum.md)).
+`CN=Users`, `CN=Builtin` ve `OU=Domain Controllers` yönetilen kapsam olarak verilemez; verilirse worker başlamaz. DnsAdmins gibi sabit RID'i olmayan, `adminCount` taşımayan ama yetki yükseltmeye açık gruplar varsayılan olarak bu konteynerlerde durur; SID ile tanınamazlar. Kurulum dokümanı bu yüzden `CN=Users`'tan yalnızca OpenSicil'in yöneteceği grupların taşınmasını ister ([docs/09](09-kurulum.md)).
 
 ## Hassas öznitelikler
 
@@ -128,7 +128,7 @@ Bir kurum kimlik numarası gibi hassas bir veriyi AD'ye yazmak isterse ([ADR-010
 - Varsayılan kurulumda **`employeeNumber` ve `employeeID` özniteliklerini tüm kimliği doğrulanmış kullanıcılar okuyabilir.** İkisi de bir property set içinde değildir. Okuma izni, "Pre-Windows 2000 Compatible Access" grubunun tüm kullanıcılar üzerindeki okuma izninden gelir. Bu grup varsayılan olarak Authenticated Users veya Everyone içerir.
 - Bir özniteliği **confidential** yapmak (`searchFlags` 0x80) okumayı ayrıca izin verilenlerle sınırlar. **Temel şema özniteliklerinde bu yapılamaz.** Microsoft'un kendi örneği `employeeID`'dir.
 - `employeeNumber`, Windows Server 2003'ten beri temel şema özniteliği değildir, bu yüzden confidential yapılabilir.
-- Pratik sonuç: Kimlik numarası AD'ye yazılacaksa **`employeeNumber` kullanılmalı ve confidential işaretlenmelidir.** `employeeID`'ye yazılmamalıdır. Şema değişikliği kurumun işidir; OpenIAM şemaya dokunmaz.
+- Pratik sonuç: Kimlik numarası AD'ye yazılacaksa **`employeeNumber` kullanılmalı ve confidential işaretlenmelidir.** `employeeID`'ye yazılmamalıdır. Şema değişikliği kurumun işidir; OpenSicil şemaya dokunmaz.
 
 ## Kerberos ve açık oturumlar
 
@@ -140,7 +140,7 @@ Hesabı pasifleştirmek o ana kadar verilmiş biletleri iptal etmez:
 - Pasifleştirme tek DC'ye yazılır ([ADR-016](decisions/016-hedef-olcek-ve-olcekte-calisma.md)); diğer DC'lerdeki KDC'ler bunu replikasyonla öğrenir: aynı site'ta saniyeler, site'lar arası varsayılan zamanlamayla dakikalar ya da saatler.
 - Domain'e bağlı bir bilgisayar çevrimdışıyken **önbelleğe alınmış kimlik doğrulayıcıyla** (varsayılan son 10 kullanıcı) açılır. Hesabı pasifleştirmek, `accountExpires` ve parolayı sıfırlamak bu önbelleği temizlemez; ayrılan kişi dizüstünü kuruma teslim etmediyse yerel dosyalara erişmeye devam eder. Cihazın geri alınması ya da uzaktan silinmesi kurumun işidir; acil ayrılış ekranı bunu söyler ([docs/04](04-yasam-dongusu.md#acil)).
 
-Acil ayrılışta bu gecikme ekranda uyarı olarak gösterilir ([docs/04](04-yasam-dongusu.md#acil)). Cihazdaki oturumu kapatmak OpenIAM'in kapsamı dışındadır.
+Acil ayrılışta bu gecikme ekranda uyarı olarak gösterilir ([docs/04](04-yasam-dongusu.md#acil)). Cihazdaki oturumu kapatmak OpenSicil'in kapsamı dışındadır.
 
 ## Samba AD
 
@@ -169,7 +169,7 @@ Lab imajı adayı: `quay.io/samba.org/samba-ad-server` (bakımı süren resmi pr
 
 ## Hibrit (Entra Connect)
 
-OpenIAM'in AD'de açtığı hesaplar Entra Connect ile buluta normal şekilde senkronlanır; OpenIAM bulut tarafına karışmaz. Entra Connect'in kendi kazara silme koruması (varsayılan 500 nesne) OpenIAM'in frenlerinden bağımsızdır. Pasif OU, Entra Connect'in eşitleme kapsamının **içinde** olmalıdır: kapsam dışına taşınan hesap bulutta silinir (30 gün geri alınabilir). Sahiplenilen hesabın UPN'i yeniden yazılmaz ([ADR-034](decisions/034-sam-upn-esleme-disi-ve-bossa-yaz.md)); hibritte UPN değişimi bulut girişini değiştirirdi.
+OpenSicil'in AD'de açtığı hesaplar Entra Connect ile buluta normal şekilde senkronlanır; OpenSicil bulut tarafına karışmaz. Entra Connect'in kendi kazara silme koruması (varsayılan 500 nesne) OpenSicil'in frenlerinden bağımsızdır. Pasif OU, Entra Connect'in eşitleme kapsamının **içinde** olmalıdır: kapsam dışına taşınan hesap bulutta silinir (30 gün geri alınabilir). Sahiplenilen hesabın UPN'i yeniden yazılmaz ([ADR-034](decisions/034-sam-upn-esleme-disi-ve-bossa-yaz.md)); hibritte UPN değişimi bulut girişini değiştirirdi.
 
 ## Kaynaklar
 

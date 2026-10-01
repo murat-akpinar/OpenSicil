@@ -1,10 +1,10 @@
 # 00 — Kavramlar
 
-OpenIAM (çalışma adı) bir **IGA** ürünüdür: kişinin kurumdaki yaşam döngüsünü (işe giriş, görev değişikliği, ayrılış) yönetir ve role göre hedef sistemlerde hesap ve yetki açar, değiştirir, kapatır. Bu dosya ürünü anlatırken kullanılan sektör terimlerini toplar. Ürün, rakip veya iş ilanı ararken kullanılan kelimeler bunlardır.
+OpenSicil bir **IGA** ürünüdür: kişinin kurumdaki yaşam döngüsünü (işe giriş, görev değişikliği, ayrılış) yönetir ve role göre hedef sistemlerde hesap ve yetki açar, değiştirir, kapatır. Bu dosya ürünü anlatırken kullanılan sektör terimlerini toplar. Ürün, rakip veya iş ilanı ararken kullanılan kelimeler bunlardır.
 
 ## Çatı kategoriler
 
-| Terim | Açılımı | Anlamı | OpenIAM'de |
+| Terim | Açılımı | Anlamı | OpenSicil'de |
 |---|---|---|---|
 | **IAM** | Identity and Access Management | Kimlik ve erişimle ilgili her şey: giriş, yetki, SSO, provisioning, denetim | Genel çatı. Doğru ama çok geniş |
 | **IGA** | Identity Governance and Administration | "Kim neye erişmeli, neden, ne zamana kadar" sorusunun yönetimi | **Ürünün kategorisi** |
@@ -18,7 +18,7 @@ OpenIAM (çalışma adı) bir **IGA** ürünüdür: kişinin kurumdaki yaşam d�
 |---|---|
 | **JML** (Joiner–Mover–Leaver) | İşe giriş, görev/departman değişikliği ve ayrılış süreçlerinin toplu adı |
 | **Identity Lifecycle Management** | JML'in kimlik kaydı üzerinden, tarih ve duruma bağlı olarak yönetilmesi |
-| **Authoritative source** | Kimlik verisinin doğru kabul edildiği kaynak. Büyük şirketlerde İK sistemi; OpenIAM v1'de kendi kişi kaydı, CSV ile beslenebilir ([ADR-018](decisions/018-ice-aktarma-ve-sahiplenme.md)) |
+| **Authoritative source** | Kimlik verisinin doğru kabul edildiği kaynak. Büyük şirketlerde İK sistemi; OpenSicil v1'de kendi kişi kaydı, CSV ile beslenebilir ([ADR-018](decisions/018-ice-aktarma-ve-sahiplenme.md)) |
 | **Provisioning** | Hedef sistemde hesap açmak ve yetki vermek |
 | **Deprovisioning** | Hesabı kapatmak ve yetkiyi almak. En çok atlanan ve güvenlik açısından en kritik kısım |
 | **Birthright access** | Kişinin sadece işe girdiği ve rolü nedeniyle otomatik aldığı yetkiler |
@@ -28,7 +28,7 @@ OpenIAM (çalışma adı) bir **IGA** ürünüdür: kişinin kurumdaki yaşam d�
 
 ## Yetki modeli
 
-| Terim | Anlamı | OpenIAM'de |
+| Terim | Anlamı | OpenSicil'de |
 |---|---|---|
 | **RBAC** | Yetkilerin kişiye değil role bağlanması | Çekirdek model ([ADR-007](decisions/007-rol-modeli.md)) |
 | **ABAC** | Departman, lokasyon, sözleşme tipi gibi özniteliklere göre yetki | Departman bazlı yetkiler bu fikrin sade hali |
@@ -42,7 +42,7 @@ OpenIAM (çalışma adı) bir **IGA** ürünüdür: kişinin kurumdaki yaşam d�
 
 | Terim | Anlamı |
 |---|---|
-| **Connector** | OpenIAM'in bir hedef sistemle konuşan parçası (AD connector, Zimbra connector) |
+| **Connector** | OpenSicil'in bir hedef sistemle konuşan parçası (AD connector, Zimbra connector) |
 | **Desired state** (olması gereken durum) | Kimlik kaydı ve rollerden hesaplanan "bu kişi bu sistemde nasıl görünmeli" cevabı |
 | **Reconciliation** (mutabakat) | Hedef sistemdeki gerçek durumu olması gereken durumla karşılaştırma |
 | **Drift** (sapma) | Hedef sistemde birinin elle yaptığı ve kayıtla çelişen değişiklik |
@@ -59,8 +59,8 @@ OpenIAM (çalışma adı) bir **IGA** ürünüdür: kişinin kurumdaki yaşam d�
 | Terim | Anlamı |
 |---|---|
 | **IdP** | Kimliği doğrulayan taraf (Keycloak, Entra ID) |
-| **OIDC** | OAuth2 üzerine kurulu kimlik protokolü. OpenIAM'in yönetim ekranı bununla giriş yapar ([ADR-005](decisions/005-yonetim-girisi-oidc.md)) |
-| **Groups claim** | IdP'nin token içine koyduğu grup listesi. OpenIAM yönetim yetkilerini buradan okur |
+| **OIDC** | OAuth2 üzerine kurulu kimlik protokolü. OpenSicil'in yönetim ekranı bununla giriş yapar ([ADR-005](decisions/005-yonetim-girisi-oidc.md)) |
+| **Groups claim** | IdP'nin token içine koyduğu grup listesi. OpenSicil yönetim yetkilerini buradan okur |
 | **LDAPS** | TLS üzerinden LDAP (port 636). AD connector sadece bununla konuşur |
 
 ## Kişisel veri

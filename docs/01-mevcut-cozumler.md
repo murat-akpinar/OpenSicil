@@ -11,8 +11,8 @@ Sıfırdan yazmadan önce: bu işi yapan olgun ürünler var. Bu dosya neyi yeni
 | **Evolveum midPoint** | IGA | **EUPL-1.2-or-later**. Apache-2.0/EUPL ikili lisansı 2025-10-13'te kaldırıldı. Dokümanlar CC BY-NC-ND 4.0 | Sektörün en kapsamlı açık kaynak IGA'sı: rol modeli, JML, mutabakat, onay akışları, yetki gözden geçirme. **Asıl referans** | Ağır (Java), öğrenme eğrisi dik, eşlemeler betik (Groovy) ile yazılır. Resmi Zimbra rehberi 2021 tarihli ve Zimbra'nın kendi LDAP'ına doğrudan yazıyor |
 | **Apache Syncope** | IGA | Apache-2.0 | ConnId connector'ları, bakımı süren bir AD connector'ı, REST API | Java; midPoint'e göre daha dar bir topluluk |
 | **ConnId Zimbra Bundle** (Tirasa) | Zimbra connector'ı | Apache-2.0 | SOAP üzerinden çalışır; Syncope ve midPoint'te kullanılabilir | Neredeyse bakımsız: 2021'den beri tek bir küçük insan commit'i, sürüm etiketi yok, Zimbra 8.8.12'ye göre derleniyor |
-| **OpenIAM Community Edition** | IAM/IGA | Sitede belirtilmiyor. Tek açık depo LGPL-3.0 ve son push'u Temmuz 2018 | Ticari bir IGA'nın ücretsiz sürümü | Açık kaynak durumu belirsiz. **Bu projenin çalışma adıyla çakışıyor** ([ADR-001](decisions/001-kapsam-ve-konumlandirma.md)) |
-| **Keycloak** | IdP | Apache-2.0 (OpenBerat `docs/01`, 2026-09-07) | AD federasyonu, OIDC/SAML. OpenIAM'in yönetim girişi için kullanılabilir. **Rakip değil** | IGA değil: AD'de hesap açmaz, yaşam döngüsü yönetmez |
+| **OpenIAM Community Edition** | IAM/IGA | Sitede belirtilmiyor. Tek açık depo LGPL-3.0 ve son push'u Temmuz 2018 | Ticari bir IGA'nın ücretsiz sürümü | Açık kaynak durumu belirsiz. Adı bu projenin eski çalışma adıyla çakışıyordu; ürün bu yüzden **OpenSicil** oldu ([ADR-063](decisions/063-kalici-urun-adi-opensicil.md)) |
+| **Keycloak** | IdP | Apache-2.0 (OpenBerat `docs/01`, 2026-09-07) | AD federasyonu, OIDC/SAML. OpenSicil'in yönetim girişi için kullanılabilir. **Rakip değil** | IGA değil: AD'de hesap açmaz, yaşam döngüsü yönetmez |
 
 ## Ticari (referans ve rakip analizi)
 
@@ -27,9 +27,9 @@ Sıfırdan yazmadan önce: bu işi yapan olgun ürünler var. Bu dosya neyi yeni
 
 ## Neyi yeniden icat etmiyoruz
 
-- **Kimlik doğrulama:** Keycloak veya başka bir OIDC sağlayıcı. OpenIAM parola doğrulamaz ([ADR-005](decisions/005-yonetim-girisi-oidc.md)).
+- **Kimlik doğrulama:** Keycloak veya başka bir OIDC sağlayıcı. OpenSicil parola doğrulamaz ([ADR-005](decisions/005-yonetim-girisi-oidc.md)).
 - **Erişim kararı:** Uygulamanın kendisi veya OpenBerat gibi bir IAP ([ADR-008](decisions/008-uygulama-yetkileri-ad-gruplari.md)).
-- **Dizin:** AD'nin kendisi. OpenIAM ayrı bir kullanıcı dizini tutmaz; kaynak kaydı ve hesap bağlantılarını tutar.
+- **Dizin:** AD'nin kendisi. OpenSicil ayrı bir kullanıcı dizini tutmaz; kaynak kaydı ve hesap bağlantılarını tutar.
 
 ## Okumaya değer kaynaklar
 
@@ -45,4 +45,4 @@ Yazmaya başlamadan önce, sırayla:
 - midPoint Zimbra rehberi: https://docs.evolveum.com/connectors/resources/zimbra/
 - Apache Syncope: https://syncope.apache.org/docs/reference-guide.html · AD connector'ı: https://github.com/Tirasa/ConnIdADBundle
 - ConnId Zimbra Bundle: https://github.com/Tirasa/ConnIdZimbraBundle
-- OpenIAM CE: https://www.openiam.com/ce-vs-ee · https://github.com/openiam-community/openiam-community · https://compare.evolveum.com/details-openiam.html
+- OpenSicil CE: https://www.openiam.com/ce-vs-ee · https://github.com/openiam-community/openiam-community · https://compare.evolveum.com/details-openiam.html

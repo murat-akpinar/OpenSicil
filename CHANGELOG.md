@@ -20,6 +20,7 @@
 - Gösterge panelini v1 kapsamına ekle (ADR-076)
 - Arayüz kabuğu kutucuğu işaretlendi, durum notu
 - Zimbra v1'den sonraya alındı, todo.md'nin sonuna taşındı (ADR-090)
+- Ürün adı OpenSicil, eski OpenIAM kalıntıları düzeltildi (ADR-063)
 
 ### Düzeltmeler
 
