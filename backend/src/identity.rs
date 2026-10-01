@@ -456,6 +456,8 @@ pub struct PersonPage {
     pub events: Vec<Event>,
     /// Ad henuz yok ve bir is mudahalede: ADR-022/042 secenekleri gosterilir
     pub name_intervention: bool,
+    pub additional_roles: Vec<AssignedRole>,
+    pub role_options: Vec<Choice>,
 }
 
 pub async fn load_page(
@@ -474,10 +476,146 @@ pub async fn load_page(
     Ok(Some(PersonPage {
         accounts: load_accounts(pool, id, state).await?,
         events: load_events(pool, time_zone, id).await?,
+        additional_roles: load_additional_roles(pool, id).await?,
+        role_options: choices(
+            pool,
+            "SELECT id, name FROM roles WHERE kind = 'additional' ORDER BY name",
+        )
+        .await?,
         person,
         jobs,
         name_intervention,
     }))
+}
+
+// Duzenleme formu mevcut degerlerle dolar (ADR-083); tarihler ve kimlik no formda yok
+// ama validate() icin tasinir.
+pub async fn load_form(pool: &PgPool, id: i64) -> Result<Option<IdentityForm>, sqlx::Error> {
+    type Row = (
+        String,
+        String,
+        Option<String>,
+        Option<String>,
+        i64,
+        i64,
+        Option<i64>,
+        String,
+        String,
+        Option<String>,
+    );
+    let row: Option<Row> = sqlx::query_as(
+        "SELECT given_name, surname, employee_number, mobile_phone, department_id, \
+         primary_role_id, manager_id, employment_type, to_char(start_date, 'YYYY-MM-DD'), \
+         to_char(end_at - interval '1 second', 'YYYY-MM-DD') FROM identities WHERE id = $1",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|r| IdentityForm {
+        given_name: r.0,
+        surname: r.1,
+        employee_number: r.2.unwrap_or_default(),
+        mobile_phone: r.3.unwrap_or_default(),
+        department_id: r.4.to_string(),
+        primary_role_id: r.5.to_string(),
+        manager_id: r.6.map(|m| m.to_string()).unwrap_or_default(),
+        employment_type: r.7,
+        start_date: r.8,
+        end_date: r.9.unwrap_or_default(),
+        national_id_country: "TR".to_string(),
+        ..IdentityForm::default()
+    }))
+}
+
+// Gorev degisikligi / calisma tipi donusumu (docs/04 Mover, ADR-042): tarihler,
+// kimlik no ve kullanici adi bu yoldan degismez.
+pub async fn update_mover(pool: &PgPool, id: i64, new: &NewIdentity) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE identities SET given_name = $2, surname = $3, employee_number = $4, \
+         mobile_phone = $5, department_id = $6, primary_role_id = $7, manager_id = $8, \
+         employment_type = $9 WHERE id = $1 AND manager_id IS DISTINCT FROM id",
+    )
+    .bind(id)
+    .bind(&new.given_name)
+    .bind(&new.surname)
+    .bind(&new.employee_number)
+    .bind(&new.mobile_phone)
+    .bind(new.department_id)
+    .bind(new.primary_role_id)
+    .bind(new.manager_id.filter(|m| *m != id))
+    .bind(&new.employment_type)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub struct AssignedRole {
+    pub role_id: i64,
+    pub name: String,
+    pub ends_on: String,
+}
+
+pub async fn load_additional_roles(
+    pool: &PgPool,
+    id: i64,
+) -> Result<Vec<AssignedRole>, sqlx::Error> {
+    let rows: Vec<(i64, String, Option<String>)> = sqlx::query_as(
+        "SELECT a.role_id, r.name, to_char(a.ends_on, 'YYYY-MM-DD') \
+         FROM identity_additional_roles a JOIN roles r ON r.id = a.role_id \
+         WHERE a.identity_id = $1 ORDER BY r.name",
+    )
+    .bind(id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(role_id, name, ends_on)| AssignedRole {
+            role_id,
+            name,
+            ends_on: ends_on.unwrap_or_default(),
+        })
+        .collect())
+}
+
+// ADR-020: bitis gunun sonudur, gecmis tarihli atama kaydedilemez; upsert tarihi uzatir.
+pub async fn assign_role(
+    pool: &PgPool,
+    time_zone: &str,
+    id: i64,
+    role_id: i64,
+    ends_on: Option<&str>,
+) -> Result<bool, sqlx::Error> {
+    if let Some(d) = ends_on {
+        let future: bool = sqlx::query_scalar("SELECT $1::date >= (now() AT TIME ZONE $2)::date")
+            .bind(d)
+            .bind(time_zone)
+            .fetch_one(pool)
+            .await?;
+        if !future {
+            return Ok(false);
+        }
+    }
+    sqlx::query(
+        "INSERT INTO identity_additional_roles (identity_id, role_id, ends_on) VALUES ($1, $2, $3::date) \
+         ON CONFLICT (identity_id, role_id) DO UPDATE SET ends_on = EXCLUDED.ends_on",
+    )
+    .bind(id)
+    .bind(role_id)
+    .bind(ends_on)
+    .execute(pool)
+    .await?;
+    Ok(true)
+}
+
+pub async fn remove_role(pool: &PgPool, id: i64, role_id: i64) -> Result<bool, sqlx::Error> {
+    let done = sqlx::query(
+        "DELETE FROM identity_additional_roles WHERE identity_id = $1 AND role_id = $2",
+    )
+    .bind(id)
+    .bind(role_id)
+    .execute(pool)
+    .await?;
+    Ok(done.rows_affected() == 1)
 }
 
 type PersonRow = (
@@ -931,6 +1069,47 @@ mod tests {
                 .unwrap()
                 .name_intervention
         );
+
+        // ADR-083: duzenleme formu mevcut degerlerle; update_mover tarihleri degistirmez;
+        // ek rol: gecmis tarih reddi, upsert tarihi uzatir, kaldirma.
+        let mut form = load_form(&pool, id).await.unwrap().unwrap();
+        assert_eq!(form.given_name, "Ayşe");
+        assert_eq!(form.manager_id, ids[0].to_string());
+        assert_eq!(form.end_date, "2026-12-31");
+        form.surname = "Demir".to_string();
+        form.manager_id = id.to_string();
+        update_mover(&pool, id, &validate(&form).await_ok())
+            .await
+            .unwrap();
+        let (surname, manager, end): (String, Option<i64>, String) = sqlx::query_as(
+            "SELECT surname, manager_id, to_char(end_at AT TIME ZONE 'Europe/Istanbul', 'YYYY-MM-DD HH24:MI') \
+             FROM identities WHERE id = $1",
+        )
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(surname, "Demir");
+        assert_eq!(manager, None, "kendisi yönetici olamaz");
+        assert_eq!(end, "2027-01-01 00:00", "tarihler bu yoldan değişmez");
+        let additional: i64 = sqlx::query_scalar(
+            "INSERT INTO roles (kind, name) VALUES ('additional', 'Nöbet') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(!assign_role(&pool, tz, id, additional, Some("2020-01-01"))
+            .await
+            .unwrap());
+        assert!(assign_role(&pool, tz, id, additional, None).await.unwrap());
+        assert!(assign_role(&pool, tz, id, additional, Some("2099-12-31"))
+            .await
+            .unwrap());
+        let assigned = load_additional_roles(&pool, id).await.unwrap();
+        assert_eq!(assigned.len(), 1);
+        assert_eq!(assigned[0].ends_on, "2099-12-31");
+        assert!(remove_role(&pool, id, additional).await.unwrap());
+        assert!(!remove_role(&pool, id, additional).await.unwrap());
 
         drop(pool);
         crate::test_support::drop_temp_db(&admin_pool, &db_name).await;

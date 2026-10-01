@@ -17,6 +17,9 @@ pub const TARGET_CHANGED: &str = "target.changed";
 pub const IDENTITY_NAME_REQUESTED: &str = "identity.name_requested";
 pub const USED_NAME_RELEASED: &str = "used_name.released";
 pub const MAPPING_CHANGED: &str = "mapping.changed";
+pub const IDENTITY_CHANGED: &str = "identity.changed";
+pub const IDENTITY_ROLE_ASSIGNED: &str = "identity.role_assigned";
+pub const IDENTITY_ROLE_REMOVED: &str = "identity.role_removed";
 
 pub struct Actor<'a> {
     pub subject: Option<&'a str>,

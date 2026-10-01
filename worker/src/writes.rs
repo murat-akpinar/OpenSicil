@@ -51,8 +51,7 @@ pub enum WriteOp {
         group_dn: String,
         member_dn: String,
     },
-    /// Uyelik farki (3b/3c) uretir; motor su an yalnizca ekler
-    #[allow(dead_code)]
+    /// Uyelik farki: rolde olmayan katalog grubu cikarilir (docs/03, ADR-050)
     RemoveMember {
         group_dn: String,
         member_dn: String,
@@ -61,6 +60,12 @@ pub enum WriteOp {
     SetAttributes {
         dn: String,
         changes: Vec<(String, Option<String>)>,
+    },
+    /// OU tasima (modifyDN; docs/05 "OU tasima", ADR-050 sirasi: ekleme ve cikarma arasinda)
+    MoveAccount {
+        dn: String,
+        new_rdn: String,
+        new_parent: String,
     },
 }
 
@@ -73,6 +78,7 @@ impl WriteOp {
             WriteOp::AddMember { .. } => "ad.group.add_member",
             WriteOp::RemoveMember { .. } => "ad.group.remove_member",
             WriteOp::SetAttributes { .. } => "ad.account.attributes",
+            WriteOp::MoveAccount { .. } => "ad.account.move",
         }
     }
 
@@ -117,6 +123,16 @@ impl WriteOp {
                 "{{\"group\":\"{}\",\"member\":\"{}\"}}",
                 q(group_dn),
                 q(member_dn)
+            ),
+            WriteOp::MoveAccount {
+                dn,
+                new_rdn,
+                new_parent,
+            } => format!(
+                "{{\"dn\":\"{}\",\"new_rdn\":\"{}\",\"new_parent\":\"{}\"}}",
+                q(dn),
+                q(new_rdn),
+                q(new_parent)
             ),
         }
     }

@@ -1,15 +1,23 @@
 {% extends "base.html" %}
-{% block title %}Yeni kimlik — OpenSicil{% endblock %}
+{% block title %}{% if editing %}Kimliği düzenle{% else %}Yeni kimlik{% endif %} — OpenSicil{% endblock %}
 {% block width %}max-w-2xl{% endblock %}
 {% block content %}
 <div class="flex justify-between items-center mb-6">
-  <h1 class="text-xl font-semibold">Yeni kimlik</h1>
+  <h1 class="text-xl font-semibold">{% if editing %}Kimliği düzenle{% else %}Yeni kimlik{% endif %}</h1>
   <a class="text-sm underline" href="/login">Ana sayfa</a>
 </div>
+{% if editing %}
+<p class="mb-4 text-sm" style="color:#a6adc8;">Görev değişikliği ve çalışma tipi dönüşümü (ADR-042): tarihler, kimlik no ve kullanıcı adı burada değişmez; kayıt her hedef için iş açar.</p>
+{% endif %}
 {% if !error.is_empty() %}
 <p class="mb-4" style="color:#f38ba8;">{{ error }}</p>
 {% endif %}
-<form method="post" action="/identities" class="space-y-4">
+<form method="post" action="{{ action }}" class="space-y-4">
+  {% if editing %}
+  <input type="hidden" name="start_date" value="{{ form.start_date }}">
+  <input type="hidden" name="end_date" value="{{ form.end_date }}">
+  <input type="hidden" name="national_id_country" value="{{ form.national_id_country }}">
+  {% endif %}
   {% if duplicate_warning %}
   <div class="rounded p-3" style="background:#313244; color:#f9e2af;">
     <p>Aynı ad-soyadlı silinmemiş bir kimlik var. Mükerrer kişi olabilir.</p>
@@ -25,6 +33,7 @@
       <label class="block text-sm mb-1" for="surname">Soyad</label>
       <input class="w-full rounded px-3 py-2 text-black" type="text" id="surname" name="surname" value="{{ form.surname }}" required>
     </div>
+    {% if !editing %}
     <div>
       <label class="block text-sm mb-1" for="national_id_country">Ülke</label>
       <input class="w-full rounded px-3 py-2 text-black" type="text" id="national_id_country" name="national_id_country" value="{{ form.national_id_country }}" maxlength="2">
@@ -37,6 +46,7 @@
       <label class="block text-sm mb-1" for="requested_username">Kullanıcı adı (isteğe bağlı; boşsa şablon üretir)</label>
       <input class="w-full rounded px-3 py-2 text-black" type="text" id="requested_username" name="requested_username" value="{{ form.requested_username }}" maxlength="20" autocomplete="off">
     </div>
+    {% endif %}
     <div>
       <label class="block text-sm mb-1" for="employee_number">Sicil no</label>
       <input class="w-full rounded px-3 py-2 text-black" type="text" id="employee_number" name="employee_number" value="{{ form.employee_number }}">
@@ -80,6 +90,7 @@
         {% endfor %}
       </select>
     </div>
+    {% if !editing %}
     <div>
       <label class="block text-sm mb-1" for="start_date">Başlangıç tarihi</label>
       <input class="w-full rounded px-3 py-2 text-black" type="date" id="start_date" name="start_date" value="{{ form.start_date }}" required>
@@ -88,6 +99,7 @@
       <label class="block text-sm mb-1" for="end_date">Bitiş tarihi (kadrolu dışında zorunlu)</label>
       <input class="w-full rounded px-3 py-2 text-black" type="date" id="end_date" name="end_date" value="{{ form.end_date }}">
     </div>
+    {% endif %}
   </div>
   <button class="w-full rounded py-2" style="background:#89b4fa; color:#1e1e2e;" type="submit">Kaydet</button>
 </form>

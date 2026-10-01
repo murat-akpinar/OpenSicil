@@ -68,6 +68,163 @@ pub fn routes() -> Router<AppState> {
         .route("/identities/{id}", get(show))
         .route("/identities/{id}/jobs/{job_id}/retry", post(retry))
         .route("/identities/{id}/names", post(request_names))
+        .route("/identities/{id}/edit", get(edit_form).post(edit_submit))
+        .route("/identities/{id}/roles", post(assign_role))
+        .route("/identities/{id}/roles/{role_id}/delete", post(remove_role))
+}
+
+// --- Gorev degisikligi (docs/04 Mover, ADR-083): alanlar, ek roller ---
+
+async fn edit_form(
+    OperatorSession(op): OperatorSession,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Response {
+    if !allowed(&op, REGISTER_AUTHORITIES) {
+        return forbidden();
+    }
+    match identity::load_form(&state.pool, id).await {
+        Ok(Some(form)) => render_form(&state, form, String::new(), false, Some(id)).await,
+        Ok(None) => (StatusCode::NOT_FOUND, "Kimlik bulunamadı.").into_response(),
+        Err(e) => internal("kimlik okunamadı", e),
+    }
+}
+
+async fn edit_submit(
+    OperatorSession(op): OperatorSession,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Form(form): Form<IdentityForm>,
+) -> Response {
+    if !allowed(&op, REGISTER_AUTHORITIES) {
+        return forbidden();
+    }
+    let new = match identity::validate(&form) {
+        Ok(n) => n,
+        Err(msg) => return render_form(&state, form, msg, false, Some(id)).await,
+    };
+    if let Err(e) = identity::update_mover(&state.pool, id, &new).await {
+        let db = e.as_database_error();
+        if db.is_some_and(|d| d.is_unique_violation()) {
+            let msg = "Bu sicil no başka bir kimlikte kayıtlı".to_string();
+            return render_form(&state, form, msg, false, Some(id)).await;
+        }
+        // docs/03: kadrolu disinda bitis zorunlu; bitis ayrilis ekranindan girilir (3c)
+        if db.is_some_and(|d| d.is_check_violation()) {
+            let msg = "Kadrolu dışı çalışma tipi için önce bitiş tarihi girilmeli".to_string();
+            return render_form(&state, form, msg, false, Some(id)).await;
+        }
+        return internal("kimlik güncellenemedi", e);
+    }
+    let detail = serde_json::json!({
+        "employee_number": new.employee_number, "department_id": new.department_id,
+        "primary_role_id": new.primary_role_id, "manager_id": new.manager_id,
+        "employment_type": new.employment_type,
+    });
+    audit_operator(
+        &state,
+        &op,
+        crate::audit::IDENTITY_CHANGED,
+        Some(id),
+        detail,
+    )
+    .await;
+    enqueue_single(&state, id).await;
+    Redirect::to(&format!("/identities/{id}")).into_response()
+}
+
+async fn enqueue_single(state: &AppState, id: i64) {
+    if let Err(e) =
+        identity::enqueue_all_targets(&state.pool, id, crate::jobs::Priority::Single).await
+    {
+        eprintln!("web: iş açılamadı (kimlik {id}): {e}");
+    }
+}
+
+#[derive(Deserialize)]
+struct RoleForm {
+    #[serde(default)]
+    role_id: String,
+    #[serde(default)]
+    ends_on: String,
+}
+
+// ADR-020: ek rol istege bagli bitis tarihli; gecmis tarih reddedilir.
+async fn assign_role(
+    OperatorSession(op): OperatorSession,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Form(form): Form<RoleForm>,
+) -> Response {
+    if !allowed(&op, REGISTER_AUTHORITIES) {
+        return forbidden();
+    }
+    let Ok(role_id) = form.role_id.trim().parse::<i64>() else {
+        return (StatusCode::BAD_REQUEST, "Ek rol seçilmeli.").into_response();
+    };
+    let ends_on = form.ends_on.trim();
+    let ends_on = (!ends_on.is_empty()).then_some(ends_on);
+    if ends_on.is_some_and(|d| crate::desired_state::Date::from_iso(d).is_none()) {
+        return (StatusCode::BAD_REQUEST, "Bitiş tarihi YYYY-AA-GG olmalı.").into_response();
+    }
+    match identity::assign_role(&state.pool, &state.time_zone, id, role_id, ends_on).await {
+        Ok(true) => {
+            let detail = serde_json::json!({ "role_id": role_id, "ends_on": ends_on });
+            audit_operator(
+                &state,
+                &op,
+                crate::audit::IDENTITY_ROLE_ASSIGNED,
+                Some(id),
+                detail,
+            )
+            .await;
+            enqueue_single(&state, id).await;
+            Redirect::to(&format!("/identities/{id}")).into_response()
+        }
+        Ok(false) => (
+            StatusCode::BAD_REQUEST,
+            "Bitiş tarihi geçmiş bir ek rol kaydedilemez (ADR-020).",
+        )
+            .into_response(),
+        Err(e)
+            if e.as_database_error()
+                .is_some_and(|d| d.is_foreign_key_violation()) =>
+        {
+            (
+                StatusCode::BAD_REQUEST,
+                "Yalnızca ek tür roller atanabilir.",
+            )
+                .into_response()
+        }
+        Err(e) => internal("ek rol yazılamadı", e),
+    }
+}
+
+async fn remove_role(
+    OperatorSession(op): OperatorSession,
+    State(state): State<AppState>,
+    Path((id, role_id)): Path<(i64, i64)>,
+) -> Response {
+    if !allowed(&op, REGISTER_AUTHORITIES) {
+        return forbidden();
+    }
+    match identity::remove_role(&state.pool, id, role_id).await {
+        Ok(true) => {
+            let detail = serde_json::json!({ "role_id": role_id });
+            audit_operator(
+                &state,
+                &op,
+                crate::audit::IDENTITY_ROLE_REMOVED,
+                Some(id),
+                detail,
+            )
+            .await;
+            enqueue_single(&state, id).await;
+        }
+        Ok(false) => {}
+        Err(e) => return internal("ek rol silinemedi", e),
+    }
+    Redirect::to(&format!("/identities/{id}")).into_response()
 }
 
 #[derive(Deserialize)]
@@ -131,6 +288,9 @@ struct IdentityFormTemplate {
     employment_types: &'static [(&'static str, &'static str)],
     error: String,
     duplicate_warning: bool,
+    /// Duzenleme: tarih, kimlik no ve kullanici adi alanlari gizli (ADR-083)
+    editing: bool,
+    action: String,
 }
 
 #[derive(Template)]
@@ -149,7 +309,7 @@ async fn new_form(OperatorSession(op): OperatorSession, State(state): State<AppS
         national_id_country: "TR".to_string(),
         ..IdentityForm::default()
     };
-    render_form(&state, form, String::new(), false).await
+    render_form(&state, form, String::new(), false, None).await
 }
 
 async fn render_form(
@@ -157,6 +317,7 @@ async fn render_form(
     form: IdentityForm,
     error: String,
     duplicate_warning: bool,
+    editing: Option<i64>,
 ) -> Response {
     match identity::form_options(&state.pool).await {
         Ok(options) => render(&IdentityFormTemplate {
@@ -165,6 +326,11 @@ async fn render_form(
             employment_types: &identity::EMPLOYMENT_TYPES,
             error,
             duplicate_warning,
+            editing: editing.is_some(),
+            action: match editing {
+                Some(id) => format!("/identities/{id}/edit"),
+                None => "/identities".to_string(),
+            },
         }),
         Err(e) => internal("form seçenekleri okunamadı", e),
     }
@@ -180,11 +346,11 @@ async fn create(
     }
     let new = match identity::validate(&form) {
         Ok(n) => n,
-        Err(msg) => return render_form(&state, form, msg, false).await,
+        Err(msg) => return render_form(&state, form, msg, false, None).await,
     };
     if new.national_id.is_none() && form.confirm_duplicate.is_none() {
         match identity::similar_name_exists(&state.pool, &new.given_name, &new.surname).await {
-            Ok(true) => return render_form(&state, form, String::new(), true).await,
+            Ok(true) => return render_form(&state, form, String::new(), true, None).await,
             Ok(false) => {}
             Err(e) => return internal("mükerrer kişi kontrolü", e),
         }
@@ -197,7 +363,7 @@ async fn create(
         Ok(id) => id,
         Err(identity::CreateError::DuplicateNationalId) => {
             let msg = "Bu kimlik numarası zaten kayıtlı".to_string();
-            return render_form(&state, form, msg, false).await;
+            return render_form(&state, form, msg, false, None).await;
         }
         Err(identity::CreateError::Db(e)) => return internal("kimlik kaydedilemedi", e),
     };
@@ -534,6 +700,137 @@ mod tests {
             StatusCode::CONFLICT,
             "ad oluştuktan sonra değişmez"
         );
+
+        // Gorev degisikligi (ADR-083): duzenleme formu dolu gelir, kayit alanlari gunceller,
+        // is acar; ek rol ekleme/kaldirma, gecmis tarih reddi.
+        let edit = format!("/identities/{id}/edit");
+        let body = body_string(
+            app.clone()
+                .oneshot(request("GET", &edit, "", &hr))
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert!(
+            body.contains("Kimliği düzenle") && body.contains("value=\"Ayşe\""),
+            "{body}"
+        );
+        sqlx::query("UPDATE jobs SET status = 'succeeded'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        // Kadrolu disina gecis bitis tarihi ister (DB CHECK); operator dilinde hata.
+        let contract_body = format!(
+            "given_name=Ay%C5%9Fe&surname=Demir&employee_number=S-9&department_id={dept}\
+             &primary_role_id={role}&employment_type=contract&start_date=2026-10-01&end_date=2027-01-01"
+        );
+        let r = app
+            .clone()
+            .oneshot(request("POST", &edit, &contract_body, &hr))
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::OK);
+        assert!(body_string(r).await.contains("önce bitiş tarihi"));
+        let edit_body = format!(
+            "given_name=Ay%C5%9Fe&surname=Demir&employee_number=S-9&department_id={dept}\
+             &primary_role_id={role}&employment_type=permanent&start_date=2026-10-01"
+        );
+        let r = app
+            .clone()
+            .oneshot(request("POST", &edit, &edit_body, &hr))
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::SEE_OTHER);
+        let (surname, employee_number, employment_type): (String, Option<String>, String) =
+            sqlx::query_as(
+                "SELECT surname, employee_number, employment_type FROM identities WHERE id = $1",
+            )
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            (
+                surname.as_str(),
+                employee_number.as_deref(),
+                employment_type.as_str()
+            ),
+            ("Demir", Some("S-9"), "permanent")
+        );
+        let open_jobs: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM jobs WHERE identity_id = $1 AND status = 'queued'",
+        )
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(open_jobs, 2, "görev değişikliği her hedefe iş açar");
+        let additional: i64 = sqlx::query_scalar(
+            "INSERT INTO roles (kind, name) VALUES ('additional', 'Nöbet') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let roles = format!("/identities/{id}/roles");
+        let past = format!("role_id={additional}&ends_on=2020-01-01");
+        let r = app
+            .clone()
+            .oneshot(request("POST", &roles, &past, &hr))
+            .await
+            .unwrap();
+        assert_eq!(
+            r.status(),
+            StatusCode::BAD_REQUEST,
+            "geçmiş tarihli ek rol (ADR-020)"
+        );
+        let future = format!("role_id={additional}&ends_on=2099-12-31");
+        let r = app
+            .clone()
+            .oneshot(request("POST", &roles, &future, &hr))
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::SEE_OTHER);
+        let primary_as_additional = format!("role_id={role}");
+        let r = app
+            .clone()
+            .oneshot(request("POST", &roles, &primary_as_additional, &hr))
+            .await
+            .unwrap();
+        assert_eq!(
+            r.status(),
+            StatusCode::BAD_REQUEST,
+            "birincil rol ek rol olarak atanamaz"
+        );
+        let body = body_string(
+            app.clone()
+                .oneshot(request("GET", &page, "", &hr))
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert!(
+            body.contains("Nöbet") && body.contains("2099-12-31"),
+            "{body}"
+        );
+        let r = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                &format!("{roles}/{additional}/delete"),
+                "",
+                &hr,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::SEE_OTHER);
+        let remaining: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM identity_additional_roles WHERE identity_id = $1",
+        )
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(remaining, 0);
 
         drop(app);
         drop(pool);

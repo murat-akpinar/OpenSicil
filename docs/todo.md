@@ -113,7 +113,8 @@ Kurallar:
   - Not (2026-10-01): backend 109 / worker 68 test (lab Keycloak + Samba dahil), format ve clippy temiz, `cargo audit` yalnızca ADR-073 `rsa`; kapsam backend %92,71 / worker %91,22; imaj taraması Faz 3a tabanıyla aynı (backend 60, worker 58, `Status: fixed` yok); faz commit'lerinde sır sızıntısı taraması boş; TODO yok; 50 satırı aşan yalnızca test fonksiyonları. docs/07'den ADR-022, ADR-029 ve ADR-040 maddeleri işaretlendi; ADR-034 "boş değeri dolduruyor" ve ADR-035 "serbest bırakılan ad yeniden üretiliyor" lab'da sınanmadı (3c/3e kapanışında)
 
 ### 3c. Yaşam döngüsü
-- [ ] İşe giriş, görev değişikliği (önce ekleme, sonra çıkarma — [ADR-050](decisions/050-verme-sayaci-ve-is-butunlugu.md))
+- [x] İşe giriş, görev değişikliği (önce ekleme, sonra çıkarma — [ADR-050](decisions/050-verme-sayaci-ve-is-butunlugu.md))
+  - Not: ADR-083 — worker bağlı hesapta katalog grubu farkını uygular (ekleme → OU taşıma → çıkarma), `/identities/{id}/edit` ve ek rol ekle/kaldır; saatlik sayaç "bütün iş bekler" kuralı 3f'te
 - [ ] Planlı ve acil ayrılış, geri alma (yıkıcı — [ADR-030](decisions/030-ayrilisi-geri-alma-yikici.md)), hedefte doğrulanan kayıt iptali ([ADR-048](decisions/048-kayit-iptali-hedefte-dogrulanir.md)), tarihli askı ([ADR-053](decisions/053-tarihli-aski.md))
 - [ ] `ayrıldı`dan her çıkış geri alma sayılır, askı bitişi iznin son günüdür, `accountExpires` temizlenir ([ADR-059](decisions/059-netlestirmeler-operator-geri-alma-aski-bitisi-accountexpires.md))
 - [ ] Yönetici ayrılışında astların etkin yöneticisi türetilir (F-38, [ADR-041](decisions/041-astlarin-yoneticisi-turetilir.md))

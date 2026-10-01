@@ -1,10 +1,10 @@
 // --- START FEATURE: engine ---
 // Bir isi calistirir (docs/02 motor): girdiyi yukle → olmasi gereken durumu
 // hesapla (saf) → hedefi oku → farki islemlere cevirip tek yazma noktasindan
-// uygula. 3a dilimi: AD'de hesap acma (tek add, varsayilan esleme ADR-012,
-// gruplar), etkinlestirme/pasiflestirme (yalnizca durum gecisinde, ADR-032),
-// hesap baglantisi ve applied_state. Uyelik farki, OU tasima, oznitelik
-// guncelleme ve silme sonraki kutucuklarda.
+// uygula. AD: hesap acma (tek add, esleme ADR-012/082, gruplar), etkinlestirme/
+// pasiflestirme (yalnizca durum gecisinde, ADR-032), uyelik farki ve OU tasima
+// (ADR-050 sirasi, ADR-083), oznitelik farki, hesap baglantisi ve applied_state.
+// Silme (saklama) ve parola sifirlama sonraki kutucuklarda.
 
 use ldap3::Ldap;
 use sqlx::PgPool;
@@ -309,12 +309,9 @@ async fn container_dn(c: &AdJob<'_>, ldap: &mut Ldap) -> Result<String, JobError
     let guid = match c.desired.container {
         Container::Item(id) => catalog_guid(c.pool, id).await?,
         Container::Passive => {
-            return std::env::var("AD_PASSIVE_OU")
-                .ok()
-                .filter(|v| !v.trim().is_empty())
-                .ok_or_else(|| {
-                    JobError::Failed("pasif OU tanımlı değil (AD_PASSIVE_OU)".to_string())
-                })
+            return passive_ou().ok_or_else(|| {
+                JobError::Failed("pasif OU tanımlı değil (AD_PASSIVE_OU)".to_string())
+            })
         }
         Container::Unchanged | Container::Unspecified => None,
     };
@@ -517,20 +514,174 @@ async fn reconcile_existing(
     let state = state_name(c.desired.state);
     let transition = link.applied_state.as_deref() != Some(state);
     let (applied, note) = reconcile_enabled(c, ldap, link, &account, enabled, transition).await?;
-    let attrs = sync_attributes(c, ldap, &account.dn).await?;
+    // ADR-050 sirasi: pasiflestirme → ekleme → OU tasima → cikarma → oznitelikler
+    let (dn, groups) = sync_groups_and_ou(c, ldap, &account).await?;
+    let attrs = sync_attributes(c, ldap, &dn).await?;
     if applied == Applied::DryRun || c.env.mode.dry_run {
         return Ok(format!(
-            "kuru çalıştırma, uygulanacaktı: {note}{attrs} ({})",
-            account.dn
+            "kuru çalıştırma, uygulanacaktı: {note}{groups}{attrs} ({dn})"
         ));
     }
     if transition {
         set_applied_state(c, state).await?;
     }
     Ok(format!(
-        "{note}{attrs}: {} → applied_state {state}",
-        account.dn
+        "{note}{groups}{attrs}: {dn} → applied_state {state}"
     ))
+}
+
+// Uyelik farki yalnizca katalog gruplari uzerinden (docs/03 "Motor neye dokunur").
+pub fn membership_diff(
+    current: &[String],
+    desired: &[String],
+    catalog: &[String],
+) -> (Vec<String>, Vec<String>) {
+    let add = desired
+        .iter()
+        .filter(|g| !current.contains(g))
+        .cloned()
+        .collect();
+    let remove = current
+        .iter()
+        .filter(|g| catalog.contains(g) && !desired.contains(g))
+        .cloned()
+        .collect();
+    (add, remove)
+}
+
+async fn desired_group_guids(c: &AdJob<'_>) -> Result<Vec<String>, JobError> {
+    let mut guids = Vec::new();
+    for item in &c.desired.memberships {
+        if let Some(guid) = catalog_guid(c.pool, *item).await? {
+            guids.push(guid);
+        }
+    }
+    Ok(guids)
+}
+
+async fn catalog_group_guids(c: &AdJob<'_>) -> Result<Vec<String>, JobError> {
+    sqlx::query_scalar(
+        "SELECT external_id FROM catalog_items WHERE target_system_id = $1 \
+         AND kind = 'group' AND missing_since IS NULL",
+    )
+    .bind(c.job.target_system_id)
+    .fetch_all(c.pool)
+    .await
+    .map_err(|e| JobError::Failed(format!("katalog grupları okunamadı: {e}")))
+}
+
+// Doner: hesabin guncel DN'i (tasindiysa yenisi) ve ozet notu.
+async fn sync_groups_and_ou(
+    c: &AdJob<'_>,
+    ldap: &mut Ldap,
+    account: &ad_account::DirectoryAccount,
+) -> Result<(String, String), JobError> {
+    let desired = desired_group_guids(c).await?;
+    let catalog = catalog_group_guids(c).await?;
+    let current = ad_account::member_group_guids(ldap, c.base_dn, &account.dn).await?;
+    let (to_add, to_remove) = membership_diff(&current, &desired, &catalog);
+    let mut notes = Vec::new();
+    let added = change_memberships(c, ldap, &account.dn, &to_add, true).await?;
+    if added > 0 {
+        notes.push(format!("{added} grup eklendi"));
+    }
+    let (dn, moved) = move_if_needed(c, ldap, account).await?;
+    if moved {
+        notes.push("OU taşındı".to_string());
+    }
+    let removed = change_memberships(c, ldap, &dn, &to_remove, false).await?;
+    if removed > 0 {
+        notes.push(format!("{removed} grup çıkarıldı"));
+    }
+    let note = notes.iter().map(|n| format!(", {n}")).collect::<String>();
+    Ok((dn, note))
+}
+
+async fn change_memberships(
+    c: &AdJob<'_>,
+    ldap: &mut Ldap,
+    member_dn: &str,
+    guids: &[String],
+    add: bool,
+) -> Result<usize, JobError> {
+    let mut changed = 0;
+    for guid in guids {
+        let Some(group_dn) = ad_account::dn_by_guid(ldap, guid).await? else {
+            continue;
+        };
+        let member_dn = member_dn.to_string();
+        let (op, class) = if add {
+            (
+                WriteOp::AddMember {
+                    group_dn,
+                    member_dn,
+                },
+                OperationClass::Grant,
+            )
+        } else {
+            (
+                WriteOp::RemoveMember {
+                    group_dn,
+                    member_dn,
+                },
+                OperationClass::Destructive,
+            )
+        };
+        apply(c, ldap, op, class).await?;
+        changed += 1;
+    }
+    Ok(changed)
+}
+
+// docs/05 OU tasima: ayni RDN ile modifyDN; hedefte CN cakisirsa CN kurali.
+// Pasif OU tanimli degilse ayrilan tasinmaz (docs/04 "tanimliysa").
+async fn move_if_needed(
+    c: &AdJob<'_>,
+    ldap: &mut Ldap,
+    account: &ad_account::DirectoryAccount,
+) -> Result<(String, bool), JobError> {
+    let target_ou = match c.desired.container {
+        Container::Unchanged | Container::Unspecified => return Ok((account.dn.clone(), false)),
+        Container::Passive if passive_ou().is_none() => return Ok((account.dn.clone(), false)),
+        _ => container_dn(c, ldap).await?,
+    };
+    let Some((rdn, parent)) = ad_account::split_dn(&account.dn) else {
+        return Err(JobError::Failed(format!(
+            "DN ayrıştırılamadı: {}",
+            account.dn
+        )));
+    };
+    if parent.eq_ignore_ascii_case(&target_ou) {
+        return Ok((account.dn.clone(), false));
+    }
+    let cn = rdn.strip_prefix("CN=").unwrap_or(rdn);
+    let new_rdn = if ad_account::cn_exists(ldap, &target_ou, cn).await? {
+        let p = &c.input.person;
+        let username = p.username.clone().unwrap_or_default();
+        format!(
+            "CN={}",
+            ldap3::dn_escape(ad_account::cn_for(
+                &p.given_name,
+                &p.surname,
+                Some(&username)
+            ))
+        )
+    } else {
+        rdn.to_string()
+    };
+    let op = WriteOp::MoveAccount {
+        dn: account.dn.clone(),
+        new_rdn: new_rdn.clone(),
+        new_parent: target_ou.clone(),
+    };
+    apply(c, ldap, op, OperationClass::Attribute).await?;
+    Ok((format!("{new_rdn},{target_ou}"), true))
+}
+
+fn passive_ou() -> Option<String> {
+    std::env::var("AD_PASSIVE_OU")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
 }
 
 async fn reconcile_enabled(
@@ -593,6 +744,18 @@ async fn sync_attributes(c: &AdJob<'_>, ldap: &mut Ldap, dn: &str) -> Result<Str
 mod tests {
     use super::*;
     use crate::test_support;
+
+    #[test]
+    fn membership_diff_only_touches_catalog_groups() {
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        let (add, remove) = membership_diff(
+            &s(&["vpn", "elle-eklenen", "eski-rol"]),
+            &s(&["vpn", "nobet"]),
+            &s(&["vpn", "nobet", "eski-rol"]),
+        );
+        assert_eq!(add, s(&["nobet"]));
+        assert_eq!(remove, s(&["eski-rol"]), "katalog dışı grup dokunulmaz");
+    }
 
     #[test]
     fn state_names_match_account_links_check() {
@@ -766,6 +929,50 @@ mod tests {
             .await
             .unwrap();
 
+        // Gorev degisikligi (ADR-050/083): rol grubu VPN → Nobet, OU SistemUzmanlari → Personel;
+        // once ekleme, sonra tasima, sonra cikarma.
+        let real_item = |name: &'static str| {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT id FROM catalog_items WHERE display_name = $1 AND target_system_id = $2 \
+                 AND external_id NOT LIKE 'GG-%' AND external_id NOT IN ('Personel', 'SistemUzmanlari')",
+            )
+            .bind(name)
+            .bind(seed.ad)
+            .fetch_one(&pool)
+        };
+        let nobet = real_item("GG-Nobet").await.unwrap();
+        let personel_ou = real_item("Personel").await.unwrap();
+        sqlx::query("UPDATE role_entitlements SET catalog_item_id = $1 WHERE role_id IN (SELECT id FROM roles WHERE kind = 'primary')")
+            .bind(nobet)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE role_target_settings SET container_item_id = $1")
+            .bind(personel_ou)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let moved = run_job(&pool, &job, &env(false)).await.unwrap();
+        for expected in ["1 grup eklendi", "OU taşındı", "1 grup çıkarıldı"] {
+            assert!(moved.contains(expected), "{moved}");
+        }
+        let account = ad_account::find_by_guid(&mut ldap, &guid)
+            .await
+            .unwrap()
+            .expect("hesap taşındı ama duruyor");
+        let dn = account.dn.to_ascii_lowercase();
+        assert!(
+            dn.ends_with("ou=personel,dc=opensicil,dc=lab") && !dn.contains("sistemuzmanlari"),
+            "{}",
+            account.dn
+        );
+        assert!(account.member_of.iter().any(|g| g.contains("GG-Nobet")));
+        assert!(!account.member_of.iter().any(|g| g.contains("GG-VPN")));
+        // SAFETY: tek is parcacikli test; ayni degiskeni eszamanli degistiren baska test yok.
+        unsafe {
+            std::env::set_var("AD_PASSIVE_OU", "OU=Pasif,OU=Personel,DC=opensicil,DC=lab");
+        }
+
         // ADR-040: rol artik "hesap acilsin = hayir" diyor; bagli hesap yine yonetilir.
         for sql in [
             "UPDATE role_target_settings SET provision_account = FALSE WHERE target_system_id = $1",
@@ -784,13 +991,20 @@ mod tests {
         let departed = run_job(&pool, &job, &env(false)).await.unwrap();
         assert!(departed.contains("pasifleştirildi"), "{departed}");
         assert!(departed.contains("rol hesap öngörmüyor"), "{departed}");
+        // Ayrilis: katalog gruplari kalkar, pasif OU'ya tasinir (docs/04 planli ayrilis)
+        assert!(departed.contains("1 grup çıkarıldı"), "{departed}");
+        assert!(departed.contains("OU taşındı"), "{departed}");
+        let account = ad_account::find_by_guid(&mut ldap, &guid)
+            .await
+            .unwrap()
+            .unwrap();
         assert!(
-            !ad_account::find_by_guid(&mut ldap, &guid)
-                .await
-                .unwrap()
-                .unwrap()
-                .enabled
+            account.dn.to_ascii_lowercase().contains("ou=pasif"),
+            "{}",
+            account.dn
         );
+        assert!(account.member_of.is_empty(), "{:?}", account.member_of);
+        assert!(!account.enabled);
 
         // ADR-040: hedefte elle silinmis bagli hesap yeniden acilmaz, "kayip hesap".
         ldap.delete(&account.dn).await.unwrap().success().unwrap();

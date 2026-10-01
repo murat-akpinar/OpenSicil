@@ -190,8 +190,53 @@ impl TargetWriter for AdWriter<'_> {
                 member_dn,
             } => change_member(self.ldap, group_dn, member_dn, false).await,
             WriteOp::SetAttributes { dn, changes } => set_attributes(self.ldap, dn, changes).await,
+            WriteOp::MoveAccount {
+                dn,
+                new_rdn,
+                new_parent,
+            } => self
+                .ldap
+                .modifydn(dn, new_rdn, true, Some(new_parent))
+                .await
+                .map_err(ad::classify)?
+                .success()
+                .map(|_| ())
+                .map_err(ad::classify),
         }
     }
+}
+
+/// DN'i (RDN, ust) olarak ayirir; kacisli virgul (`\,`) ayirici sayilmaz.
+pub fn split_dn(dn: &str) -> Option<(&str, &str)> {
+    let bytes = dn.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\\' => i += 2,
+            b',' => return Some((&dn[..i], &dn[i + 1..])),
+            _ => i += 1,
+        }
+    }
+    None
+}
+
+/// Hesabin uyesi oldugu gruplarin objectGUID'leri (uyelik farki icin; docs/05).
+pub async fn member_group_guids(
+    ldap: &mut Ldap,
+    base_dn: &str,
+    member_dn: &str,
+) -> Result<Vec<String>, WriteError> {
+    let filter = format!("(&(objectClass=group)(member={}))", ldap_escape(member_dn));
+    let found = ad::search(ldap, base_dn, Scope::Subtree, &filter, &["objectGUID"]).await?;
+    Ok(found
+        .iter()
+        .filter_map(|e| {
+            e.bin_attrs
+                .get("objectGUID")
+                .and_then(|v| v.first())
+                .and_then(|b| ad::guid_to_string(b))
+        })
+        .collect())
 }
 
 // docs/05 Oznitelik guncelleme: replace; kaynak bossa sil (ADR-012).
@@ -329,6 +374,16 @@ async fn change_member(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn split_dn_respects_escaped_commas() {
+        assert_eq!(
+            split_dn("CN=Yilmaz\\, Ayse,OU=Personel,DC=x"),
+            Some(("CN=Yilmaz\\, Ayse", "OU=Personel,DC=x"))
+        );
+        assert_eq!(split_dn("CN=a,DC=x"), Some(("CN=a", "DC=x")));
+        assert_eq!(split_dn("DC=x"), None);
+    }
 
     #[test]
     fn filetime_epoch_and_unicode_pwd_encoding() {

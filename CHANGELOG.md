@@ -52,4 +52,5 @@
 - Elle kullanıcı adı, çakışma müdahalesi ve kullanılmış ad serbest bırakma (ADR-081)
 - Öznitelik eşlemesi: izinli liste, sadece boşsa yaz, yönetici eşlemesi ve ekran (ADR-082)
 - Hesap açılsın=hayır mevcut hesabı silmez, kayıp hesap ve belirsiz yönetici dokunulmaz (ADR-040)
+- Görev değişikliği: üyelik farkı, OU taşıma, kimlik düzenleme ve ek roller (ADR-050/083)
 

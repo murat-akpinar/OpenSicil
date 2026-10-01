@@ -37,6 +37,42 @@
 </div>
 {% endif %}
 
+<div class="flex justify-between items-center mb-2">
+  <h2 class="font-medium">Ek roller</h2>
+  {% if can_edit_names %}<a class="text-sm underline" href="/identities/{{ page.person.id }}/edit">Kimliği düzenle</a>{% endif %}
+</div>
+{% if page.additional_roles.is_empty() %}
+<p class="text-sm mb-2" style="color:#a6adc8;">Ek rol yok.</p>
+{% else %}
+<table class="w-full text-sm mb-2">
+  <thead><tr class="text-left" style="color:#a6adc8;"><th>Rol</th><th>Bitiş (iznin son günü gibi, ADR-020)</th><th></th></tr></thead>
+  <tbody>
+  {% for r in page.additional_roles %}
+    <tr style="border-top:1px solid #313244;">
+      <td class="py-1">{{ r.name }}</td>
+      <td>{{ r.ends_on }}</td>
+      <td>{% if can_edit_names %}<form method="post" action="/identities/{{ page.person.id }}/roles/{{ r.role_id }}/delete"><button class="text-sm underline" type="submit">Kaldır</button></form>{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% if can_edit_names %}
+<form method="post" action="/identities/{{ page.person.id }}/roles" class="flex gap-2 items-end mb-6">
+  <div class="grow">
+    <label class="block text-sm mb-1" for="role_id">Ek rol</label>
+    <select class="w-full rounded px-3 py-2 text-black" id="role_id" name="role_id" required>
+      {% for c in page.role_options %}<option value="{{ c.id }}">{{ c.label }}</option>{% endfor %}
+    </select>
+  </div>
+  <div>
+    <label class="block text-sm mb-1" for="ends_on">Bitiş (isteğe bağlı)</label>
+    <input class="rounded px-3 py-2 text-black" type="date" id="ends_on" name="ends_on">
+  </div>
+  <button class="rounded px-3 py-2" style="background:#89b4fa; color:#1e1e2e;" type="submit">Ekle</button>
+</form>
+{% endif %}
+
 <h2 class="font-medium mb-2">Hesaplar ve hedefteki fark</h2>
 <table class="w-full text-sm mb-6">
   <thead><tr class="text-left" style="color:#a6adc8;"><th>Hedef</th><th>Hesap</th><th>Köken / mod</th><th>Uygulanan</th><th>Fark</th></tr></thead>
