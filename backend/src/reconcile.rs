@@ -478,6 +478,96 @@ mod tests {
         crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
     }
 
+    /// ADR-103 madde 3 "tumunu sec": baslik kutusu yalnizca sahiplenme formuyla
+    /// birlikte basilir (yetkisiz operator formu da kutuyu da gormez) ve satir
+    /// kutularinin adini tasir — app.js onlari bu adla bulur, satir ici onclick yok.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn the_select_all_box_only_renders_with_the_adoption_form() {
+        use axum::body::Body;
+        use axum::http::{header, Request};
+        use tower::ServiceExt;
+
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        crate::test_support::seed_two_identities(&pool).await;
+        let app = crate::web::routes()
+            .with_state(crate::web::test_state(pool.clone(), "https://localhost"));
+        let target: i64 = sqlx::query_scalar("SELECT id FROM target_systems WHERE kind = 'ad'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let read_job: i64 = sqlx::query_scalar(
+            "INSERT INTO read_jobs (kind, target_system_id, requested_by) \
+             VALUES ('reconcile', $1, 'test') RETURNING id",
+        )
+        .bind(target)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO reconcile_findings (target_system_id, read_job_id, kind, external_id, \
+             account_name, given_name, surname) VALUES ($1, $2, 'unmanaged', 'g1', \
+             'harry.potter', 'Harry', 'Potter')",
+        )
+        .bind(target)
+        .bind(read_job)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let page = |authority: &'static str| {
+            let (app, pool) = (app.clone(), pool.clone());
+            async move {
+                let operator = crate::operator_session::Operator {
+                    subject: "sub-x".to_string(),
+                    username: "ik.operatoru".to_string(),
+                    email: "ik@example.org".to_string(),
+                    authorities: vec![authority.to_string()],
+                    auth_source: crate::operator_session::AuthSource::Oidc,
+                    lang: crate::i18n::DEFAULT,
+                };
+                let token = crate::operator_session::create_session(&pool, &operator)
+                    .await
+                    .unwrap();
+                let r = app
+                    .oneshot(
+                        Request::builder()
+                            .uri(format!("/targets/{target}/reconcile"))
+                            .header(
+                                header::COOKIE,
+                                format!("{}={token}", crate::cookie::OPERATOR_SESSION_COOKIE_NAME),
+                            )
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                let bytes = axum::body::to_bytes(r.into_body(), usize::MAX)
+                    .await
+                    .unwrap();
+                String::from_utf8(bytes.to_vec()).unwrap()
+            }
+        };
+
+        let hr = page("hr").await;
+        assert!(
+            hr.contains(r#"data-select-all="finding""#),
+            "başlık kutusu yok"
+        );
+        assert!(hr.contains(r#"name="finding""#), "satır kutusu yok");
+        assert!(!hr.contains("onclick"), "satır içi script CSP'ye takılır");
+        let auditor = page("auditor").await;
+        assert!(auditor.contains("harry.potter"), "auditor bulguyu okur");
+        assert!(
+            !auditor.contains("data-select-all"),
+            "formu olmayan kutuyu da görmez"
+        );
+
+        drop(app);
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
     /// ADR-103 madde 3: panel ve bos personel listesi "sirada ne var" diyor.
     /// Serit sahiplenilmemis hesap kalmayinca kendiliginden kayboluyor mu?
     #[tokio::test]

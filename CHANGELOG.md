@@ -115,4 +115,5 @@
 - Tekil sahiplenmede sicil ve telefon AD'den gelir
 - Rol ve departman listeleri bölümlere ve gerçek ağaca geçti
 - Rol ve departman detayında gruplanmış üyelikler ve miras satırı
+- Toplu sahiplenmede tümünü seç kutusu (ADR-103 madde 3)
 

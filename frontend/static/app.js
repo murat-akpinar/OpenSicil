@@ -75,10 +75,56 @@
     }
   }
 
+  // Tablo başlığındaki kutu, aynı formdaki data-select-all="<ad>" ile adı verilen
+  // bütün kutuları seçer/bırakır; satırlar değişince başlık kutusu onları yansıtır
+  // (hepsi seçiliyse işaretli, bir kısmıysa belirsiz). ADR-103 madde 3.
+  function selectAll() {
+    var heads = document.querySelectorAll("input[type=checkbox][data-select-all]");
+    for (var i = 0; i < heads.length; i++) {
+      bindSelectAll(heads[i]);
+    }
+  }
+
+  function bindSelectAll(head) {
+    var form = head.form || head.closest("form");
+    if (!form) {
+      return;
+    }
+    var name = head.getAttribute("data-select-all");
+    function rows() {
+      return form.querySelectorAll('input[type=checkbox][name="' + name + '"]');
+    }
+    function reflect() {
+      var list = rows();
+      var checked = 0;
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].checked) {
+          checked++;
+        }
+      }
+      head.checked = list.length > 0 && checked === list.length;
+      head.indeterminate = checked > 0 && checked < list.length;
+    }
+    head.addEventListener("change", function () {
+      var list = rows();
+      for (var i = 0; i < list.length; i++) {
+        list[i].checked = head.checked;
+      }
+      head.indeterminate = false;
+    });
+    form.addEventListener("change", function (event) {
+      if (event.target !== head && event.target.name === name) {
+        reflect();
+      }
+    });
+    reflect();
+  }
+
   apply(stored());
 
   document.addEventListener("DOMContentLoaded", function () {
     themeToggle();
     activeNav();
+    selectAll();
   });
 })();
