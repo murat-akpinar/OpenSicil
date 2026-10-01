@@ -28,11 +28,19 @@
   {% endif %}
 </div>
 
+{# Panel'deki sayac kutusuyla ayni yapi (.stat-head/.stat-label/.stat-value) #}
 <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-6">
-  <div class="stat"><span class="meta">{{ lang.t("reconcilekind.unmanaged") }}</span><strong class="h1">{{ v.unmanaged }}</strong></div>
-  <div class="stat"><span class="meta">{{ lang.t("reconcilekind.managed") }}</span><strong class="h1">{{ v.managed }}</strong></div>
-  <div class="stat"><span class="meta">{{ lang.t("reconcilekind.observed") }}</span><strong class="h1">{{ v.observed }}</strong></div>
-  <div class="stat"><span class="meta">{{ lang.t("reconcilekind.missing") }}</span><strong class="h1">{{ v.missing }}</strong></div>
+  {% for box in v.boxes() %}
+  <div class="stat">
+    <div class="stat-head">
+      <span class="ico-tile"><i class="ico ico-{{ box.icon }}" aria-hidden="true"></i></span>
+      <div class="min-w-0">
+        <p class="stat-label">{{ lang.t(box.label) }}</p>
+        <p class="stat-value">{{ box.count }}</p>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
 </div>
 
 {% if v.rows.is_empty() %}

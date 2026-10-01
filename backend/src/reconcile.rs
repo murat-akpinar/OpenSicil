@@ -44,6 +44,40 @@ pub struct View {
     pub result: String,
 }
 
+pub struct Box {
+    pub icon: &'static str,
+    pub label: &'static str,
+    pub count: i64,
+}
+
+impl View {
+    /// Sayac kutulari; ilgi sirasi: once dikkat isteyenler.
+    pub fn boxes(&self) -> Vec<Box> {
+        vec![
+            Box {
+                icon: "user",
+                label: "reconcilekind.unmanaged",
+                count: self.unmanaged,
+            },
+            Box {
+                icon: "shield",
+                label: "reconcilekind.managed",
+                count: self.managed,
+            },
+            Box {
+                icon: "search",
+                label: "reconcilekind.observed",
+                count: self.observed,
+            },
+            Box {
+                icon: "link",
+                label: "reconcilekind.missing",
+                count: self.missing,
+            },
+        ]
+    }
+}
+
 const ROWS_SQL: &str = "SELECT kind, account_name, COALESCE(display_name, ''), \
     COALESCE(container, ''), enabled, identity_id FROM reconcile_findings \
     WHERE target_system_id = $1 \

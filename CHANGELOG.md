@@ -27,6 +27,7 @@
 
 - Arayüz kökü 404 veriyordu, kabuğun / bağlantısı rotasızdı
 - Değişen statik varlıklar artık ETag ile doğrulanıyor
+- Mutabakat sayaç kutuları panel yapısına alındı; iki AD ortamı belgelendi
 
 ### Testler
 
