@@ -121,7 +121,8 @@ Kurallar:
   - Not: ileri tarihli bitiş `ayrıldı`dan çıkarıyorsa `identity.departure_reverted` olarak denetlenir; form iznin son gününü alır ve dönüş gününü gösterir; `accountExpires` her işte bitişe göre yazılır, bitiş yoksa `0` (lab testinde doğrulandı)
 - [x] Yönetici ayrılışında astların etkin yöneticisi türetilir (F-38, [ADR-041](decisions/041-astlarin-yoneticisi-turetilir.md))
   - Not: türetme ve `manager` eşlemesi ADR-082 kutucuğuyla gelmişti; burada yöneticinin `ayrıldı`ya giriş/çıkış işi astlara iş açıyor (`enqueue_subordinates`), kişi sayfası "(ayrıldı → devir: X)" notunu, ast sayısını ve yöneticisiz kalan astlar uyarısını gösteriyor
-- [ ] Süreli ek rol, tarih dolunca kendiliğinden kalkar (F-37, [ADR-020](decisions/020-sureli-ek-rol.md))
+- [x] Süreli ek rol, tarih dolunca kendiliğinden kalkar (F-37, [ADR-020](decisions/020-sureli-ek-rol.md))
+  - Not: zamanlayıcı tiki bitişi geçmiş atamayı siler, `identity.role_expired` ("süresi doldu") yazar ve her hedefe iş açar; gruplar o işte üyelik farkıyla düşer (ADR-050 yıkıcı sınıf)
 - [ ] Ayrılışta gecikmeli parola sıfırlama ([ADR-033](decisions/033-ayrilista-parola-gecikmesi.md))
 - [ ] Yaklaşan bitişler listesi (F-36)
 - [ ] Faz kapanışı: güvenlik ve test

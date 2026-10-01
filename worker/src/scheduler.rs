@@ -55,7 +55,7 @@ pub async fn tick(pool: &PgPool, time_zone: &str) -> Result<usize, String> {
     .fetch_all(&mut *tx)
     .await
     .map_err(|e| format!("bağlantılar okunamadı: {e}"))?;
-    let mut opened = 0;
+    let mut opened = expire_additional_roles(&mut tx, time_zone).await?;
     for row in rows {
         let (identity_id, target_system_id, applied) = (row.0, row.1, row.2.as_deref());
         let state = derived_state(&row)?;
@@ -76,6 +76,34 @@ pub async fn tick(pool: &PgPool, time_zone: &str) -> Result<usize, String> {
     }
     tx.commit().await.map_err(|e| e.to_string())?;
     Ok(opened)
+}
+
+// ADR-020/038: bitisi gecmis ek rol atamasi kaldirilir, denetim kaydina "suresi doldu"
+// yazilir ve kimlik icin her hedefe is acilir (gruplar sonraki iste duser). Tek
+// ifade: veri degistiren CTE'ler bir kez calisir, sonuc acilan is sayisidir.
+async fn expire_additional_roles(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    time_zone: &str,
+) -> Result<usize, String> {
+    let opened = sqlx::query(
+        "WITH expired AS ( \
+           DELETE FROM identity_additional_roles \
+           WHERE ends_on < (now() AT TIME ZONE $1)::date RETURNING identity_id, role_id), \
+         logged AS ( \
+           INSERT INTO audit_log (event_type, identity_id, detail) \
+           SELECT 'identity.role_expired', identity_id, \
+                  jsonb_build_object('role_id', role_id, 'reason', 'süresi doldu') \
+           FROM expired RETURNING identity_id) \
+         INSERT INTO jobs (identity_id, target_system_id, priority) \
+         SELECT DISTINCT e.identity_id, t.id, $2 FROM expired e CROSS JOIN target_systems t \
+         ON CONFLICT (identity_id, target_system_id) WHERE status <> 'succeeded' DO NOTHING",
+    )
+    .bind(time_zone)
+    .bind(TRANSITION_PRIORITY)
+    .execute(&mut **tx)
+    .await
+    .map_err(|e| format!("süresi dolan ek roller işlenemedi: {e}"))?;
+    Ok(opened.rows_affected() as usize)
 }
 
 // Silme (saklama suresi, ADR-024) 3c'de gelir; o gune kadar `silindi` icin is acilmaz,
@@ -194,6 +222,62 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(open, 1);
+
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
+    // ADR-020: bitisi gecmis ek rol tek tikte kalkar, denetime yazilir, her hedefe is acilir;
+    // bitisi gelmemis atama durur.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn tick_expires_additional_roles_once_with_audit_and_jobs() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        let seed = crate::test_support::seed_example_model(&pool).await;
+        let nobet: i64 = sqlx::query_scalar("SELECT id FROM roles WHERE kind = 'additional'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO identity_additional_roles (identity_id, role_id, ends_on) \
+             VALUES ($1, $2, current_date - 1)",
+        )
+        .bind(seed.other_identity)
+        .bind(nobet)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(
+            tick(&pool, "Europe/Istanbul").await.unwrap(),
+            2,
+            "iki hedefe iş"
+        );
+        let remaining: Vec<i64> =
+            sqlx::query_scalar("SELECT identity_id FROM identity_additional_roles")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            remaining,
+            vec![seed.identity],
+            "14 gün sonrası duran atama kalır"
+        );
+        let (events, jobs): (i64, i64) = sqlx::query_as(
+            "SELECT (SELECT COUNT(*) FROM audit_log WHERE event_type = 'identity.role_expired' \
+                     AND identity_id = $1 AND detail->>'reason' = 'süresi doldu'), \
+                    (SELECT COUNT(*) FROM jobs WHERE identity_id = $1 AND status = 'queued')",
+        )
+        .bind(seed.other_identity)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!((events, jobs), (1, 2));
+        assert_eq!(
+            tick(&pool, "Europe/Istanbul").await.unwrap(),
+            0,
+            "ikinci tik boş"
+        );
 
         drop(pool);
         crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
