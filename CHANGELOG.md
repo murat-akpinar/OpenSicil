@@ -23,6 +23,7 @@
 - Ürün adı OpenSicil, eski OpenIAM kalıntıları düzeltildi (ADR-063)
 - Görsel yenileme ve gerçek Windows AD kutucukları açıldı
 - Iki yeni kutucuk — müdahale listesi ve sahiplenmede AD kişi alanları
+- Tekil sahiplenmede sicil ve telefon kutucuğu
 
 ### Düzeltmeler
 
