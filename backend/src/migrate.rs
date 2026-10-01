@@ -118,7 +118,8 @@ GRANT UPDATE (released_at, release_reason) ON used_names TO {backend};
 const IDENTITY_OPERATOR_COLUMNS: &str = "given_name, surname, employee_number, mobile_phone, \
 existing_ad_account_hint, existing_zimbra_account_hint, department_id, primary_role_id, \
 manager_id, handover_manager_id, employment_type, start_date, end_at, suspension_start, \
-suspension_end, cancelled, emergency_departure, national_id_enc, national_id_bidx, national_id_country";
+suspension_end, cancelled, emergency_departure, national_id_enc, national_id_bidx, national_id_country, \
+requested_username, name_conflict_override";
 
 async fn grant_service_privileges(
     pool: &PgPool,

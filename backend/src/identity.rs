@@ -50,6 +50,9 @@ pub struct IdentityForm {
     pub start_date: String,
     #[serde(default)]
     pub end_date: String,
+    // ADR-022: istege bagli elle kullanici adi; bossa sablon
+    #[serde(default)]
+    pub requested_username: String,
     // "Yine de kaydet" kutusu (mukerrer kisi uyarisi, docs/03)
     #[serde(default)]
     pub confirm_duplicate: Option<String>,
@@ -68,6 +71,23 @@ pub struct NewIdentity {
     pub employment_type: String,
     pub start_date: String,
     pub end_date: Option<String>,
+    pub requested_username: Option<String>,
+}
+
+// Sekil kontrolu burada; ADR-011 normallestirmesi worker'da (validate_manual).
+pub fn valid_requested_username(raw: &str) -> Result<Option<String>, String> {
+    const MAX_LEN: usize = 20;
+    let name = raw.trim().to_lowercase();
+    if name.is_empty() {
+        return Ok(None);
+    }
+    let shape_ok = name.chars().count() <= MAX_LEN
+        && name.chars().all(|c| c.is_alphanumeric() || c == '.')
+        && !name.starts_with('.')
+        && !name.ends_with('.');
+    shape_ok
+        .then_some(Some(name))
+        .ok_or_else(|| format!("Kullanıcı adı en fazla {MAX_LEN} karakter, harf/rakam/nokta"))
 }
 
 pub fn validate(f: &IdentityForm) -> Result<NewIdentity, String> {
@@ -110,6 +130,7 @@ pub fn validate(f: &IdentityForm) -> Result<NewIdentity, String> {
         employment_type: f.employment_type.clone(),
         start_date: f.start_date.trim().to_string(),
         end_date: optional(&f.end_date),
+        requested_username: valid_requested_username(&f.requested_username)?,
     })
 }
 
@@ -174,9 +195,10 @@ pub async fn create(
     let mut tx = pool.begin().await?;
     let id: i64 = sqlx::query_scalar(
         "INSERT INTO identities (given_name, surname, employee_number, mobile_phone, \
-         department_id, primary_role_id, manager_id, employment_type, start_date, end_at) \
+         department_id, primary_role_id, manager_id, employment_type, start_date, end_at, \
+         requested_username) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::date, \
-         (($10::date + 1)::timestamp AT TIME ZONE $11)) RETURNING id",
+         (($10::date + 1)::timestamp AT TIME ZONE $11), $12) RETURNING id",
     )
     .bind(&new.given_name)
     .bind(&new.surname)
@@ -189,6 +211,7 @@ pub async fn create(
     .bind(&new.start_date)
     .bind(&new.end_date)
     .bind(time_zone)
+    .bind(&new.requested_username)
     .fetch_one(&mut *tx)
     .await?;
     if let Some(nid) = &new.national_id {
@@ -374,7 +397,28 @@ pub struct Person {
     pub username: String,
     pub email: String,
     pub upn: String,
+    pub requested_username: String,
+    pub name_conflict_override: bool,
     pub state: &'static str,
+}
+
+// ADR-022/042: istek ve karar yalnizca ad henuz olusmamisken yazilir (false = olusmus).
+pub async fn request_names(
+    pool: &PgPool,
+    id: i64,
+    requested_username: Option<&str>,
+    name_conflict_override: bool,
+) -> Result<bool, sqlx::Error> {
+    let done = sqlx::query(
+        "UPDATE identities SET requested_username = $2, name_conflict_override = $3 \
+         WHERE id = $1 AND username IS NULL",
+    )
+    .bind(id)
+    .bind(requested_username)
+    .bind(name_conflict_override)
+    .execute(pool)
+    .await?;
+    Ok(done.rows_affected() == 1)
 }
 
 pub struct Account {
@@ -410,6 +454,8 @@ pub struct PersonPage {
     pub accounts: Vec<Account>,
     pub jobs: Vec<Job>,
     pub events: Vec<Event>,
+    /// Ad henuz yok ve bir is mudahalede: ADR-022/042 secenekleri gosterilir
+    pub name_intervention: bool,
 }
 
 pub async fn load_page(
@@ -421,11 +467,16 @@ pub async fn load_page(
     let Some(state) = load_state(pool, time_zone, id).await? else {
         return Ok(None);
     };
+    let person = load_person(pool, time_zone, aead_key, id, state).await?;
+    let jobs = load_jobs(pool, time_zone, id).await?;
+    let name_intervention =
+        person.username.is_empty() && jobs.iter().any(|j| j.status == INTERVENTION_LABEL);
     Ok(Some(PersonPage {
-        person: load_person(pool, time_zone, aead_key, id, state).await?,
         accounts: load_accounts(pool, id, state).await?,
-        jobs: load_jobs(pool, time_zone, id).await?,
         events: load_events(pool, time_zone, id).await?,
+        person,
+        jobs,
+        name_intervention,
     }))
 }
 
@@ -444,6 +495,8 @@ type PersonRow = (
     Option<String>,
     Option<String>,
     Option<String>,
+    Option<String>,
+    bool,
 );
 
 async fn load_person(
@@ -457,7 +510,8 @@ async fn load_person(
         "SELECT i.given_name, i.surname, i.employee_number, i.mobile_phone, i.national_id_enc, \
          d.name, r.name, m.given_name || ' ' || m.surname, i.employment_type, \
          to_char(i.start_date, 'YYYY-MM-DD'), \
-         to_char(i.end_at AT TIME ZONE $2, 'YYYY-MM-DD HH24:MI'), i.username, i.email, i.upn \
+         to_char(i.end_at AT TIME ZONE $2, 'YYYY-MM-DD HH24:MI'), i.username, i.email, i.upn, \
+         i.requested_username, i.name_conflict_override \
          FROM identities i JOIN departments d ON d.id = i.department_id \
          JOIN roles r ON r.id = i.primary_role_id \
          LEFT JOIN identities m ON m.id = i.manager_id WHERE i.id = $1",
@@ -489,6 +543,8 @@ async fn load_person(
         username: r.11.unwrap_or_default(),
         email: r.12.unwrap_or_default(),
         upn: r.13.unwrap_or_default(),
+        requested_username: r.14.unwrap_or_default(),
+        name_conflict_override: r.15,
         state: state_label(state),
     })
 }
@@ -568,12 +624,14 @@ pub fn diff_text(state: LifecycleState, linked: bool, applied: Option<&str>) -> 
     }
 }
 
+const INTERVENTION_LABEL: &str = "müdahale gerekiyor";
+
 fn status_label(status: &str) -> &'static str {
     match status {
         "queued" => "kuyrukta",
         "running" => "çalışıyor",
         "succeeded" => "tamamlandı",
-        "needs_intervention" => "müdahale gerekiyor",
+        "needs_intervention" => INTERVENTION_LABEL,
         _ => "bilinmiyor",
     }
 }
@@ -716,6 +774,24 @@ mod tests {
     }
 
     #[test]
+    fn requested_username_shape_is_checked_here_normalization_in_worker() {
+        assert_eq!(valid_requested_username("  ").unwrap(), None);
+        assert_eq!(
+            valid_requested_username(" Mehmet.Ali ").unwrap(),
+            Some("mehmet.ali".to_string())
+        );
+        assert!(valid_requested_username("a b").is_err());
+        assert!(valid_requested_username(".ad").is_err());
+        assert!(valid_requested_username(&"a".repeat(21)).is_err());
+        let mut f = form();
+        f.requested_username = "m.ali".to_string();
+        assert_eq!(
+            validate(&f).unwrap().requested_username.as_deref(),
+            Some("m.ali")
+        );
+    }
+
+    #[test]
     fn permanent_needs_no_end_date() {
         let mut f = form();
         f.employment_type = PERMANENT.to_string();
@@ -825,6 +901,36 @@ mod tests {
             .unwrap()
             .is_none());
         assert_eq!(recent(&pool, tz).await.unwrap().len(), 3);
+
+        // ADR-022/042: ad istegi yalnizca ad olusmamisken; mudahale blogu isle birlikte.
+        assert!(request_names(&pool, id, Some("ozel.ad"), true)
+            .await
+            .unwrap());
+        sqlx::query("UPDATE jobs SET status = 'needs_intervention' WHERE identity_id = $1")
+            .bind(id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let page = load_page(&pool, tz, keys.aead, id).await.unwrap().unwrap();
+        assert!(page.name_intervention);
+        assert_eq!(page.person.requested_username, "ozel.ad");
+        assert!(page.person.name_conflict_override);
+        sqlx::query("UPDATE identities SET username = 'ozel.ad' WHERE id = $1")
+            .bind(id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(
+            !request_names(&pool, id, None, false).await.unwrap(),
+            "ad oluştuktan sonra istek yazılmaz"
+        );
+        assert!(
+            !load_page(&pool, tz, keys.aead, id)
+                .await
+                .unwrap()
+                .unwrap()
+                .name_intervention
+        );
 
         drop(pool);
         crate::test_support::drop_temp_db(&admin_pool, &db_name).await;

@@ -9,6 +9,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::Router;
+use serde::Deserialize;
 
 use crate::cookie::{get_cookie, OPERATOR_SESSION_COOKIE_NAME};
 use crate::identity::{self, FormOptions, IdentityForm, PersonPage};
@@ -66,6 +67,60 @@ pub fn routes() -> Router<AppState> {
         .route("/identities", post(create))
         .route("/identities/{id}", get(show))
         .route("/identities/{id}/jobs/{job_id}/retry", post(retry))
+        .route("/identities/{id}/names", post(request_names))
+}
+
+#[derive(Deserialize)]
+struct NamesForm {
+    #[serde(default)]
+    requested_username: String,
+    #[serde(default)]
+    name_conflict_override: Option<String>,
+}
+
+// ADR-022/042 mudahale secenekleri: farkli ad, "farkli kisi, siradaki adi ver";
+// ad olustuktan sonra degistirilemez (409). Kayit, mudahaledeki isleri yeniden dener.
+async fn request_names(
+    OperatorSession(op): OperatorSession,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Form(form): Form<NamesForm>,
+) -> Response {
+    if !allowed(&op, REGISTER_AUTHORITIES) {
+        return forbidden();
+    }
+    let requested = match identity::valid_requested_username(&form.requested_username) {
+        Ok(r) => r,
+        Err(msg) => return (StatusCode::BAD_REQUEST, msg).into_response(),
+    };
+    let override_conflicts = form.name_conflict_override.is_some();
+    match identity::request_names(&state.pool, id, requested.as_deref(), override_conflicts).await {
+        Ok(true) => {}
+        Ok(false) => {
+            return (
+                StatusCode::CONFLICT,
+                "Kullanıcı adı zaten oluşmuş, değiştirilemez (ADR-011).",
+            )
+                .into_response()
+        }
+        Err(e) => return internal("ad isteği yazılamadı", e),
+    }
+    let detail = serde_json::json!({
+        "requested_username": requested,
+        "name_conflict_override": override_conflicts,
+    });
+    audit_operator(
+        &state,
+        &op,
+        crate::audit::IDENTITY_NAME_REQUESTED,
+        Some(id),
+        detail,
+    )
+    .await;
+    if let Err(e) = crate::jobs::request_retry_all(&state.pool, id).await {
+        eprintln!("web: tekrar dene yazılamadı (kimlik {id}): {e}");
+    }
+    Redirect::to(&format!("/identities/{id}")).into_response()
 }
 
 #[derive(Template)]
@@ -83,6 +138,7 @@ struct IdentityFormTemplate {
 struct PersonTemplate {
     page: PersonPage,
     can_retry: bool,
+    can_edit_names: bool,
 }
 
 async fn new_form(OperatorSession(op): OperatorSession, State(state): State<AppState>) -> Response {
@@ -180,6 +236,7 @@ async fn show(
         Ok(Some(page)) => render(&PersonTemplate {
             page,
             can_retry: allowed(&op, RETRY_AUTHORITIES),
+            can_edit_names: allowed(&op, REGISTER_AUTHORITIES),
         }),
         Ok(None) => (StatusCode::NOT_FOUND, "Kimlik bulunamadı.").into_response(),
         Err(e) => internal("kişi sayfası okunamadı", e),
@@ -414,6 +471,69 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(r.status(), StatusCode::NOT_FOUND);
+
+        // ADR-022/042 mudahale: ad istegi + "siradaki adi ver" → bayrak + tekrar dene.
+        sqlx::query("UPDATE jobs SET retry_requested = FALSE WHERE id = $1")
+            .bind(job_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let names = format!("/identities/{id}/names");
+        let r = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                &names,
+                "requested_username=Ozel.Ad&name_conflict_override=1",
+                &hr,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::SEE_OTHER);
+        let (requested, over, retry): (Option<String>, bool, bool) = sqlx::query_as(
+            "SELECT i.requested_username, i.name_conflict_override, j.retry_requested \
+             FROM identities i JOIN jobs j ON j.identity_id = i.id WHERE i.id = $1",
+        )
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            (requested.as_deref(), over, retry),
+            (Some("ozel.ad"), true, true)
+        );
+        let body = body_string(
+            app.clone()
+                .oneshot(request("GET", &page, "", &hr))
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert!(
+            body.contains("Kullanıcı adı müdahalesi") && body.contains("ozel.ad"),
+            "{body}"
+        );
+        let r = app
+            .clone()
+            .oneshot(request("POST", &names, "requested_username=a+b", &hr))
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::BAD_REQUEST);
+        sqlx::query("UPDATE identities SET username = 'ozel.ad' WHERE id = $1")
+            .bind(id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let r = app
+            .clone()
+            .oneshot(request("POST", &names, "requested_username=baska", &hr))
+            .await
+            .unwrap();
+        assert_eq!(
+            r.status(),
+            StatusCode::CONFLICT,
+            "ad oluştuktan sonra değişmez"
+        );
 
         drop(app);
         drop(pool);

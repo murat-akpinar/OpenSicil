@@ -26,6 +26,7 @@ mod settings;
 #[cfg(test)]
 mod test_support;
 mod token;
+mod used_names;
 mod web;
 
 use std::process::ExitCode;

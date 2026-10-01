@@ -66,6 +66,17 @@ pub async fn request_retry(
     .await?;
     Ok(done.rows_affected() == 1)
 }
+// Ad mudahalesinden sonra kimligin butun mudahaledeki isleri yeniden denenir (ADR-022).
+pub async fn request_retry_all(pool: &PgPool, identity_id: i64) -> Result<u64, sqlx::Error> {
+    let done = sqlx::query(
+        "UPDATE jobs SET retry_requested = TRUE \
+         WHERE identity_id = $1 AND status = 'needs_intervention'",
+    )
+    .bind(identity_id)
+    .execute(pool)
+    .await?;
+    Ok(done.rows_affected())
+}
 // --- END FEATURE: job-queue ---
 
 #[cfg(test)]

@@ -14,6 +14,8 @@ pub const JOB_RETRY_REQUESTED: &str = "job.retry_requested";
 pub const ROLE_CHANGED: &str = "role.changed";
 pub const DEPARTMENT_CHANGED: &str = "department.changed";
 pub const TARGET_CHANGED: &str = "target.changed";
+pub const IDENTITY_NAME_REQUESTED: &str = "identity.name_requested";
+pub const USED_NAME_RELEASED: &str = "used_name.released";
 
 pub struct Actor<'a> {
     pub subject: Option<&'a str>,

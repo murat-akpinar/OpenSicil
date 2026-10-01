@@ -200,19 +200,7 @@ async fn ensure_names(c: &AdJob<'_>, ldap: &mut Ldap) -> Result<Names, JobError>
             upn: upn.clone(),
         });
     }
-    let templates = username::Templates::from_lookup(|n| std::env::var(n).ok());
-    let input = username::NameInput {
-        given_names: &person.given_name,
-        surname: &person.surname,
-        employee_number: person.employee_number.as_deref(),
-    };
-    let candidate = username::Candidate {
-        username: username::base_username(&templates, &input)
-            .map_err(JobError::NeedsIntervention)?,
-        email_local: username::base_email_local(&templates, &input)
-            .map_err(JobError::NeedsIntervention)?,
-        manual: false,
-    };
+    let candidate = candidate_for(person)?;
     let names = resolve_names(c, ldap, &candidate).await?;
     sqlx::query("UPDATE identities SET username = $2, email = $3, upn = $4 WHERE id = $1")
         .bind(c.job.identity_id)
@@ -223,6 +211,39 @@ async fn ensure_names(c: &AdJob<'_>, ldap: &mut Ldap) -> Result<Names, JobError>
         .await
         .map_err(|e| JobError::Failed(format!("kullanıcı adı kaydedilemedi: {e}")))?;
     Ok(names)
+}
+
+// ADR-022: elle girilen ad varsa sablon calismaz; e-posta yerel kismi da odur.
+fn candidate_for(person: &model::Person) -> Result<username::Candidate, JobError> {
+    let override_conflicts = person.name_conflict_override;
+    let requested = person
+        .requested_username
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    if let Some(raw) = requested {
+        let name = username::validate_manual(raw).map_err(JobError::NeedsIntervention)?;
+        return Ok(username::Candidate {
+            email_local: name.clone(),
+            username: name,
+            manual: true,
+            override_conflicts,
+        });
+    }
+    let templates = username::Templates::from_lookup(|n| std::env::var(n).ok());
+    let input = username::NameInput {
+        given_names: &person.given_name,
+        surname: &person.surname,
+        employee_number: person.employee_number.as_deref(),
+    };
+    Ok(username::Candidate {
+        username: username::base_username(&templates, &input)
+            .map_err(JobError::NeedsIntervention)?,
+        email_local: username::base_email_local(&templates, &input)
+            .map_err(JobError::NeedsIntervention)?,
+        manual: false,
+        override_conflicts,
+    })
 }
 
 async fn resolve_names(

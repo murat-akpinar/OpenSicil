@@ -142,6 +142,7 @@ pub fn routes() -> Router<AppState> {
         // --- END FEATURE: oidc-login ---
         .merge(crate::identity_web::routes())
         .merge(crate::org_web::routes())
+        .merge(crate::used_names::routes())
 }
 
 // Ayarlar okunamazsa (DB gecici erisilemez) giris sayfasi yine de gosterilir:

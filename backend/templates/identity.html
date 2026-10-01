@@ -15,7 +15,27 @@
   <tr><td class="py-1" style="color:#a6adc8;">Başlangıç</td><td>{{ page.person.start_date }}</td><td style="color:#a6adc8;">Bitiş anı</td><td>{{ page.person.end_at }}</td></tr>
   <tr><td class="py-1" style="color:#a6adc8;">Cep telefonu</td><td>{{ page.person.mobile_phone }}</td><td style="color:#a6adc8;">Kullanıcı adı</td><td>{{ page.person.username }}</td></tr>
   <tr><td class="py-1" style="color:#a6adc8;">E-posta</td><td>{{ page.person.email }}</td><td style="color:#a6adc8;">UPN</td><td>{{ page.person.upn }}</td></tr>
+  {% if !page.person.requested_username.is_empty() %}
+  <tr><td class="py-1" style="color:#a6adc8;">İstenen kullanıcı adı</td><td colspan="3">{{ page.person.requested_username }}{% if page.person.name_conflict_override %} (farklı kişi, sıradaki ad verilir){% endif %}</td></tr>
+  {% endif %}
 </table>
+
+{% if page.name_intervention %}
+<div class="rounded p-3 mb-6" style="background:#313244;">
+  <h2 class="font-medium mb-1">Kullanıcı adı müdahalesi</h2>
+  <p class="text-sm mb-2">İş kullanıcı adı yüzünden bekliyor. Seçenekler (ADR-022/042): farklı bir ad girin; aynı ad başka birine aitse "farklı kişi, sıradaki adı ver" deyin; kullanılmış ad kaydındaysa Sistem yöneticisi <a class="underline" href="/used-names">serbest bırakır</a>. Kaydet, müdahaledeki işleri yeniden dener.</p>
+  {% if can_edit_names %}
+  <form method="post" action="/identities/{{ page.person.id }}/names" class="flex gap-3 items-end">
+    <div class="grow">
+      <label class="block text-sm mb-1" for="requested_username">Kullanıcı adı</label>
+      <input class="w-full rounded px-3 py-2 text-black" type="text" id="requested_username" name="requested_username" value="{{ page.person.requested_username }}" maxlength="20" autocomplete="off">
+    </div>
+    <label class="text-sm"><input type="checkbox" name="name_conflict_override" value="1"{% if page.person.name_conflict_override %} checked{% endif %}> Farklı kişi, sıradaki adı ver</label>
+    <button class="rounded px-3 py-2" style="background:#89b4fa; color:#1e1e2e;" type="submit">Kaydet ve tekrar dene</button>
+  </form>
+  {% endif %}
+</div>
+{% endif %}
 
 <h2 class="font-medium mb-2">Hesaplar ve hedefteki fark</h2>
 <table class="w-full text-sm mb-6">

@@ -33,6 +33,10 @@ pub struct Person {
     pub username: Option<String>,
     pub email: Option<String>,
     pub upn: Option<String>,
+    /// Elle girilen ad (ADR-022); yalnizca username bosken okunur
+    pub requested_username: Option<String>,
+    /// "Farkli kisi, siradaki adi ver" (ADR-022/042)
+    pub name_conflict_override: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -118,11 +122,14 @@ type PersonRow = (
     Option<String>,
     Option<String>,
     Option<String>,
+    Option<String>,
+    bool,
 );
 
 async fn load_person(pool: &PgPool, identity_id: i64) -> Result<Person, String> {
     let row: PersonRow = sqlx::query_as(
-        "SELECT i.given_name, i.surname, i.employee_number, d.name, i.username, i.email, i.upn \
+        "SELECT i.given_name, i.surname, i.employee_number, d.name, i.username, i.email, i.upn, \
+         i.requested_username, i.name_conflict_override \
          FROM identities i JOIN departments d ON d.id = i.department_id WHERE i.id = $1",
     )
     .bind(identity_id)
@@ -137,6 +144,8 @@ async fn load_person(pool: &PgPool, identity_id: i64) -> Result<Person, String> 
         username: row.4,
         email: row.5,
         upn: row.6,
+        requested_username: row.7,
+        name_conflict_override: row.8,
     })
 }
 

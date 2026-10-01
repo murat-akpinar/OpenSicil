@@ -164,8 +164,6 @@ pub fn base_email_local(templates: &Templates, input: &NameInput<'_>) -> Result<
 }
 
 // ADR-022: elle girilen ad ayni normallestirme ve dogrulamadan gecer.
-// Kimlik formundaki istege bagli alan (3b) cagirir.
-#[allow(dead_code)]
 pub fn validate_manual(raw: &str) -> Result<String, String> {
     let normalized = raw
         .split('.')
@@ -196,6 +194,9 @@ pub struct Candidate {
     pub email_local: String,
     /// Elle girilen ad: cakismada n eklenmez, mudahale (ADR-022)
     pub manual: bool,
+    /// Operator "farkli kisi, siradaki adi ver" dedi (ADR-022 2. madde, ADR-042):
+    /// bagli olmayan hesap / kullanilmis ad cakismasinda da n + 1 denenir
+    pub override_conflicts: bool,
 }
 
 pub struct Context<'a> {
@@ -327,6 +328,9 @@ pub async fn resolve(
                     username,
                     email_local,
                 })
+            }
+            Conflict::Intervention(_) if candidate.override_conflicts && !candidate.manual => {
+                continue
             }
             Conflict::Intervention(reason) => return Ok(Resolution::NeedsIntervention(reason)),
             Conflict::Linked(reason) if candidate.manual => {
@@ -487,6 +491,11 @@ mod tests {
             username: username.to_string(),
             email_local: username.to_string(),
             manual,
+            override_conflicts: false,
+        };
+        let next_name = |username: &str| Candidate {
+            override_conflicts: true,
+            ..candidate(username, false)
         };
 
         let fresh = resolve(&pool, &mut ldap, &ctx, &candidate("yeni.kisi", false))
@@ -534,6 +543,22 @@ mod tests {
             matches!(&unlinked, Resolution::NeedsIntervention(r) if r.contains("bağlı değil")),
             "{unlinked:?}"
         );
+        // ADR-022 2. madde: "farkli kisi, siradaki adi ver" → bagli olmayan hesap ve
+        // kullanilmis ad cakismasinda n + 1.
+        for (name, expected) in [
+            ("mevcut.personel", "mevcut.personel2"),
+            ("yanik.ad", "yanik.ad2"),
+        ] {
+            assert_eq!(
+                resolve(&pool, &mut ldap, &ctx, &next_name(name))
+                    .await
+                    .unwrap(),
+                Resolution::Ok {
+                    username: expected.into(),
+                    email_local: expected.into()
+                }
+            );
+        }
 
         ldap.unbind().await.ok();
         drop(pool);

@@ -34,6 +34,10 @@
       <input class="w-full rounded px-3 py-2 text-black" type="text" id="national_id" name="national_id" value="{{ form.national_id }}" autocomplete="off">
     </div>
     <div>
+      <label class="block text-sm mb-1" for="requested_username">Kullanıcı adı (isteğe bağlı; boşsa şablon üretir)</label>
+      <input class="w-full rounded px-3 py-2 text-black" type="text" id="requested_username" name="requested_username" value="{{ form.requested_username }}" maxlength="20" autocomplete="off">
+    </div>
+    <div>
       <label class="block text-sm mb-1" for="employee_number">Sicil no</label>
       <input class="w-full rounded px-3 py-2 text-black" type="text" id="employee_number" name="employee_number" value="{{ form.employee_number }}">
     </div>
