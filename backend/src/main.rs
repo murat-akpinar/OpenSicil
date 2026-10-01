@@ -29,6 +29,7 @@ mod mapping_rules;
 mod mapping_web;
 mod migrate;
 mod national_id;
+mod normalize;
 mod oidc;
 mod operator_guard;
 mod operator_session;
@@ -106,6 +107,7 @@ mod tests {
             "desired_state.rs",
             "crypto.rs",
             "mapping_rules.rs",
+            "normalize.rs",
         ] {
             let mine =
                 std::fs::read_to_string(format!("src/{name}")).expect("kendi kopyası okunamadı");

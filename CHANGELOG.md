@@ -120,4 +120,5 @@
 - Tanımsız yer tutucu rol — rolü atanmamış sayacı, liste filtresi ve yönetime alma kapısı (ADR-103 madde 4/5)
 - Toplu sahiplenmede başlangıç tarihi AD whenCreated'dan gelir (ADR-103 madde 6)
 - TC kimlik no özniteliği kurulum ayarı — tarama şifreli okur, toplu sahiplenme doğrulayıp yazar (ADR-106 madde 5)
+- Rol ve departman adresleri okunur ada döndü, sayısal adres 301 (ADR-107)
 

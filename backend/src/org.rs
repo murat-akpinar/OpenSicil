@@ -30,6 +30,8 @@ impl From<sqlx::Error> for SaveError {
 
 pub struct RoleRow {
     pub id: i64,
+    /// Okunur adres (ADR-107); bos = slug uretilemedi, adres id ile
+    pub slug: String,
     pub kind: String,
     pub name: String,
     pub title: String,
@@ -37,6 +39,133 @@ pub struct RoleRow {
     /// Bu rolu tasiyan silinmemis kimlik sayisi; kural `affected_identities` ile
     /// ayni (temel rol → herkes, birincil → `primary_role_id`, ek → atama).
     pub people: i64,
+}
+
+impl RoleRow {
+    pub fn key(&self) -> String {
+        address_key(&self.slug, self.id)
+    }
+}
+
+/// Adresteki anahtar: slug varsa slug, yoksa id (ADR-107 madde 1 ve 5).
+pub fn address_key(slug: &str, id: i64) -> String {
+    match slug.is_empty() {
+        true => id.to_string(),
+        false => slug.to_string(),
+    }
+}
+
+/// ADR-107 madde 1: ad alfanumerik olmayan karakterlerden parcalanir, her parca
+/// ADR-011 normallestirmesinden gecer, boslar duser, `-` ile birlesir.
+/// `Sistem Uzmanı` → `sistem-uzmani`. Hic parca kalmazsa `None`.
+pub fn slug_for(name: &str) -> Option<String> {
+    let parts: Vec<String> = name
+        .split(|c: char| !c.is_alphanumeric())
+        .map(crate::normalize::normalize_component)
+        .filter(|p| !p.is_empty())
+        .collect();
+    (!parts.is_empty()).then(|| parts.join("-"))
+}
+
+/// Tabloda bos olan ilk slug: taban, sonra `taban-2`, `taban-3` … (madde 3).
+/// Kesin sinir tekil indekstir; yaris olursa INSERT duser ve operator yeniden dener.
+async fn unique_slug(
+    pool: &PgPool,
+    owner: Owner,
+    name: &str,
+) -> Result<Option<String>, sqlx::Error> {
+    let Some(base) = slug_for(name) else {
+        return Ok(None);
+    };
+    let sql = match owner {
+        Owner::Role => "SELECT EXISTS (SELECT 1 FROM roles WHERE slug = $1)",
+        Owner::Department => "SELECT EXISTS (SELECT 1 FROM departments WHERE slug = $1)",
+    };
+    let mut candidate = base.clone();
+    let mut n = 1;
+    while sqlx::query_scalar::<_, bool>(sql)
+        .bind(&candidate)
+        .fetch_one(pool)
+        .await?
+    {
+        n += 1;
+        candidate = format!("{base}-{n}");
+    }
+    Ok(Some(candidate))
+}
+
+/// Adres anahtarini tanima cevirir (madde 5): `i64`'e cevrilen anahtar id,
+/// digeri slug. `by_id` ile GET sayisal adresi slug'a yonlendirir.
+pub struct Resolved {
+    pub id: i64,
+    pub slug: String,
+    pub by_id: bool,
+}
+
+pub async fn resolve(
+    pool: &PgPool,
+    owner: Owner,
+    key: &str,
+) -> Result<Option<Resolved>, sqlx::Error> {
+    let (by_id_sql, by_slug_sql) = match owner {
+        Owner::Role => (
+            "SELECT id, COALESCE(slug, '') FROM roles WHERE id = $1",
+            "SELECT id, COALESCE(slug, '') FROM roles WHERE slug = $1",
+        ),
+        Owner::Department => (
+            "SELECT id, COALESCE(slug, '') FROM departments WHERE id = $1",
+            "SELECT id, COALESCE(slug, '') FROM departments WHERE slug = $1",
+        ),
+    };
+    let row: Option<(i64, String)> = match key.parse::<i64>() {
+        Ok(id) => {
+            sqlx::query_as(by_id_sql)
+                .bind(id)
+                .fetch_optional(pool)
+                .await?
+        }
+        Err(_) => {
+            sqlx::query_as(by_slug_sql)
+                .bind(key)
+                .fetch_optional(pool)
+                .await?
+        }
+    };
+    Ok(row.map(|(id, slug)| Resolved {
+        id,
+        slug,
+        by_id: key.parse::<i64>().is_ok(),
+    }))
+}
+
+/// Madde 6: slug'i bos satirlari tek kuralla doldurur; `migrate` alt komutu
+/// her calismada cagirir, dolu satira dokunmaz. Doldurulan satir sayisini doner.
+pub async fn backfill_slugs(pool: &PgPool) -> Result<u64, sqlx::Error> {
+    let mut filled = 0;
+    for owner in [Owner::Role, Owner::Department] {
+        let (list_sql, update_sql) = match owner {
+            Owner::Role => (
+                "SELECT id, name FROM roles WHERE slug IS NULL ORDER BY id",
+                "UPDATE roles SET slug = $2 WHERE id = $1",
+            ),
+            Owner::Department => (
+                "SELECT id, name FROM departments WHERE slug IS NULL ORDER BY id",
+                "UPDATE departments SET slug = $2 WHERE id = $1",
+            ),
+        };
+        let rows: Vec<(i64, String)> = sqlx::query_as(list_sql).fetch_all(pool).await?;
+        for (id, name) in rows {
+            if let Some(slug) = unique_slug(pool, owner, &name).await? {
+                sqlx::query(update_sql)
+                    .bind(id)
+                    .bind(slug)
+                    .execute(pool)
+                    .await?;
+                filled += 1;
+            }
+        }
+    }
+    Ok(filled)
 }
 
 /// Tur basina bolum: ekran birincil ile ek rolu ayri tablolarda gosterir ve
@@ -47,8 +176,9 @@ pub struct RoleSection {
 }
 
 pub async fn list_roles(pool: &PgPool) -> Result<Vec<RoleRow>, sqlx::Error> {
-    let rows: Vec<(i64, String, String, Option<String>, i64, i64)> = sqlx::query_as(
-        "SELECT r.id, r.kind, r.name, r.title, \
+    type Row = (i64, String, String, String, Option<String>, i64, i64);
+    let rows: Vec<Row> = sqlx::query_as(
+        "SELECT r.id, COALESCE(r.slug, ''), r.kind, r.name, r.title, \
          (SELECT COUNT(*) FROM role_entitlements e WHERE e.role_id = r.id), \
          CASE r.kind \
            WHEN 'base' THEN (SELECT COUNT(*) FROM identities i WHERE i.deleted_at IS NULL) \
@@ -64,14 +194,17 @@ pub async fn list_roles(pool: &PgPool) -> Result<Vec<RoleRow>, sqlx::Error> {
     .await?;
     Ok(rows
         .into_iter()
-        .map(|(id, kind, name, title, entitlements, people)| RoleRow {
-            id,
-            kind,
-            name,
-            title: title.unwrap_or_default(),
-            entitlements,
-            people,
-        })
+        .map(
+            |(id, slug, kind, name, title, entitlements, people)| RoleRow {
+                id,
+                slug,
+                kind,
+                name,
+                title: title.unwrap_or_default(),
+                entitlements,
+                people,
+            },
+        )
         .collect())
 }
 
@@ -112,16 +245,16 @@ pub async fn create_role(
         return Err(SaveError::Invalid("err.base_role_exists"));
     }
     let title = (kind == "primary" && !title.trim().is_empty()).then(|| title.trim().to_string());
-    Ok(
-        sqlx::query_scalar(
-            "INSERT INTO roles (kind, name, title) VALUES ($1, $2, $3) RETURNING id",
-        )
-        .bind(kind)
-        .bind(name)
-        .bind(title)
-        .fetch_one(pool)
-        .await?,
+    let slug = unique_slug(pool, Owner::Role, name).await?;
+    Ok(sqlx::query_scalar(
+        "INSERT INTO roles (kind, name, title, slug) VALUES ($1, $2, $3, $4) RETURNING id",
     )
+    .bind(kind)
+    .bind(name)
+    .bind(title)
+    .bind(slug)
+    .fetch_one(pool)
+    .await?)
 }
 
 async fn base_role_exists(pool: &PgPool) -> Result<bool, sqlx::Error> {
@@ -142,9 +275,17 @@ pub struct TargetSetting {
 
 pub struct Definition {
     pub id: i64,
+    /// Okunur adres (ADR-107); bos = yok, formlar id ile calisir
+    pub slug: String,
     pub name: String,
     pub entitlement_ids: Vec<i64>,
     pub settings: Vec<TargetSetting>,
+}
+
+impl Definition {
+    pub fn key(&self) -> String {
+        address_key(&self.slug, self.id)
+    }
 }
 
 pub struct RoleDetail {
@@ -257,8 +398,17 @@ async fn load_definition(
             upn_suffix: us.unwrap_or_default(),
         })
         .collect();
+    let slug_sql = match owner {
+        Owner::Role => "SELECT COALESCE(slug, '') FROM roles WHERE id = $1",
+        Owner::Department => "SELECT COALESCE(slug, '') FROM departments WHERE id = $1",
+    };
+    let slug: String = sqlx::query_scalar(slug_sql)
+        .bind(id)
+        .fetch_one(pool)
+        .await?;
     Ok(Definition {
         id,
+        slug,
         name,
         entitlement_ids,
         settings,
@@ -398,6 +548,8 @@ pub async fn save_role(
 
 pub struct DepartmentRow {
     pub id: i64,
+    /// Okunur adres (ADR-107); bos = slug uretilemedi, adres id ile
+    pub slug: String,
     pub name: String,
     pub code: String,
     /// `<select>` icin metin girintisi: option'a CSS uygulanamaz
@@ -413,21 +565,27 @@ pub struct DepartmentRow {
 // Agac, kokten yapraga; ayni seviyede ada gore (recursive CTE, ADR-017).
 // ponytail: `reach` her (ata, torun) ciftini uretiyor — departman sayisi onlarca
 // oldugu surece ucuz; binlere cikarsa sayim ayri bir ozete tasinir.
+impl DepartmentRow {
+    pub fn key(&self) -> String {
+        address_key(&self.slug, self.id)
+    }
+}
+
 pub async fn list_departments(pool: &PgPool) -> Result<Vec<DepartmentRow>, sqlx::Error> {
-    type Row = (i64, String, Option<String>, i64, i64, i64);
+    type Row = (i64, String, String, Option<String>, i64, i64, i64);
     let rows: Vec<Row> = sqlx::query_as(
         "WITH RECURSIVE tree AS ( \
-           SELECT id, name, code, 1::bigint AS depth, ARRAY[lower(name)] AS path FROM departments \
-           WHERE parent_id IS NULL \
+           SELECT id, slug, name, code, 1::bigint AS depth, ARRAY[lower(name)] AS path \
+           FROM departments WHERE parent_id IS NULL \
            UNION ALL \
-           SELECT d.id, d.name, d.code, t.depth + 1, t.path || lower(d.name) \
+           SELECT d.id, d.slug, d.name, d.code, t.depth + 1, t.path || lower(d.name) \
            FROM departments d JOIN tree t ON d.parent_id = t.id WHERE t.depth < $1), \
          reach AS ( \
            SELECT id AS root, id AS node, 1::bigint AS depth FROM departments \
            UNION ALL \
            SELECT r.root, d.id, r.depth + 1 FROM departments d \
            JOIN reach r ON d.parent_id = r.node WHERE r.depth < $1) \
-         SELECT tree.id, tree.name, tree.code, tree.depth, \
+         SELECT tree.id, COALESCE(tree.slug, ''), tree.name, tree.code, tree.depth, \
            (SELECT COUNT(*) FROM department_entitlements e WHERE e.department_id = tree.id), \
            (SELECT COUNT(*) FROM identities i WHERE i.deleted_at IS NULL \
               AND i.department_id IN (SELECT node FROM reach WHERE root = tree.id)) \
@@ -439,8 +597,9 @@ pub async fn list_departments(pool: &PgPool) -> Result<Vec<DepartmentRow>, sqlx:
     Ok(rows
         .into_iter()
         .map(
-            |(id, name, code, depth, entitlements, people)| DepartmentRow {
+            |(id, slug, name, code, depth, entitlements, people)| DepartmentRow {
                 id,
+                slug,
                 name,
                 code: code.unwrap_or_default(),
                 indent: "— ".repeat((depth - 1) as usize),
@@ -464,12 +623,15 @@ pub async fn create_department(
             return Err(SaveError::Invalid("err.depth_exceeded"));
         }
     }
+    let slug = unique_slug(pool, Owner::Department, &name).await?;
     Ok(sqlx::query_scalar(
-        "INSERT INTO departments (name, code, parent_id) VALUES ($1, $2, $3) RETURNING id",
+        "INSERT INTO departments (name, code, parent_id, slug) VALUES ($1, $2, $3, $4) \
+         RETURNING id",
     )
     .bind(name)
     .bind(blank_to_null(code))
     .bind(parent_id)
+    .bind(slug)
     .fetch_one(pool)
     .await?)
 }
@@ -796,6 +958,23 @@ pub async fn save_target(pool: &PgPool, t: &TargetRow) -> Result<(), SaveError> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ADR-107 madde 1: parcalar ADR-011 kuralindan gecer, `-` ile birlesir;
+    /// sembolden ibaret ad slug almaz.
+    #[test]
+    fn slugs_follow_the_username_normalisation_rule() {
+        assert_eq!(slug_for("Sistem Uzmanı").as_deref(), Some("sistem-uzmani"));
+        assert_eq!(slug_for("Bilgi İşlem").as_deref(), Some("bilgi-islem"));
+        assert_eq!(
+            slug_for("GG-Course-Charms").as_deref(),
+            Some("gg-course-charms")
+        );
+        assert_eq!(slug_for("  Ar-Ge / Ürün  ").as_deref(), Some("ar-ge-urun"));
+        assert_eq!(slug_for("Tanımsız").as_deref(), Some("tanimsiz"));
+        assert_eq!(slug_for("***"), None);
+        assert_eq!(address_key("", 17), "17");
+        assert_eq!(address_key("uzman", 17), "uzman");
+    }
 
     fn edit(name: &str, items: Vec<i64>, settings: Vec<TargetSetting>) -> DefinitionEdit {
         DefinitionEdit {

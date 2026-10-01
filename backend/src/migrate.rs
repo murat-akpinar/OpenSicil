@@ -48,6 +48,16 @@ pub async fn run() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
+    // ADR-107 madde 6: slug SQL'de uretilmez; gecmis satirlar burada tek kuralla dolar
+    match crate::org::backfill_slugs(&pool).await {
+        Ok(filled) if filled > 0 => println!("migrate: {filled} rol/departman adresi üretildi"),
+        Ok(_) => {}
+        Err(e) => {
+            eprintln!("migrate: rol/departman adresleri üretilemedi: {e}");
+            return ExitCode::FAILURE;
+        }
+    }
+
     if let Err(e) = grant_service_privileges(&pool, &backend_user, &worker_user).await {
         eprintln!("migrate: servis rollerine tablo izni verilemedi: {e}");
         return ExitCode::FAILURE;

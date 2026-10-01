@@ -60,7 +60,7 @@
       {# Girinti CSS'ten (`tree-d<derinlik>`): satir ici stil CSP'de yasak #}
       {% for d in departments %}
         <tr>
-          <td><span class="tree-d{{ d.depth }}"><a class="link" href="/departments/{{ d.id }}">{{ d.name }}</a></span></td>
+          <td><span class="tree-d{{ d.depth }}"><a class="link" href="/departments/{{ d.key() }}">{{ d.name }}</a></span></td>
           <td class="muted">{% if d.code.is_empty() %}—{% else %}{{ d.code }}{% endif %}</td>
           <td class="num muted">{{ d.entitlements }}</td>
           <td class="num">{{ d.people }}</td>

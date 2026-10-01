@@ -663,7 +663,7 @@ async fn create_role(
         Ok(id) => {
             let detail = serde_json::json!({ "action": "created", "role_id": id, "kind": f.get("kind"), "name": f.get("name") });
             audit_operator(&state, &op, crate::audit::ROLE_CHANGED, None, detail).await;
-            Redirect::to(&format!("/roles/{id}")).into_response()
+            Redirect::to(&address(&state, Owner::Role, id).await).into_response()
         }
         Err(e) => match save_error(e, "rol oluşturulamadı") {
             Ok(key) => render_roles(&state, &op, op.lang.t(key).to_string()).await,
@@ -700,23 +700,77 @@ async fn render_role(state: &AppState, op: &Operator, id: i64, notice: Notice) -
     })
 }
 
+/// Tanimin adresi: slug varsa `/roles/sistem-uzmani`, yoksa id (ADR-107).
+async fn address(state: &AppState, owner: Owner, id: i64) -> String {
+    let base = match owner {
+        Owner::Role => "/roles",
+        Owner::Department => "/departments",
+    };
+    let key = match org::resolve(&state.pool, owner, &id.to_string()).await {
+        Ok(Some(found)) => org::address_key(&found.slug, found.id),
+        _ => id.to_string(),
+    };
+    format!("{base}/{key}")
+}
+
+/// Adres anahtarini (sayisal id ya da slug) tanima cevirir; yoksa 404. `GET`
+/// sayisal adresi slug'a kalici yonlendirir (ADR-107 madde 5), `POST` yonlendirmez.
+async fn resolve_key(
+    state: &AppState,
+    op: &Operator,
+    owner: Owner,
+    key: &str,
+    redirect_numeric: bool,
+) -> Result<i64, Box<Response>> {
+    let (not_found, base) = match owner {
+        Owner::Role => ("err.role_not_found", "/roles"),
+        Owner::Department => ("err.department_not_found", "/departments"),
+    };
+    match org::resolve(&state.pool, owner, key).await {
+        // 301: axum'un `Redirect::permanent`i 308 verir; eski bağlantılar GET'tir ve
+        // yer imi/tarayıcı için 301 yerleşik beklenti (ADR-107 madde 5)
+        Ok(Some(found)) if redirect_numeric && found.by_id && !found.slug.is_empty() => {
+            let location = format!("{base}/{}", found.slug);
+            Err(Box::new(
+                (
+                    StatusCode::MOVED_PERMANENTLY,
+                    [(axum::http::header::LOCATION, location)],
+                )
+                    .into_response(),
+            ))
+        }
+        Ok(Some(found)) => Ok(found.id),
+        Ok(None) => Err(Box::new(
+            (StatusCode::NOT_FOUND, op.lang.t(not_found)).into_response(),
+        )),
+        Err(e) => Err(Box::new(internal("tanım çözümlenemedi", e))),
+    }
+}
+
 async fn role_page(
     OperatorSession(op): OperatorSession,
     State(state): State<AppState>,
-    Path(id): Path<i64>,
+    Path(key): Path<String>,
 ) -> Response {
-    render_role(&state, &op, id, Notice::default()).await
+    match resolve_key(&state, &op, Owner::Role, &key, true).await {
+        Ok(id) => render_role(&state, &op, id, Notice::default()).await,
+        Err(response) => *response,
+    }
 }
 
 async fn save_role(
     OperatorSession(op): OperatorSession,
     State(state): State<AppState>,
-    Path(id): Path<i64>,
+    Path(key): Path<String>,
     Form(form): Form<Vec<(String, String)>>,
 ) -> Response {
     if !allowed(&op, WRITE_AUTHORITIES) {
         return forbidden(op.lang);
     }
+    let id = match resolve_key(&state, &op, Owner::Role, &key, false).await {
+        Ok(id) => id,
+        Err(response) => return *response,
+    };
     let current = match org::load_role(&state.pool, id).await {
         Ok(Some(role)) => role,
         Ok(None) => {
@@ -951,7 +1005,7 @@ async fn create_department(
         Ok(id) => {
             let detail = serde_json::json!({ "action": "created", "department_id": id, "name": f.get("name"), "parent_id": parent });
             audit_operator(&state, &op, crate::audit::DEPARTMENT_CHANGED, None, detail).await;
-            Redirect::to(&format!("/departments/{id}")).into_response()
+            Redirect::to(&address(&state, Owner::Department, id).await).into_response()
         }
         Err(e) => match save_error(e, "departman oluşturulamadı") {
             Ok(key) => render_departments(&state, &op, op.lang.t(key).to_string()).await,
@@ -995,20 +1049,27 @@ async fn render_department(state: &AppState, op: &Operator, id: i64, notice: Not
 async fn department_page(
     OperatorSession(op): OperatorSession,
     State(state): State<AppState>,
-    Path(id): Path<i64>,
+    Path(key): Path<String>,
 ) -> Response {
-    render_department(&state, &op, id, Notice::default()).await
+    match resolve_key(&state, &op, Owner::Department, &key, true).await {
+        Ok(id) => render_department(&state, &op, id, Notice::default()).await,
+        Err(response) => *response,
+    }
 }
 
 async fn save_department(
     OperatorSession(op): OperatorSession,
     State(state): State<AppState>,
-    Path(id): Path<i64>,
+    Path(key): Path<String>,
     Form(form): Form<Vec<(String, String)>>,
 ) -> Response {
     if !allowed(&op, WRITE_AUTHORITIES) {
         return forbidden(op.lang);
     }
+    let id = match resolve_key(&state, &op, Owner::Department, &key, false).await {
+        Ok(id) => id,
+        Err(response) => return *response,
+    };
     let current = match org::load_department(&state.pool, id).await {
         Ok(Some(d)) => d,
         Ok(None) => {
@@ -1091,36 +1152,50 @@ async fn reject(state: &AppState, op: &Operator, owner: Owner, id: i64) -> Respo
     render_definition(state, op, owner, id, notice).await
 }
 
+/// Onay/red: anahtar sayisal ya da slug; POST yonlendirmez (ADR-107 madde 5).
+async fn decide_key(
+    state: &AppState,
+    op: &Operator,
+    owner: Owner,
+    key: &str,
+    approve: bool,
+) -> Response {
+    match resolve_key(state, op, owner, key, false).await {
+        Ok(id) => decide(state, op, owner, id, approve).await,
+        Err(response) => *response,
+    }
+}
+
 async fn approve_role(
     OperatorSession(op): OperatorSession,
     State(state): State<AppState>,
-    Path(id): Path<i64>,
+    Path(key): Path<String>,
 ) -> Response {
-    decide(&state, &op, Owner::Role, id, true).await
+    decide_key(&state, &op, Owner::Role, &key, true).await
 }
 
 async fn reject_role(
     OperatorSession(op): OperatorSession,
     State(state): State<AppState>,
-    Path(id): Path<i64>,
+    Path(key): Path<String>,
 ) -> Response {
-    decide(&state, &op, Owner::Role, id, false).await
+    decide_key(&state, &op, Owner::Role, &key, false).await
 }
 
 async fn approve_department(
     OperatorSession(op): OperatorSession,
     State(state): State<AppState>,
-    Path(id): Path<i64>,
+    Path(key): Path<String>,
 ) -> Response {
-    decide(&state, &op, Owner::Department, id, true).await
+    decide_key(&state, &op, Owner::Department, &key, true).await
 }
 
 async fn reject_department(
     OperatorSession(op): OperatorSession,
     State(state): State<AppState>,
-    Path(id): Path<i64>,
+    Path(key): Path<String>,
 ) -> Response {
-    decide(&state, &op, Owner::Department, id, false).await
+    decide_key(&state, &op, Owner::Department, &key, false).await
 }
 
 async fn render_targets(state: &AppState, op: &Operator, notice: Notice) -> Response {
@@ -1463,8 +1538,30 @@ mod tests {
         )
         .await;
         assert_eq!(r.status(), StatusCode::SEE_OTHER);
+        // ADR-107: yonlendirme okunur adrese, sayisal adres kalici yonlendirmeyle
         let role_url = location(&r);
-        let role_id: i64 = role_url.rsplit('/').next().unwrap().parse().unwrap();
+        assert_eq!(role_url, "/roles/uzman");
+        let role_id: i64 = sqlx::query_scalar("SELECT id FROM roles WHERE slug = 'uzman'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let r = send(
+            "GET",
+            format!("/roles/{role_id}"),
+            String::new(),
+            admin.clone(),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::MOVED_PERMANENTLY);
+        assert_eq!(location(&r), "/roles/uzman");
+        let r = send(
+            "GET",
+            "/roles/yok-boyle-rol".into(),
+            String::new(),
+            admin.clone(),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::NOT_FOUND);
         sqlx::query("UPDATE identities SET primary_role_id = $1 WHERE id = $2")
             .bind(role_id)
             .bind(ids[0])
@@ -1508,7 +1605,18 @@ mod tests {
         )
         .await;
         let root_url = location(&r);
-        let root_id: i64 = root_url.rsplit('/').next().unwrap().parse().unwrap();
+        assert_eq!(root_url, "/departments/ankara", "ADR-107 okunur adres");
+        let by_slug = |slug: &'static str| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_scalar::<_, i64>("SELECT id FROM departments WHERE slug = $1")
+                    .bind(slug)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap()
+            }
+        };
+        let root_id = by_slug("ankara").await;
         let r = send(
             "POST",
             "/departments".into(),
@@ -1516,7 +1624,8 @@ mod tests {
             admin.clone(),
         )
         .await;
-        let child_id: i64 = location(&r).rsplit('/').next().unwrap().parse().unwrap();
+        assert_eq!(location(&r), "/departments/bt");
+        let child_id = by_slug("bt").await;
         let r = send(
             "POST",
             root_url.clone(),
@@ -1530,9 +1639,7 @@ mod tests {
                 .await;
         // Girinti artik `— ` on eki degil derinlik sinifi (CSP: satir ici stil yok).
         assert!(
-            page.contains(&format!(
-                "<span class=\"tree-d2\"><a class=\"link\" href=\"/departments/{child_id}\">BT"
-            )),
+            page.contains("<span class=\"tree-d2\"><a class=\"link\" href=\"/departments/bt\">BT"),
             "{page}"
         );
 
@@ -1626,7 +1733,13 @@ mod tests {
             .fetch_one(&pool)
             .await
             .unwrap();
-        let url = format!("/roles/{role}");
+        // ADR-107: sayfa okunur adresten okunur; POST'lar sayisal anahtari da kabul eder
+        let slug: String = sqlx::query_scalar("SELECT slug FROM roles WHERE id = $1")
+            .bind(role)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let url = format!("/roles/{slug}");
         // Ikinci kimlik baska bir role alinir: taslak kaydedilince 1 kimlik etkilenir.
         let other = org::create_role(&pool, "primary", "Diğer", "")
             .await

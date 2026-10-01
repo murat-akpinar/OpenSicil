@@ -13,10 +13,10 @@
   <div class="text-sm mt-1">{{ pending.note }}</div>
   {% if can_edit %}
   <div class="mt-2 flex gap-2">
-    <form method="post" action="/roles/{{ role.def.id }}/approve">
+    <form method="post" action="/roles/{{ role.def.key() }}/approve">
       <button class="btn" type="submit"{% if !pending.approvable %} disabled{% endif %}>{{ lang.t("changeset.approve") }}</button>
     </form>
-    <form method="post" action="/roles/{{ role.def.id }}/reject">
+    <form method="post" action="/roles/{{ role.def.key() }}/reject">
       <button class="btn" type="submit">{{ lang.t("changeset.reject") }}</button>
     </form>
   </div>
@@ -24,7 +24,7 @@
 </div>
 {% endif %}
 
-<form method="post" action="/roles/{{ role.def.id }}" class="space-y-6">
+<form method="post" action="/roles/{{ role.def.key() }}" class="space-y-6">
   <div class="grid gap-4 sm:grid-cols-2">
     <div>
       <label class="label" for="name">{{ lang.t("field.name") }}</label>

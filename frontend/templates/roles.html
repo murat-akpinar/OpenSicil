@@ -64,7 +64,7 @@
       <tbody>
       {% for r in s.roles %}
         <tr>
-          <td><a class="link" href="/roles/{{ r.id }}">{{ r.name }}</a></td>
+          <td><a class="link" href="/roles/{{ r.key() }}">{{ r.name }}</a></td>
           {% if s.kind == "primary" %}<td class="muted">{% if r.title.is_empty() %}—{% else %}{{ r.title }}{% endif %}</td>{% endif %}
           <td class="num muted">{{ r.entitlements }}</td>
           <td class="num">{{ r.people }}</td>

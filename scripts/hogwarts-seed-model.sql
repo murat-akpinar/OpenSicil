@@ -8,6 +8,10 @@
 -- katalogda olmayan oge icin o satir yazilmaz, sessizce atlanir. Once
 -- /targets -> "Kataloğu yenile" ile katalogun dolu oldugundan emin ol.
 --
+-- Okunur adresler (ADR-107): bu betik slug yazmaz (kural Rust'ta, SQL'de kopya
+-- yok). Betikten sonra `docker compose run --rm --no-deps migrate` yeni satirlarin
+-- slug'ini doldurur; o ana kadar adresler id ile calisir.
+--
 -- Yapi (gercek AD'deki OU ve grup duzenine birebir):
 --   Hogwarts
 --   ├── Teachers    OU=Users,OU=Teachers        GG-Teachers

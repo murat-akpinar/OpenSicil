@@ -19,6 +19,7 @@ mod mapping;
 #[allow(dead_code)]
 mod mapping_rules;
 mod model;
+mod normalize;
 mod queue;
 mod read_lane;
 mod reconcile;

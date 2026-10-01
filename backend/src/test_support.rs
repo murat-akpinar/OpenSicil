@@ -158,7 +158,7 @@ pub async fn seed_two_identities(pool: &PgPool) -> [i64; 2] {
             .await
             .expect("departman açılamadı");
     let role: i64 = sqlx::query_scalar(
-        "INSERT INTO roles (kind, name) VALUES ('primary', 'Test Rolü') RETURNING id",
+        "INSERT INTO roles (kind, name, slug) VALUES ('primary', 'Test Rolü', 'test-rolu') RETURNING id",
     )
     .fetch_one(pool)
     .await

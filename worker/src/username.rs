@@ -8,7 +8,6 @@
 
 use ldap3::{ldap_escape, Ldap, Scope};
 use sqlx::PgPool;
-use unicode_normalization::UnicodeNormalization;
 
 use crate::ad;
 use crate::writes::WriteError;
@@ -47,25 +46,8 @@ pub struct NameInput<'a> {
 
 // ADR-011 normallestirme: Turkce kucuk harf (I → i, i̇ → i), cgiosu donusumu,
 // diger aksanlar NFD ile atilir, a-z0-9 disindaki her sey atilir.
-pub fn normalize_component(text: &str) -> String {
-    let turkish: String = text
-        .chars()
-        .map(|c| match c {
-            'I' | 'İ' | 'ı' => 'i',
-            'Ç' | 'ç' => 'c',
-            'Ğ' | 'ğ' => 'g',
-            'Ö' | 'ö' => 'o',
-            'Ş' | 'ş' => 's',
-            'Ü' | 'ü' => 'u',
-            other => other,
-        })
-        .collect();
-    turkish
-        .nfd()
-        .filter(|c| c.is_ascii_alphanumeric())
-        .map(|c| c.to_ascii_lowercase())
-        .collect()
-}
+// Kural ikiz dosyada (`normalize.rs`): backend okunur adres icin ayni kurali okur (ADR-107).
+pub use crate::normalize::normalize_component;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum GivenForm {
