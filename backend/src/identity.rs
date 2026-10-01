@@ -475,6 +475,54 @@ pub struct LifecycleInfo {
     pub deleted: bool,
     /// Hic sahiplenilmis baglantisi yoksa iptal dugmesi gosterilir (ADR-048)
     pub can_cancel: bool,
+    /// ADR-041/F-38: yonetici ayrilmissa "(ayrildi → devir: X)" ya da devir yok uyarisi
+    pub manager_note: String,
+    pub subordinates: i64,
+    /// Kimlik ayrilmis ve etkin devir yoneticisi yok: astlar yoneticisiz kalir
+    pub orphaned_subordinates: bool,
+}
+
+// Yoneticinin durumu ve devir yoneticisi; etkin yonetici ADR-041 tek atlama.
+async fn manager_note(pool: &PgPool, time_zone: &str, id: i64) -> Result<String, sqlx::Error> {
+    let row: Option<(i64, Option<i64>, Option<String>)> = sqlx::query_as(
+        "SELECT m.id, m.handover_manager_id, h.given_name || ' ' || h.surname \
+         FROM identities i JOIN identities m ON m.id = i.manager_id \
+         LEFT JOIN identities h ON h.id = m.handover_manager_id WHERE i.id = $1",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?;
+    let Some((manager, handover, handover_name)) = row else {
+        return Ok(String::new());
+    };
+    let gone = |s: Option<LifecycleState>| {
+        matches!(
+            s,
+            Some(LifecycleState::Departed) | Some(LifecycleState::Deleted)
+        )
+    };
+    if !gone(load_state(pool, time_zone, manager).await?) {
+        return Ok(String::new());
+    }
+    let handover_state = match handover {
+        Some(h) => load_state(pool, time_zone, h).await?,
+        None => None,
+    };
+    Ok(
+        match (handover_name, gone(handover_state), handover.is_some()) {
+            (Some(name), false, true) => format!(" (ayrıldı → devir: {name})"),
+            _ => " (ayrıldı, etkin yönetici yok)".to_string(),
+        },
+    )
+}
+
+async fn subordinates(pool: &PgPool, id: i64) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT COUNT(*) FROM identities WHERE manager_id = $1 AND deleted_at IS NULL",
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await
 }
 
 async fn load_lifecycle(
@@ -516,7 +564,25 @@ async fn load_lifecycle(
         departed: state == LifecycleState::Departed,
         deleted: state == LifecycleState::Deleted,
         can_cancel: r.7 && state != LifecycleState::Deleted,
+        manager_note: manager_note(pool, time_zone, id).await?,
+        subordinates: subordinates(pool, id).await?,
+        orphaned_subordinates: state == LifecycleState::Departed
+            && !handover_effective(pool, time_zone, r.1).await?,
     })
+}
+
+async fn handover_effective(
+    pool: &PgPool,
+    time_zone: &str,
+    handover: Option<i64>,
+) -> Result<bool, sqlx::Error> {
+    let Some(h) = handover else {
+        return Ok(false);
+    };
+    Ok(matches!(
+        load_state(pool, time_zone, h).await?,
+        Some(LifecycleState::Active | LifecycleState::Pending | LifecycleState::Suspended)
+    ))
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1421,6 +1487,48 @@ mod tests {
             !revert_departure(&pool, ids[1], None).await.unwrap(),
             "geri alınacak bitiş yok"
         );
+
+        // ADR-041/F-38: yonetici (Ayşe, ids[0]) ayrilir, devir Ali (ids[1]); astin sayfasinda not,
+        // yoneticinin sayfasinda ast sayisi; devir yoksa astlar yoneticisiz uyarisi.
+        sqlx::query("UPDATE identities SET manager_id = $1 WHERE id = $2")
+            .bind(ids[0])
+            .bind(id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE identities SET start_date = '2026-01-01' WHERE id = $1")
+            .bind(ids[0])
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            set_departure(&pool, tz, ids[0], "2026-09-30", Some(ids[1]))
+                .await
+                .unwrap(),
+            LifecycleChange::Applied
+        );
+        let info = load_lifecycle(&pool, tz, id, LifecycleState::Active)
+            .await
+            .unwrap();
+        assert_eq!(info.manager_note, " (ayrıldı → devir: Ali Kaya)");
+        let boss = load_lifecycle(&pool, tz, ids[0], LifecycleState::Departed)
+            .await
+            .unwrap();
+        assert_eq!(boss.subordinates, 1);
+        assert!(!boss.orphaned_subordinates);
+        sqlx::query("UPDATE identities SET handover_manager_id = NULL WHERE id = $1")
+            .bind(ids[0])
+            .execute(&pool)
+            .await
+            .unwrap();
+        let boss = load_lifecycle(&pool, tz, ids[0], LifecycleState::Departed)
+            .await
+            .unwrap();
+        assert!(boss.orphaned_subordinates);
+        let info = load_lifecycle(&pool, tz, id, LifecycleState::Active)
+            .await
+            .unwrap();
+        assert_eq!(info.manager_note, " (ayrıldı, etkin yönetici yok)");
 
         drop(pool);
         crate::test_support::drop_temp_db(&admin_pool, &db_name).await;

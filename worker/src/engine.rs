@@ -531,10 +531,30 @@ async fn reconcile_existing(
     }
     if transition {
         set_applied_state(c, state).await?;
+        // ADR-041: ayrildiya giris/cikis astlarin etkin yoneticisini degistirir → astlara is
+        let departed = "departed";
+        if state == departed || link.applied_state.as_deref() == Some(departed) {
+            enqueue_subordinates(c).await?;
+        }
     }
     Ok(format!(
         "{note}{groups}{attrs}{expires}: {dn} → applied_state {state}"
     ))
+}
+
+// Astlar icin ayni hedefe tek kimlik oncelikli is; acik is varsa yenisi acilmaz.
+async fn enqueue_subordinates(c: &AdJob<'_>) -> Result<(), JobError> {
+    sqlx::query(
+        "INSERT INTO jobs (identity_id, target_system_id, priority) \
+         SELECT id, $2, 1 FROM identities WHERE manager_id = $1 AND deleted_at IS NULL \
+         ON CONFLICT (identity_id, target_system_id) WHERE status <> 'succeeded' DO NOTHING",
+    )
+    .bind(c.job.identity_id)
+    .bind(c.job.target_system_id)
+    .execute(c.pool)
+    .await
+    .map(|_| ())
+    .map_err(|e| JobError::Failed(format!("astların işi açılamadı: {e}")))
 }
 
 // ADR-046/048: hic kullanilmamis = lastLogonTimestamp bos ve pwdLastSet 0.
@@ -1160,7 +1180,14 @@ mod tests {
             sqlx::query(sql).bind(seed.ad).execute(&pool).await.unwrap();
         }
 
-        // ayrilis: pasiflestirme (yikici niyet), applied_state departed
+        // ayrilis: pasiflestirme (yikici niyet), applied_state departed; Ali'nin yoneticisi
+        // Ayse → ADR-041 asta is acilir
+        sqlx::query("UPDATE identities SET manager_id = $1 WHERE id = $2")
+            .bind(seed.identity)
+            .bind(seed.other_identity)
+            .execute(&pool)
+            .await
+            .unwrap();
         sqlx::query("UPDATE identities SET end_at = now() - interval '1 hour' WHERE id = $1")
             .bind(seed.identity)
             .execute(&pool)
@@ -1168,6 +1195,22 @@ mod tests {
             .unwrap();
         let departed = run_job(&pool, &job, &env(false)).await.unwrap();
         assert!(departed.contains("pasifleştirildi"), "{departed}");
+        let subordinate_jobs: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM jobs WHERE identity_id = $1 AND status = 'queued' AND priority = 1",
+        )
+        .bind(seed.other_identity)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            subordinate_jobs, 1,
+            "yönetici ayrıldı: asta iş açılır (ADR-041)"
+        );
+        sqlx::query("UPDATE jobs SET status = 'succeeded' WHERE identity_id = $1")
+            .bind(seed.other_identity)
+            .execute(&pool)
+            .await
+            .unwrap();
         assert!(departed.contains("rol hesap öngörmüyor"), "{departed}");
         // Ayrilis: katalog gruplari kalkar, pasif OU'ya tasinir (docs/04 planli ayrilis)
         assert!(departed.contains("1 grup çıkarıldı"), "{departed}");
@@ -1261,6 +1304,12 @@ mod tests {
         ] {
             sqlx::query(sql).bind(seed.ad).execute(&pool).await.unwrap();
         }
+        // yonetici gecisleri asta is acmisti; kapat, sonra temiz bir is ac
+        sqlx::query("UPDATE jobs SET status = 'succeeded' WHERE identity_id = $1")
+            .bind(seed.other_identity)
+            .execute(&pool)
+            .await
+            .unwrap();
         test_support::enqueue(&pool, seed.other_identity, seed.ad, 1).await;
         // ilk is hala kirali ("running"); claim siradaki acik isi, yani bunu verir
         let other_job = crate::queue::claim(&pool, "w1", &[])

@@ -11,7 +11,10 @@
 <table class="w-full text-sm mb-6">
   <tr><td class="py-1" style="color:#a6adc8;">Sicil no</td><td>{{ page.person.employee_number }}</td><td style="color:#a6adc8;">Kimlik no</td><td>{{ page.person.national_id_masked }}</td></tr>
   <tr><td class="py-1" style="color:#a6adc8;">Departman</td><td>{{ page.person.department }}</td><td style="color:#a6adc8;">Birincil rol</td><td>{{ page.person.role }}</td></tr>
-  <tr><td class="py-1" style="color:#a6adc8;">Yönetici</td><td>{{ page.person.manager }}</td><td style="color:#a6adc8;">Çalışma tipi</td><td>{{ page.person.employment_type }}</td></tr>
+  <tr><td class="py-1" style="color:#a6adc8;">Yönetici</td><td>{{ page.person.manager }}{% if !page.lifecycle.manager_note.is_empty() %}<span style="color:#f9e2af;">{{ page.lifecycle.manager_note }}</span>{% endif %}</td><td style="color:#a6adc8;">Çalışma tipi</td><td>{{ page.person.employment_type }}</td></tr>
+  {% if page.lifecycle.subordinates > 0 %}
+  <tr><td class="py-1" style="color:#a6adc8;">Astlar</td><td colspan="3">{{ page.lifecycle.subordinates }} kişi{% if page.lifecycle.orphaned_subordinates %} <span style="color:#f38ba8;">— etkin yöneticileri boş kaldı: devir yöneticisi girin (ADR-041)</span>{% endif %}</td></tr>
+  {% endif %}
   <tr><td class="py-1" style="color:#a6adc8;">Başlangıç</td><td>{{ page.person.start_date }}</td><td style="color:#a6adc8;">Bitiş anı</td><td>{{ page.person.end_at }}</td></tr>
   <tr><td class="py-1" style="color:#a6adc8;">Cep telefonu</td><td>{{ page.person.mobile_phone }}</td><td style="color:#a6adc8;">Kullanıcı adı</td><td>{{ page.person.username }}</td></tr>
   <tr><td class="py-1" style="color:#a6adc8;">E-posta</td><td>{{ page.person.email }}</td><td style="color:#a6adc8;">UPN</td><td>{{ page.person.upn }}</td></tr>
