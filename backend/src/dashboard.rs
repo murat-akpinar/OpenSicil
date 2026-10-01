@@ -35,7 +35,40 @@ pub struct Dashboard {
     /// yapilacagini soyler, operator mutabakat ekranini aramaz. Bos liste =
     /// serit hic basilmaz.
     pub unadopted: Vec<crate::reconcile::Unadopted>,
+    /// Devreye alma karti (ADR-103 madde 2)
+    pub setup: Setup,
 }
+
+/// Devreye alma karti: kurulumun dort adimi mevcut tablolardan **tek sorguyla**
+/// turetilir (ADR-103 madde 2). Yeni tablo ve "kurulum bitti" bayragi yok;
+/// dordu tamamsa kart hic basilmaz.
+pub struct Setup {
+    pub steps: Vec<SetupStep>,
+    pub done: bool,
+}
+
+pub struct SetupStep {
+    /// Baslik anahtari (`setup.ad` …); metin i18n'de
+    pub key: &'static str,
+    /// Aciklama anahtari
+    pub hint: &'static str,
+    pub done: bool,
+    pub icon: &'static str,
+    /// Adimin kendi ekran(lar)i; son adim iki yol gosterir (ADR-103 madde 2)
+    pub links: Vec<SetupLink>,
+    /// Yalnizca `admin`in acabildigi ekran: yetkisiz operatore baglanti
+    /// gosterilmez, olmayan bir kapiyi isaret etmek olurdu (bkz. `Shell::is_admin`)
+    pub admin_only: bool,
+    /// Henuz ekrani olmayan ikinci yol icin not anahtari; bos = not yok
+    pub note: &'static str,
+}
+
+pub struct SetupLink {
+    pub key: &'static str,
+    pub href: String,
+}
+
+const SETUP_STEPS: usize = 4;
 
 /// Halka grafik: dilimler SVG `stroke-dasharray` ile cizilir. `conic-gradient`
 /// dilim acisini ancak satir ici `style` ya da yuzde basina ayri bir sinifla
@@ -119,7 +152,90 @@ pub async fn load(pool: &PgPool, time_zone: &str) -> Result<Dashboard, sqlx::Err
         departments: departments(pool).await?,
         employment: employment(pool).await?,
         unadopted: crate::reconcile::unadopted(pool).await?,
+        setup: setup(pool).await?,
     })
+}
+
+/// Devreye alma adimlari: dort kosul ve AD hedefinin id'si tek sorguda.
+/// "Katalog tarandi mi" kayip isaretli ogeyi saymaz — eski ortamdan kalan
+/// kayip satirlar adimi tamam gostermesin (ADR-014: katalog oge silmez).
+async fn setup(pool: &PgPool) -> Result<Setup, sqlx::Error> {
+    let row: (bool, bool, bool, bool, Option<i64>) = sqlx::query_as(
+        "SELECT (SELECT ad_host <> '' FROM app_settings), \
+                EXISTS (SELECT 1 FROM catalog_items WHERE missing_since IS NULL), \
+                EXISTS (SELECT 1 FROM departments) AND EXISTS (SELECT 1 FROM roles), \
+                EXISTS (SELECT 1 FROM identities WHERE deleted_at IS NULL), \
+                (SELECT id FROM target_systems WHERE kind = 'ad')",
+    )
+    .fetch_one(pool)
+    .await?;
+    Ok(setup_steps([row.0, row.1, row.2, row.3], row.4))
+}
+
+/// Adim listesi; saf — DB olmadan sinanir.
+fn setup_steps(done: [bool; SETUP_STEPS], ad_target: Option<i64>) -> Setup {
+    // Toplu sahiplenme hedefin mutabakat ekraninda. AD satiri migration'da
+    // seed edilir; yoksa (teorik) rapor kapagina duser, sablon bos href basmaz.
+    let adopt = match ad_target {
+        Some(id) => format!("/targets/{id}/reconcile"),
+        None => "/reports".to_string(),
+    };
+    let steps = vec![
+        SetupStep {
+            key: "setup.ad",
+            hint: "setup.ad_hint",
+            done: done[0],
+            icon: "ico-server",
+            links: vec![link("nav.settings", "/config")],
+            admin_only: true,
+            note: "",
+        },
+        SetupStep {
+            key: "setup.catalog",
+            hint: "setup.catalog_hint",
+            done: done[1],
+            icon: "ico-sitemap",
+            links: vec![link("nav.targets", "/targets")],
+            admin_only: false,
+            note: "",
+        },
+        SetupStep {
+            key: "setup.model",
+            hint: "setup.model_hint",
+            done: done[2],
+            icon: "ico-key",
+            links: vec![
+                link("nav.departments", "/departments"),
+                link("nav.roles", "/roles"),
+            ],
+            admin_only: false,
+            note: "",
+        },
+        SetupStep {
+            key: "setup.staff",
+            hint: "setup.staff_hint",
+            done: done[3],
+            icon: "ico-users",
+            links: vec![SetupLink {
+                key: "adopt.title",
+                href: adopt,
+            }],
+            admin_only: false,
+            // Ikinci yol CSV (ADR-103 madde 1 B1); ekrani Faz 5'te geliyor
+            note: "setup.staff_csv",
+        },
+    ];
+    Setup {
+        done: done.iter().all(|step| *step),
+        steps,
+    }
+}
+
+fn link(key: &'static str, href: &str) -> SetupLink {
+    SetupLink {
+        key,
+        href: href.to_string(),
+    }
 }
 
 /// Alti sayi ve bugunun tarihi tek sorguda: panel acilirken yedi ayri gidis
@@ -478,6 +594,163 @@ mod tests {
         // Mutabakat hic taranmadiysa yonlendirme seridi de yok (ADR-103)
         assert!(dash.unadopted.is_empty());
 
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
+    #[test]
+    fn the_setup_card_only_disappears_when_all_four_steps_are_done() {
+        let fresh = setup_steps([false; SETUP_STEPS], Some(7));
+        assert!(!fresh.done);
+        assert_eq!(fresh.steps.len(), SETUP_STEPS);
+        // Ilk adim Yapilandirma sayfasinda: yalnizca `admin` acabiliyor
+        assert!(fresh.steps[0].admin_only);
+        assert_eq!(fresh.steps[0].links[0].href, "/config");
+        // Departman + rol adimi iki ekrana baglanir
+        assert_eq!(fresh.steps[2].links.len(), 2);
+        // Son adim toplu sahiplenmeye, hedefin mutabakat ekranina
+        assert_eq!(fresh.steps[3].links[0].href, "/targets/7/reconcile");
+        assert_eq!(fresh.steps[3].note, "setup.staff_csv");
+
+        // Uc adim tamam, biri eksik: kart durur
+        let partial = setup_steps([true, true, true, false], None);
+        assert!(!partial.done);
+        // AD hedefi yoksa son adim rapor kapagina duser (bos href basilmaz)
+        assert_eq!(partial.steps[3].links[0].href, "/reports");
+
+        assert!(setup_steps([true; SETUP_STEPS], Some(7)).done);
+    }
+
+    #[test]
+    fn every_setup_key_and_icon_exists() {
+        // Anahtarlar struct alanindan geliyor; i18n taramasi sablondaki duz
+        // metin cagrisini aradigi icin bunlari gormez, burada dogrulanir.
+        let css = include_str!("../../frontend/assets/app.css");
+        let setup = setup_steps([false; SETUP_STEPS], Some(1));
+        for step in &setup.steps {
+            assert!(
+                css.contains(&format!(".{}::before {{", step.icon)),
+                "app.css'te .{} yok",
+                step.icon
+            );
+            let mut keys = vec![step.key, step.hint];
+            if !step.note.is_empty() {
+                keys.push(step.note);
+            }
+            keys.extend(step.links.iter().map(|l| l.key));
+            for key in keys {
+                for lang in [crate::i18n::Lang::Tr, crate::i18n::Lang::En] {
+                    assert_ne!(lang.t(key), key, "{}: {key} eksik", lang.code());
+                }
+            }
+        }
+        assert!(
+            css.contains(".qa-row-done {"),
+            "app.css'te .qa-row-done yok"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn the_setup_steps_are_derived_from_the_existing_tables() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+
+        // Bos kurulum: dort adimin dordu de eksik
+        let fresh = setup(&pool).await.unwrap();
+        assert!(!fresh.done);
+        assert!(fresh.steps.iter().all(|s| !s.done));
+
+        // Departman + rol + personel tek seed'le gelir
+        crate::test_support::seed_two_identities(&pool).await;
+        // Baglanti ayari ve katalog taramasi
+        sqlx::query("UPDATE app_settings SET ad_host = 'ldaps://dc1.example.org'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let catalog = crate::test_support::seed_example_catalog(&pool).await;
+        let done = setup(&pool).await.unwrap();
+        assert!(done.done, "dört adım da tamam olmalı");
+
+        // Katalog ogesi silinmez, "kayip" isaretlenir (ADR-014): kayip oge
+        // tarama adimini tamam gostermemeli
+        sqlx::query("UPDATE catalog_items SET missing_since = now()")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let lost = setup(&pool).await.unwrap();
+        assert!(!lost.done);
+        assert!(!lost.steps[1].done, "kayıp katalog adımı tamam saymaz");
+        assert!(catalog.gg_vpn > 0, "seed katalog öğesi döndürür");
+
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn the_home_page_prints_the_setup_card_until_the_install_is_complete() {
+        use axum::body::Body;
+        use axum::http::{header, Request};
+        use tower::ServiceExt;
+
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        let app = crate::web::routes()
+            .with_state(crate::web::test_state(pool.clone(), "https://localhost"));
+        let operator = crate::operator_session::Operator {
+            subject: "sub-setup".to_string(),
+            username: "ik.operatoru".to_string(),
+            email: "ik@example.org".to_string(),
+            authorities: vec!["hr".to_string()],
+            auth_source: crate::operator_session::AuthSource::Oidc,
+            lang: crate::i18n::DEFAULT,
+        };
+        let token = crate::operator_session::create_session(&pool, &operator)
+            .await
+            .unwrap();
+        let cookie = format!("{}={token}", crate::cookie::OPERATOR_SESSION_COOKIE_NAME);
+        let home = || {
+            let (app, cookie) = (app.clone(), cookie.clone());
+            async move {
+                let r = app
+                    .oneshot(
+                        Request::builder()
+                            .uri("/")
+                            .header(header::COOKIE, cookie)
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                let bytes = axum::body::to_bytes(r.into_body(), usize::MAX)
+                    .await
+                    .unwrap();
+                String::from_utf8(bytes.to_vec()).unwrap()
+            }
+        };
+
+        let title = crate::i18n::DEFAULT.t("setup.title");
+        let body = home().await;
+        assert!(body.contains(title), "boş kurulumda kart basılmalı");
+        // `hr` operatoru Yapilandirma sayfasini acamaz: baglanti gosterilmez
+        assert!(
+            !body.contains("href=\"/config\""),
+            "yetkisiz operatöre bağlantı verilmemeli"
+        );
+        assert!(
+            body.contains("/departments"),
+            "eksik adımın ekranı bağlanmalı"
+        );
+
+        // Dort adim tamamlanir: kart hic basilmaz
+        sqlx::query("UPDATE app_settings SET ad_host = 'ldaps://dc1.example.org'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        crate::test_support::seed_example_catalog(&pool).await;
+        crate::test_support::seed_two_identities(&pool).await;
+        assert!(!home().await.contains(title), "kurulum bitince kart kalmaz");
+
+        drop(app);
         drop(pool);
         crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
     }

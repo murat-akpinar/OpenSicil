@@ -101,4 +101,5 @@
 - Mutabakat taraması ve ekranı — AD'deki hesaplar artık görünüyor
 - Menü yapısı, panel düzeni ve toplu sahiplenme
 - Sahiplenilmeyen AD hesapları için panel ve liste yönlendirmesi
+- Devreye alma kartı — kurulumun dört adımı panelde
 

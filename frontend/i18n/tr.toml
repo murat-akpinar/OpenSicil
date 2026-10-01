@@ -452,6 +452,19 @@ dash.quick = "Hızlı işlemler"
 dash.needs_intervention = "{} iş müdahale bekliyor."
 dash.pending_approvals = "{} tanım taslağı onay bekliyor."
 
+# --- devreye alma kartı (kurulum adımları) ---
+setup.title = "Devreye alma"
+setup.hint = "Ürünün çalışması için gereken dört adım. Hepsi tamamlandığında bu kart kendiliğinden kaybolur."
+setup.ad = "Active Directory bağlantısı"
+setup.ad_hint = "Sunucu adresi ve servis hesabı Ayarlar sayfasından girilir."
+setup.catalog = "Katalog taraması"
+setup.catalog_hint = "Hedefteki OU ve gruplar okunur; rol ve departman tanımları bu listeden seçilir."
+setup.model = "Departman ve rol"
+setup.model_hint = "Departman ağacı ve roller tanımlanır; personel kaydı ikisini de ister."
+setup.staff = "Personel"
+setup.staff_hint = "Dizindeki hesaplar toplu sahiplenmeyle kayda dönüşür; hedefe hiçbir şey yazılmaz."
+setup.staff_csv = "CSV ile içe aktarma henüz yok"
+
 # --- denetim olayı adları (etkinlik akışı) ---
 event.settings.changed = "Ayarlar değiştirildi"
 event.bootstrap.password_changed = "Yerel hesap parolası değiştirildi"

@@ -278,6 +278,9 @@
   .ico-sign-in::before {
     content: "\f090";
   }
+  .ico-check::before {
+    content: "\f00c";
+  }
 
   /* Yuvarlak köşeli ikon karesi: kart başlığı, liste satırı, boş durum */
   /* Açık temada soluk mavi zemin + mavi glyph, koyuda palet "Primary Light"
@@ -790,6 +793,10 @@
   }
   .qa-row .nav-chevron {
     @apply ml-auto text-xs text-fg-faint;
+  }
+  /* Tamamlanmis devreye alma adimi: satir durur ama one cikmaz (ADR-103) */
+  .qa-row-done {
+    @apply border-transparent bg-transparent font-normal text-fg-faint hover:bg-transparent;
   }
 
   /* --- düğmeler --- */

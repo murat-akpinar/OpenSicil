@@ -547,9 +547,14 @@ mod tests {
         };
 
         let link = format!("/targets/{target}/reconcile");
+        // Seridin kendi cumlesi: ayni ekranda devreye alma kartinin son adimi da
+        // ayni mutabakat ekranina baglaniyor (ADR-103 madde 2), bu yuzden yalnizca
+        // baglantiya bakmak serit kalktiginda da dogru cikardi.
+        let strip = crate::i18n::DEFAULT.t("adopt.cta");
         for path in ["/", "/identities"] {
             let body = body_of(path).await;
             assert!(body.contains(&link), "{path}: mutabakat bağlantısı yok");
+            assert!(body.contains(strip), "{path}: şerit yok");
             assert!(body.contains("Active Directory"), "{path}: hedef adı yok");
         }
 
@@ -560,7 +565,7 @@ mod tests {
             .unwrap();
         for path in ["/", "/identities"] {
             assert!(
-                !body_of(path).await.contains(&link),
+                !body_of(path).await.contains(strip),
                 "{path}: şerit kalmamalı"
             );
         }

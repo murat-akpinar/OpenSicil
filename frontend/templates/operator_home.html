@@ -19,6 +19,40 @@
     </div>
   </section>
 
+  {# ADR-103 madde 2: devreye alma karti. Dort adim tek sorgudan turetilir,
+     dordu tamamsa kart hic basilmaz ("kurulum bitti" bayragi yok) #}
+  {% if !dash.setup.done %}
+  <section class="card">
+    <div class="card-head">
+      <i class="ico ico-bolt card-icon" aria-hidden="true"></i>
+      <h2 class="h2">{{ lang.t("setup.title") }}</h2>
+    </div>
+    <p class="sub">{{ lang.t("setup.hint") }}</p>
+    <div class="qa mt-4">
+      {% for s in dash.setup.steps %}
+      <div class="qa-row{% if s.done %} qa-row-done{% endif %}">
+        {% if s.done %}
+        <span class="ico-solid ico-solid-ok"><i class="ico ico-check" aria-hidden="true"></i></span>
+        {% else %}
+        <span class="ico-tile"><i class="ico {{ s.icon }}" aria-hidden="true"></i></span>
+        {% endif %}
+        <span class="min-w-0 flex-1">{{ lang.t(s.key) }}
+          {% if !s.done %}<span class="meta block font-normal">{{ lang.t(s.hint) }}</span>{% endif %}
+        </span>
+        {% if !s.done && (!s.admin_only || shell.is_admin) %}
+        <span class="flex flex-wrap items-center justify-end gap-2">
+          {% for l in s.links %}
+          <a class="btn btn-sm" href="{{ l.href }}">{{ lang.t(l.key) }}<i class="ico ico-chevron-right" aria-hidden="true"></i></a>
+          {% endfor %}
+          {% if s.note != "" %}<span class="meta font-normal">{{ lang.t(s.note) }}</span>{% endif %}
+        </span>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
   {# Isletme uyarilari yalnizca sifir degilken; temiz kurulumda ekran susmali #}
   {% if dash.totals.needs_intervention > 0 %}
   <p class="alert alert-warn">{{ lang.t1("dash.needs_intervention", dash.totals.needs_intervention) }}</p>

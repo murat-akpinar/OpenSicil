@@ -452,6 +452,19 @@ dash.quick = "Quick actions"
 dash.needs_intervention = "{} jobs need intervention."
 dash.pending_approvals = "{} definition drafts await approval."
 
+# --- setup card (onboarding steps) ---
+setup.title = "Setup"
+setup.hint = "The four steps the product needs to work. The card disappears on its own once they are all done."
+setup.ad = "Active Directory connection"
+setup.ad_hint = "The server address and the service account are entered on the Settings page."
+setup.catalog = "Catalog scan"
+setup.catalog_hint = "OUs and groups are read from the target; role and department definitions pick from that list."
+setup.model = "Departments and roles"
+setup.model_hint = "Define the department tree and the roles; staff records require both."
+setup.staff = "Staff"
+setup.staff_hint = "Directory accounts become records through bulk adoption; nothing is written to the target."
+setup.staff_csv = "CSV import not available yet"
+
 # --- audit event names (activity feed) ---
 event.settings.changed = "Settings changed"
 event.bootstrap.password_changed = "Local account password changed"
