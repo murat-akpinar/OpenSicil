@@ -579,7 +579,10 @@ fn local_path(referer: &str) -> Option<&str> {
         }
         None => referer,
     };
-    (path.starts_with('/') && !path.starts_with("//")).then_some(path)
+    // `//host` ve `/\host` protokol-goreli adrestir: tarayici ters bolu isaretini
+    // bolu gibi okur, acik yonlendirme olur
+    let relative = path.starts_with("//") || path.starts_with("/\\");
+    (path.starts_with('/') && !relative).then_some(path)
 }
 // --- END FEATURE: ui-i18n ---
 
@@ -713,6 +716,7 @@ mod tests {
             Some("/identities/3")
         );
         assert_eq!(local_path("//evil.example/x"), None);
+        assert_eq!(local_path("/\\evil.example/x"), None);
         assert_eq!(local_path("https://evil.example"), None);
         assert_eq!(local_path("javascript:alert(1)"), None);
     }

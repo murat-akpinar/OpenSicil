@@ -403,21 +403,18 @@ async fn edit_submit(
     }
     let new = match identity::validate(&form) {
         Ok(n) => n,
-        Err(key) => {
-            let msg = op.lang.t(key).to_string();
-            return render_form(&state, op.lang, form, msg, FormMode::Edit(id)).await;
-        }
+        Err(key) => return form_error(&state, op.lang, form, key, FormMode::Edit(id)).await,
     };
     if let Err(e) = identity::update_mover(&state.pool, id, &new).await {
         let db = e.as_database_error();
         if db.is_some_and(|d| d.is_unique_violation()) {
-            let msg = op.lang.t("err.duplicate_employee_number").to_string();
-            return render_form(&state, op.lang, form, msg, FormMode::Edit(id)).await;
+            let key = "err.duplicate_employee_number";
+            return form_error(&state, op.lang, form, key, FormMode::Edit(id)).await;
         }
         // docs/03: kadrolu disinda bitis zorunlu; bitis ayrilis ekranindan girilir (3c)
         if db.is_some_and(|d| d.is_check_violation()) {
-            let msg = op.lang.t("err.non_permanent_needs_end").to_string();
-            return render_form(&state, op.lang, form, msg, FormMode::Edit(id)).await;
+            let key = "err.non_permanent_needs_end";
+            return form_error(&state, op.lang, form, key, FormMode::Edit(id)).await;
         }
         return internal("kimlik güncellenemedi", e);
     }
@@ -631,6 +628,18 @@ enum FormMode {
     Edit(i64),
 }
 
+/// Formu i18n anahtarindan cozulmus hata mesajiyla yeniden gosterir
+async fn form_error(
+    state: &AppState,
+    lang: Lang,
+    form: IdentityForm,
+    key: &'static str,
+    mode: FormMode,
+) -> Response {
+    let error = lang.t(key).to_string();
+    render_form(state, lang, form, error, mode).await
+}
+
 async fn render_form(
     state: &AppState,
     lang: Lang,
@@ -672,19 +681,14 @@ async fn create(
     }
     let new = match identity::validate(&form) {
         Ok(n) => n,
-        Err(key) => {
-            let msg = op.lang.t(key).to_string();
-            return render_form(&state, op.lang, form, msg, FormMode::New).await;
-        }
+        Err(key) => return form_error(&state, op.lang, form, key, FormMode::New).await,
     };
-    if new.national_id.is_none() && form.confirm_duplicate.is_none() {
-        match identity::similar_name_exists(&state.pool, &new.given_name, &new.surname).await {
-            Ok(true) => {
-                return render_form(&state, op.lang, form, String::new(), FormMode::Duplicate).await
-            }
-            Ok(false) => {}
-            Err(e) => return internal("mükerrer kişi kontrolü", e),
+    match duplicate_person(&state, &form, &new).await {
+        Ok(true) => {
+            return render_form(&state, op.lang, form, String::new(), FormMode::Duplicate).await
         }
+        Ok(false) => {}
+        Err(e) => return internal("mükerrer kişi kontrolü", e),
     }
     // ADR-056: tek adim yalnizca bugun ya da gecmiste baslayan kayda ve ilk parola yetkisiyle
     let issue = !form.issue_first_password.is_empty();
@@ -695,8 +699,8 @@ async fn create(
         match identity::starts_by_today(&state.pool, &new.start_date, &state.time_zone).await {
             Ok(true) => {}
             Ok(false) => {
-                let msg = op.lang.t("err.first_password_start_date").to_string();
-                return render_form(&state, op.lang, form, msg, FormMode::New).await;
+                let key = "err.first_password_start_date";
+                return form_error(&state, op.lang, form, key, FormMode::New).await;
             }
             Err(e) => return internal("tarih kontrolü", e),
         }
@@ -710,12 +714,24 @@ async fn create(
     let (id, first_password) = match created {
         Ok(created) => created,
         Err(identity::CreateError::DuplicateNationalId) => {
-            let msg = op.lang.t("err.duplicate_national_id").to_string();
-            return render_form(&state, op.lang, form, msg, FormMode::New).await;
+            let key = "err.duplicate_national_id";
+            return form_error(&state, op.lang, form, key, FormMode::New).await;
         }
         Err(identity::CreateError::Db(e)) => return internal("kimlik kaydedilemedi", e),
     };
     finish_create(&state, &op, &new, id, first_password).await
+}
+
+/// ADR-078: kimlik no girilmediyse ad-soyad mukerrerligi uyarilir, operator onaylarsa gecilir
+async fn duplicate_person(
+    state: &AppState,
+    form: &IdentityForm,
+    new: &identity::NewIdentity,
+) -> Result<bool, sqlx::Error> {
+    if new.national_id.is_some() || form.confirm_duplicate.is_some() {
+        return Ok(false);
+    }
+    identity::similar_name_exists(&state.pool, &new.given_name, &new.surname).await
 }
 
 // Denetim satiri ve yonlendirme: ilk parola istendiyse teslim sayfasi, yoksa kisi sayfasi.

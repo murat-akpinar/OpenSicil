@@ -130,6 +130,23 @@ struct FirstPasswordTemplate {
     error: String,
 }
 
+impl FirstPasswordTemplate {
+    /// `header`: (ad soyad, kullanici adi, e-posta) — `person_header` cikti sirasi
+    fn new(lang: Lang, identity_id: i64, header: (String, String, String)) -> Self {
+        Self {
+            lang,
+            identity_id,
+            name: header.0,
+            username: header.1,
+            email: header.2,
+            pending: false,
+            jobs: Vec::new(),
+            password: String::new(),
+            error: String::new(),
+        }
+    }
+}
+
 async fn show(
     OperatorSession(op): OperatorSession,
     State(state): State<AppState>,
@@ -152,17 +169,7 @@ async fn show(
         }
         Err(e) => return internal("ilk parola okunamadı", e),
     };
-    let mut page = FirstPasswordTemplate {
-        lang: op.lang,
-        identity_id: id,
-        name: header.0,
-        username: header.1,
-        email: header.2,
-        pending: false,
-        jobs: Vec::new(),
-        password: String::new(),
-        error: String::new(),
-    };
+    let mut page = FirstPasswordTemplate::new(op.lang, id, header);
     match status {
         Status::Pending => {
             page.pending = true;
