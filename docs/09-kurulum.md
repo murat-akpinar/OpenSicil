@@ -215,6 +215,28 @@ Motor, kapatılmış hesabı geri açmaz ve silinmiş hesabı yeniden açmaz ([A
 
 **Git geçmişi yeniden yazılmaz** ([ADR-104](decisions/104-env-yedegi-public-repoya-push-edildi.md)): `git push --force` proje kuralıyla yasak ve GitHub silinen blob'u kendi çöp toplamasına kadar sunmaya devam eder, yani yeniden yazma tek başına sırrı geri almaz. Rotasyon geçmişte duran değeri değersizleştirir; asıl düzeltme budur.
 
+## İzleme (metrik ucu)
+
+Backend `GET /metrics` ile Prometheus metin biçiminde sayaç sunar (F-19; paket yok, birkaç satır metin). Erişim `METRICS_TOKEN` ile `Authorization: Bearer …` ([ADR-061](decisions/061-dagitim-sozlesmesi-compose-ve-kubernetes.md) madde 8); nginx `/metrics`i dışarıya **kapatır** (404), Prometheus backend'e doğrudan gider — compose'da `backend:8000`, Kubernetes'te pod/Service. Değerler kişisel veri içermez; tek etiket hedef sistem adıdır.
+
+```
+curl -H "Authorization: Bearer $METRICS_TOKEN" http://backend:8000/metrics
+```
+
+| Metrik | Ne | Alarm |
+|---|---|---|
+| `opensicil_departed_unclosed_links` | Ayrılmış (bitişi bir saatten eski) ama hedefte kapatılamamış yönetilen hesap bağlantısı ([ADR-052](decisions/052-uygulanamayan-fark.md)) | **İlk alarm:** > 0 |
+| `opensicil_target_last_success_timestamp_seconds{target}` | Hedefle son başarılı temas (okuma şeridi ya da yazma işi) | Servis hesabı parolası / CA sertifikası dolunca worker sessizce durur: `time() - değer` bir günü aşarsa |
+| `opensicil_target_last_reconcile_timestamp_seconds{target}` | Son başarılı mutabakat taraması | Gece koşusu çalışmadıysa |
+| `opensicil_oldest_awaiting_deletion_age_seconds` · `opensicil_awaiting_deletion_accounts` | Silinmesi onay bekleyen en eski hesabın yaşı ve sayısı ([ADR-024](decisions/024-hedef-sistem-basina-saklama-suresi.md)) | Arşiv unutulmasın |
+| `opensicil_dry_run` | Worker kuru çalıştırmada (1/0; worker durum satırını yazdıysa) ([ADR-054](decisions/054-kuru-calistirma-ve-yedekten-donus.md)) | Devreye almadan sonra 1 kalmışsa |
+| `opensicil_worker_last_seen_timestamp_seconds` | Worker'ın durum satırını son yazdığı an (dakikada bir) | İki dakikayı aşarsa worker ayakta değil |
+| `opensicil_jobs_needs_intervention` · `opensicil_oldest_open_job_age_seconds` | Müdahale bekleyen iş ve en eski açık işin yaşı | Kuyruk birikiyorsa |
+| `opensicil_pending_change_sets` | Onay bekleyen rol/departman taslağı ([ADR-031](decisions/031-degisiklik-seti-sahneleme.md)) | — |
+| `opensicil_hourly_counter_used{class}` · `opensicil_hourly_counter_limit{class}` | Saatlik fren sayaçlarının doluluğu ve sınırı (`destructive`, `grant`, `first_password`; [ADR-050](decisions/050-verme-sayaci-ve-is-butunlugu.md)) | Kullanım sınıra yaklaşınca |
+
+Worker modunu ve nabzını `worker_status` tablosuna dakikada bir yazar (tek satır); panel de kuru çalıştırma şeridini oradan basar. `worker-health` alt komutu (container içi dosya) değişmedi.
+
 ## Migration
 Aynı imajın `migrate` alt komutu, şema sahibi rolüyle **tek seferlik container** olarak çalışır: compose'da backend ve worker'ın `service_completed_successfully` ile beklediği servis, Kubernetes'te Job. Sahip rolünün parolası yalnızca bu container'a verilir ([ADR-015](decisions/015-veritabani-rolleri.md), [ADR-061](decisions/061-dagitim-sozlesmesi-compose-ve-kubernetes.md)). Backend ve worker açılışta şema sürümüne bakar; eskiyse çıkar, orkestratör yeniden başlatır. Komutlar: tek sunucuda (topoloji A) `docker compose up -d` migrate'i `depends_on: service_completed_successfully` ile otomatik önce çalıştırır; elle ya da B/C'de tek başına çalıştırmak için `docker compose run --rm --no-deps migrate`.
 

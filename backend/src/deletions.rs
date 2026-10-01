@@ -99,11 +99,13 @@ pub async fn load(pool: &PgPool, time_zone: &str) -> Result<Vec<Row>, sqlx::Erro
         .collect())
 }
 
-/// Onay bekleyen hesap sayisi (ADR-024 "silinmeyi bekleyen hesap sayisi" metrigi,
-/// rapor kapagi da okur).
-pub async fn awaiting_count(pool: &PgPool) -> Result<i64, sqlx::Error> {
-    sqlx::query_scalar(
-        "SELECT count(*) FROM account_links l \
+/// Onay bekleyen hesap sayisi ve en eskisinin yasi (saniye; saklama bitisinden
+/// bu yana) — ADR-024 / F-19 metrikleri, rapor kapagi sayiyi okur.
+pub async fn awaiting(pool: &PgPool) -> Result<(i64, i64), sqlx::Error> {
+    sqlx::query_as(
+        "SELECT count(*), \
+           COALESCE(EXTRACT(EPOCH FROM max(now() - (i.end_at + make_interval(days => t.retention_days))))::bigint, 0) \
+         FROM account_links l \
          JOIN identities i ON i.id = l.identity_id \
          JOIN target_systems t ON t.id = l.target_system_id \
          WHERE l.mode = 'managed' AND l.deleted_by_us_at IS NULL AND i.deleted_at IS NULL \
@@ -113,6 +115,10 @@ pub async fn awaiting_count(pool: &PgPool) -> Result<i64, sqlx::Error> {
     )
     .fetch_one(pool)
     .await
+}
+
+pub async fn awaiting_count(pool: &PgPool) -> Result<i64, sqlx::Error> {
+    Ok(awaiting(pool).await?.0)
 }
 
 /// Yalnizca gercekten onay bekleyen satir onaylanir (saklama dolmus, hedef onay

@@ -13,6 +13,9 @@ pub(crate) fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/api/health", get(health::health))
         .with_state(state.pool.clone())
+        // Metrik ucu (F-19): operator oturumu degil Bearer token; nginx disariya kapatir
+        .route("/metrics", get(crate::metrics::metrics))
+        .with_state(state.clone())
         // Statik varlıklar (ADR-088) operatör oturumu istemez: CSS/font giriş ekranında da gerekir
         .merge(crate::assets::routes())
         .merge(
@@ -36,6 +39,7 @@ struct Config {
     time_zone: String,
     change_set_threshold: usize,
     approval_timelock_hours: u32,
+    metrics_token: String,
 }
 
 // Butun ortam degiskenleri acilista dogrulanir: eksik anahtar ya da bozuk ortak
@@ -47,6 +51,11 @@ fn load_config() -> Result<Config, String> {
     let public_url = env_required("PUBLIC_URL")?;
     let common = crate::common_settings::CommonSettings::from_env()?;
     println!("backend: ortak ayarlar: {common}");
+    // ADR-061 madde 8: token zorunlu — bos deger ucu kapali tutar, uyarilir
+    let metrics_token = env_required("METRICS_TOKEN")?.trim().to_string();
+    if metrics_token.is_empty() {
+        eprintln!("backend: METRICS_TOKEN boş, metrik ucu kapalı");
+    }
     Ok(Config {
         database_url,
         aead_key,
@@ -55,6 +64,7 @@ fn load_config() -> Result<Config, String> {
         time_zone: common.time_zone,
         change_set_threshold: crate::change_set::threshold_from_env()?,
         approval_timelock_hours: crate::change_set::timelock_from_env()?,
+        metrics_token,
     })
 }
 
@@ -74,6 +84,7 @@ async fn startup() -> Result<AppState, String> {
         time_zone: c.time_zone,
         change_set_threshold: c.change_set_threshold,
         approval_timelock_hours: c.approval_timelock_hours,
+        metrics_token: c.metrics_token,
     })
 }
 
@@ -157,6 +168,7 @@ mod tests {
             time_zone: "Europe/Istanbul".to_string(),
             change_set_threshold: crate::change_set::DEFAULT_THRESHOLD,
             approval_timelock_hours: 0,
+            metrics_token: String::new(),
         }
     }
 

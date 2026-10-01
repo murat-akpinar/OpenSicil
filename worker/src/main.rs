@@ -311,7 +311,7 @@ async fn run() -> ExitCode {
         if let Err(e) = heartbeat::touch() {
             eprintln!("worker: nabız dosyasına yazılamadı: {e}");
         }
-        tick_if_due(&pool, &env.time_zone, &mut next_tick).await;
+        tick_if_due(&pool, &env, &worker_id, &mut next_tick).await;
         let skip = unreachable_targets(&unreachable, Instant::now());
         match queue::claim(&pool, &worker_id, &skip).await {
             Ok(Some(job)) => {
@@ -329,11 +329,16 @@ async fn run() -> ExitCode {
 }
 
 // Zamanlayici tiki (ADR-028): hata surec durdurmaz, sonraki tikte yeniden denenir.
-async fn tick_if_due(pool: &PgPool, time_zone: &str, next_tick: &mut Instant) {
+async fn tick_if_due(pool: &PgPool, env: &Env, worker_id: &str, next_tick: &mut Instant) {
     if Instant::now() < *next_tick {
         return;
     }
     *next_tick = Instant::now() + TICK_INTERVAL;
+    let time_zone = env.time_zone.as_str();
+    // F-19 / ADR-054: mod ve son gorulme veritabanina, dakikada bir (metrik ucu + panel)
+    if let Err(e) = heartbeat::record(pool, worker_id, env.write_mode.dry_run).await {
+        eprintln!("worker: durum satırı yazılamadı: {e}");
+    }
     match scheduler::tick(pool, time_zone).await {
         Ok(0) => {}
         Ok(opened) => println!("worker: zamanlayıcı {opened} geçiş işi açtı"),

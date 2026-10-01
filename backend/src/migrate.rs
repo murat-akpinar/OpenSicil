@@ -102,6 +102,8 @@ async fn fill_slugs(pool: &PgPool) -> Result<(), String> {
 //   (ADR-029: liste veritabaninda degil worker kodunda)
 // - first_passwords: backend ister ve gosterince bosaltir; sifreli parolayi ve
 //   red nedenini yalnizca worker yazar (ADR-036/085)
+// - worker_status: worker modunu ve son gorulmesini yazar, backend metrik ucu
+//   ve panel icin okur (F-19, ADR-054)
 const SERVICE_GRANTS: &str = "\
 GRANT SELECT ON _sqlx_migrations TO {backend}, {worker};
 GRANT SELECT, INSERT, UPDATE, DELETE ON bootstrap_account, app_settings, \
@@ -151,6 +153,8 @@ GRANT UPDATE (status, started_at, finished_at, result) ON read_jobs TO {worker};
 GRANT INSERT (kind, target_system_id) ON read_jobs TO {worker};
 GRANT SELECT ON reconcile_findings TO {backend}, {worker};
 GRANT INSERT, DELETE ON reconcile_findings TO {worker};
+GRANT SELECT ON worker_status TO {backend}, {worker};
+GRANT INSERT, UPDATE ON worker_status TO {worker};
 ";
 
 const IDENTITY_OPERATOR_COLUMNS: &str = "given_name, surname, employee_number, mobile_phone, \

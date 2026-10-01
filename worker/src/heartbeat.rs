@@ -15,6 +15,25 @@ pub fn check() -> ExitCode {
     check_path(Path::new(HEARTBEAT_PATH))
 }
 
+/// F-19 / ADR-054: mod ve son gorulme veritabanina — backend'in metrik ucu ve
+/// panel buradan okur (dosya tabanli nabiz container'da kalir). Tek satir, upsert.
+pub async fn record(
+    pool: &sqlx::PgPool,
+    worker_id: &str,
+    dry_run: bool,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO worker_status (id, worker_id, dry_run, seen_at) VALUES (TRUE, $1, $2, now()) \
+         ON CONFLICT (id) DO UPDATE SET worker_id = EXCLUDED.worker_id, \
+         dry_run = EXCLUDED.dry_run, seen_at = now()",
+    )
+    .bind(worker_id)
+    .bind(dry_run)
+    .execute(pool)
+    .await
+    .map(|_| ())
+}
+
 fn check_path(path: &Path) -> ExitCode {
     let age = std::fs::metadata(path)
         .and_then(|m| m.modified())
@@ -73,5 +92,22 @@ mod tests {
         assert_eq!(check_path(&path), ExitCode::FAILURE);
 
         std::fs::remove_file(&path).ok();
+    }
+
+    // F-19: tek satir, her yazimda mod ve zaman tazelenir.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn record_keeps_a_single_row_with_the_latest_mode() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        record(&pool, "w-1", true).await.unwrap();
+        record(&pool, "w-2", false).await.unwrap();
+        let rows: Vec<(String, bool)> =
+            sqlx::query_as("SELECT worker_id, dry_run FROM worker_status")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(rows, vec![("w-2".to_string(), false)]);
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
     }
 }

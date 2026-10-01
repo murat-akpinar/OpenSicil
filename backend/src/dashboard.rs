@@ -59,6 +59,9 @@ pub struct Dashboard {
     pub unadopted: Vec<crate::reconcile::Unadopted>,
     /// Devreye alma karti (ADR-103 madde 2)
     pub setup: Setup,
+    /// ADR-054: worker kuru calistirmada — panelde kalici serit; worker hic
+    /// yazmadiysa (ilk acilis) serit yok
+    pub dry_run: bool,
 }
 
 /// Devreye alma karti: kurulumun dort adimi mevcut tablolardan **tek sorguyla**
@@ -200,6 +203,10 @@ pub async fn load(pool: &PgPool, time_zone: &str, days: i32) -> Result<Dashboard
         employment: employment(pool).await?,
         unadopted: crate::reconcile::unadopted(pool).await?,
         setup: setup(pool).await?,
+        dry_run: sqlx::query_scalar("SELECT dry_run FROM worker_status")
+            .fetch_optional(pool)
+            .await?
+            .unwrap_or(false),
     })
 }
 

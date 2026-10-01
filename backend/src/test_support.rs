@@ -193,10 +193,12 @@ async fn target_id(pool: &PgPool, kind: &str) -> i64 {
 }
 
 pub async fn drop_temp_db(admin_pool: &PgPool, db_name: &str) {
-    sqlx::query(sqlx::AssertSqlSafe(format!("DROP DATABASE {db_name}")))
-        .execute(admin_pool)
-        .await
-        .expect("test veritabanı silinemedi");
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "DROP DATABASE {db_name} WITH (FORCE)"
+    )))
+    .execute(admin_pool)
+    .await
+    .expect("test veritabanı silinemedi");
 }
 
 // Bos, gercek migrator ile kurulmus bir veritabani doner; cagiran isini bitirince

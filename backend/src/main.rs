@@ -28,6 +28,7 @@ mod logging;
 #[allow(dead_code)]
 mod mapping_rules;
 mod mapping_web;
+mod metrics;
 mod migrate;
 mod national_id;
 mod normalize;

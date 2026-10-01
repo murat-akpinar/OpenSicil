@@ -53,6 +53,10 @@
   </section>
   {% endif %}
 
+  {# ADR-054: kuru calistirma unutulmasin — worker bildirdigi surece serit durur #}
+  {% if dash.dry_run %}
+  <p class="alert alert-warn">{{ lang.t("dash.dry_run") }}</p>
+  {% endif %}
   {# Isletme uyarilari yalnizca sifir degilken; temiz kurulumda ekran susmali #}
   {# Serit kisa yoldur: tek is kisi sayfasina, birden fazlasi mudahale listesine #}
   {% if dash.totals.needs_intervention > 0 %}

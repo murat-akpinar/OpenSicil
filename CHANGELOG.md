@@ -125,4 +125,5 @@
 - Mutabakat gece koşusu ve bulgudan yeniden uygula (F-13)
 - Panelde tarih aralığı filtresi ve rol kırılımı halkası (ADR-076)
 - Silinmeyi bekleyenler listesi ve silme onayı (ADR-024)
+- Metrik ucu — Prometheus metni, Bearer token, worker durum satırı ve kuru çalıştırma şeridi (F-19)
 
