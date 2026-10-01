@@ -1,24 +1,32 @@
 /* Arayüz girdi dosyası (ADR-088). Çıktı: backend/static/app.css — `sh scripts/build-css.sh`
    ile üretilir ve commit'lenir, include_bytes! ile binary'ye gömülür (backend/src/assets.rs).
    Renkler Catppuccin: açık Latte, koyu Mocha (ADR-067). Şablonlarda satır içi renk yoktur;
-   buradaki token ve bileşen sınıfları kullanılır. */
+   buradaki token ve bileşen sınıfları kullanılır.
+
+   Yüzey düzeni: sayfa zemini mantle, kart/kenar çubuğu/üst bar base, satır vurgusu crust.
+   Çerçeve değil yüzey + yumuşak gölge ayırır; ikonlar CaskaydiaMono Nerd Font glyph'leri
+   (yalnızca `sh scripts/check-glyphs.sh` ile varlığı doğrulanmış kod noktaları). */
 @import "tailwindcss";
 
-/* Tailwind'in kaynak taraması: bu dosya assets/ altında, şablonlar bir üstteki templates/ */
+/* Tailwind'in kaynak taraması: bu dosya assets/ altında, şablonlar bir üstteki templates/;
+   app.js şablonlarda geçmeyen sınıf (aktif gezinme) yazdığı için o da taranır. */
 @source "../templates";
+@source "../static/app.js";
 
 /* --- Catppuccin Latte (açık, varsayılan) --- */
 :root {
-  --ctp-bg: #eff1f5;
+  --ctp-bg: #e6e9ef;
+  --ctp-card: #eff1f5;
   --ctp-bg-soft: #e6e9ef;
   --ctp-bg-hard: #dce0e8;
   --ctp-surface: #ccd0da;
   --ctp-surface-2: #bcc0cc;
-  --ctp-line: #bcc0cc;
+  --ctp-line: #dce0e8;
   --ctp-fg: #4c4f69;
   --ctp-fg-dim: #5c5f77;
   --ctp-fg-faint: #8c8fa1;
   --ctp-accent: #1e66f5;
+  --ctp-accent-soft: #dde6fd;
   --ctp-ok: #40a02b;
   --ctp-err: #d20f39;
   --ctp-warn: #df8e1d;
@@ -28,12 +36,15 @@
   --ctp-warn-soft: #f8ecd8;
   --ctp-err-soft: #f9dde2;
   --ctp-info-soft: #d9efef;
+  --ctp-shadow: 0 1px 2px rgb(76 79 105 / 0.06), 0 8px 24px rgb(76 79 105 / 0.07);
+  --ctp-shadow-sm: 0 1px 2px rgb(76 79 105 / 0.08);
 }
 
 /* Sistem koyu tercihi; operatör elle "light" seçmediyse */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --ctp-bg: #1e1e2e;
+    --ctp-bg: #181825;
+    --ctp-card: #1e1e2e;
     --ctp-bg-soft: #181825;
     --ctp-bg-hard: #11111b;
     --ctp-surface: #313244;
@@ -43,6 +54,7 @@
     --ctp-fg-dim: #bac2de;
     --ctp-fg-faint: #a6adc8;
     --ctp-accent: #89b4fa;
+    --ctp-accent-soft: #2b3148;
     --ctp-ok: #a6e3a1;
     --ctp-err: #f38ba8;
     --ctp-warn: #f9e2af;
@@ -52,12 +64,15 @@
     --ctp-warn-soft: #3a382b;
     --ctp-err-soft: #3a2b31;
     --ctp-info-soft: #28383a;
+    --ctp-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px rgb(0 0 0 / 0.28);
+    --ctp-shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
   }
 }
 
 /* Elle koyu seçimi (static/app.js, localStorage) */
 :root[data-theme="dark"] {
-  --ctp-bg: #1e1e2e;
+  --ctp-bg: #181825;
+  --ctp-card: #1e1e2e;
   --ctp-bg-soft: #181825;
   --ctp-bg-hard: #11111b;
   --ctp-surface: #313244;
@@ -67,6 +82,7 @@
   --ctp-fg-dim: #bac2de;
   --ctp-fg-faint: #a6adc8;
   --ctp-accent: #89b4fa;
+  --ctp-accent-soft: #2b3148;
   --ctp-ok: #a6e3a1;
   --ctp-err: #f38ba8;
   --ctp-warn: #f9e2af;
@@ -76,11 +92,14 @@
   --ctp-warn-soft: #3a382b;
   --ctp-err-soft: #3a2b31;
   --ctp-info-soft: #28383a;
+  --ctp-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px rgb(0 0 0 / 0.28);
+  --ctp-shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
 }
 
 /* `inline`: utility'ler değeri var() olarak taşır, tema değişkeni değişince renk değişir */
 @theme inline {
   --color-bg: var(--ctp-bg);
+  --color-card: var(--ctp-card);
   --color-bg-soft: var(--ctp-bg-soft);
   --color-bg-hard: var(--ctp-bg-hard);
   --color-surface: var(--ctp-surface);
@@ -90,6 +109,7 @@
   --color-fg-dim: var(--ctp-fg-dim);
   --color-fg-faint: var(--ctp-fg-faint);
   --color-accent: var(--ctp-accent);
+  --color-accent-soft: var(--ctp-accent-soft);
   --color-ok: var(--ctp-ok);
   --color-err: var(--ctp-err);
   --color-warn: var(--ctp-warn);
@@ -119,10 +139,19 @@
   html {
     color-scheme: light dark;
   }
+  /* Elle tema seçimi tarayıcı widget'larını (onay kutusu, açılır liste, kaydırma çubuğu)
+     da çevirmeli: aksi halde sistem koyuyken "light" seçen operatör siyah onay kutusu görür. */
+  :root[data-theme="light"] {
+    color-scheme: light;
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+  }
   body {
     background-color: var(--ctp-bg);
     color: var(--ctp-fg);
     font-family: "CaskaydiaMono Nerd Font", ui-monospace, monospace;
+    accent-color: var(--ctp-accent);
   }
   a {
     color: var(--ctp-accent);
@@ -134,54 +163,144 @@
 }
 
 @layer components {
+  /* --- ikonlar ---
+     Glyph'ler yalnızca burada durur (şablonlarda ham karakter yok): `sh scripts/check-glyphs.sh`
+     bu dosyadaki her `\fXXX` kod noktasını gömülü TTF'te arar, eksikse hata verir — eksik glyph
+     ekranda tofu kutusu demek. Kod noktaları Nerd Font'un Font Awesome bloğundan (f000–f385). */
+  .ico {
+    @apply inline-block shrink-0 leading-none not-italic;
+  }
+  .ico::before {
+    display: inline-block;
+  }
+  .ico-shield::before {
+    content: "\f132";
+  }
+  .ico-users::before {
+    content: "\f0c0";
+  }
+  .ico-calendar::before {
+    content: "\f073";
+  }
+  .ico-key::before {
+    content: "\f084";
+  }
+  .ico-sitemap::before {
+    content: "\f0e8";
+  }
+  .ico-server::before {
+    content: "\f233";
+  }
+  .ico-tag::before {
+    content: "\f02b";
+  }
+  .ico-cog::before {
+    content: "\f013";
+  }
+  .ico-plus::before {
+    content: "\f067";
+  }
+  .ico-logout::before {
+    content: "\f08b";
+  }
+  .ico-globe::before {
+    content: "\f0ac";
+  }
+  .ico-moon::before {
+    content: "\f186";
+  }
+  .ico-sun::before {
+    content: "\f185";
+  }
+  .ico-inbox::before {
+    content: "\f01c";
+  }
+  .ico-user::before {
+    content: "\f007";
+  }
+  .ico-clock::before {
+    content: "\f017";
+  }
+  .ico-link::before {
+    content: "\f0c1";
+  }
+  .ico-refresh::before {
+    content: "\f021";
+  }
+  .ico-lock::before {
+    content: "\f023";
+  }
+  .ico-mail::before {
+    content: "\f0e0";
+  }
+
+  /* Yuvarlak köşeli ikon karesi: kart başlığı, liste satırı, boş durum */
+  .ico-tile {
+    @apply grid size-9 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent;
+  }
+  .ico-tile-lg {
+    @apply size-12 rounded-xl text-xl;
+  }
+
   /* --- kabuk --- */
   .topbar {
-    @apply sticky top-0 z-10 border-b border-line bg-bg-soft;
+    @apply sticky top-0 z-10 border-b border-line bg-card;
+    box-shadow: var(--ctp-shadow-sm);
   }
   .topbar-inner {
-    @apply mx-auto flex max-w-6xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3;
+    @apply flex w-full flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 md:px-6;
   }
   .brand {
-    @apply flex items-center gap-2 font-bold tracking-tight text-fg no-underline;
+    @apply flex items-center gap-2.5 text-base font-bold tracking-tight text-fg no-underline;
   }
   .brand-mark {
-    @apply grid size-7 place-items-center rounded-md bg-accent text-sm font-bold text-on-accent;
+    @apply grid size-8 place-items-center rounded-lg bg-accent text-sm text-on-accent;
   }
   .shell {
-    @apply mx-auto flex w-full max-w-6xl flex-col md:flex-row;
+    @apply flex w-full flex-1 flex-col md:flex-row;
   }
   /* Dar ekranda icerigin ustunde yatay seride kayar, md'den sonra sol sutun olur. */
   .side {
-    @apply flex shrink-0 flex-row gap-1 overflow-x-auto border-b border-line px-4 py-2 text-sm md:w-52 md:flex-col md:border-r md:border-b-0 md:px-3 md:py-6;
+    @apply flex shrink-0 flex-row gap-1 overflow-x-auto border-b border-line bg-card px-3 py-2
+           text-sm md:w-56 md:flex-col md:border-r md:border-b-0 md:px-3 md:py-5;
   }
   .nav-link {
-    @apply rounded-md px-2 py-1 whitespace-nowrap text-fg-dim no-underline hover:bg-surface hover:text-fg;
+    @apply flex items-center gap-2.5 rounded-lg px-3 py-2 whitespace-nowrap text-fg-dim
+           no-underline hover:bg-bg hover:text-fg;
+  }
+  /* Glyph'lerin ilerleme genişliği farklı; sabit kutu etiketleri aynı hizada tutar */
+  .nav-link .ico {
+    @apply w-5 text-center text-fg-faint;
+  }
+  /* Aktif bağlantıyı app.js yol eşleşmesiyle isaretler; sablon basina plumbing yok */
+  .nav-link-active {
+    @apply bg-accent font-bold text-on-accent hover:bg-accent hover:text-on-accent;
+  }
+  .nav-link-active .ico {
+    @apply text-on-accent;
   }
   .page {
-    @apply w-full min-w-0 px-4 py-6;
+    @apply mx-auto w-full min-w-0 max-w-6xl px-4 py-7 md:px-6;
   }
   .page-narrow {
-    @apply mx-auto w-full max-w-xl px-4 py-6;
+    @apply mx-auto w-full max-w-xl px-4 py-7;
   }
   .page-head {
     @apply mb-6 flex flex-wrap items-center justify-between gap-3;
   }
+
+  /* --- tipografi --- */
   .h1 {
-    @apply text-xl font-bold tracking-tight;
+    @apply text-2xl leading-tight font-bold tracking-tight;
   }
   .h2 {
     @apply mb-3 text-base font-bold;
   }
-
-  /* --- yüzeyler --- */
-  .card {
-    @apply rounded-xl border border-line bg-bg-soft p-5;
+  .sub {
+    @apply mt-1 text-sm text-fg-faint;
   }
-  .card-tight {
-    @apply rounded-lg border border-line bg-bg-soft p-3;
-  }
-  .chip {
-    @apply rounded-md bg-surface px-2 py-0.5 text-sm;
+  .meta {
+    @apply text-xs text-fg-faint;
   }
   .muted {
     @apply text-fg-faint;
@@ -196,44 +315,80 @@
     @apply text-ok;
   }
 
+  /* --- yüzeyler --- */
+  .card {
+    @apply rounded-xl border border-line bg-card p-5;
+    box-shadow: var(--ctp-shadow);
+  }
+  .card-tight {
+    @apply rounded-lg border border-line bg-card p-3;
+    box-shadow: var(--ctp-shadow-sm);
+  }
+  /* Kart başlığı: ikon karesi + başlık + sağda eylem */
+  .card-head {
+    @apply mb-4 flex items-center gap-3;
+  }
+  .card-head .h2 {
+    @apply mb-0;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-lg bg-bg px-2.5 py-1 text-sm;
+  }
+
+  /* Boş durum: ikon karesi + başlık + ipucu + eylem */
+  .empty {
+    @apply flex flex-col items-center gap-3 rounded-xl border border-line bg-card px-6 py-12 text-center;
+    box-shadow: var(--ctp-shadow);
+  }
+  .empty-title {
+    @apply text-base font-bold;
+  }
+  .empty-hint {
+    @apply max-w-md text-sm text-fg-faint;
+  }
+
   /* --- düğmeler --- */
   .btn {
-    @apply inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-md
-           border border-line bg-surface px-3 py-1.5 text-sm font-bold text-fg no-underline
-           hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg
+           border border-line bg-card px-3.5 py-2 text-sm font-bold text-fg no-underline
+           hover:bg-bg disabled:cursor-not-allowed disabled:opacity-50;
+    box-shadow: var(--ctp-shadow-sm);
   }
   .btn-primary {
-    @apply border-transparent bg-accent text-on-accent hover:opacity-90;
+    @apply border-transparent bg-accent text-on-accent hover:bg-accent hover:opacity-90;
   }
   .btn-ok {
-    @apply border-transparent bg-ok text-on-accent hover:opacity-90;
+    @apply border-transparent bg-ok text-on-accent hover:bg-ok hover:opacity-90;
   }
   .btn-warn {
-    @apply border-transparent bg-warn text-on-accent hover:opacity-90;
+    @apply border-transparent bg-warn text-on-accent hover:bg-warn hover:opacity-90;
   }
   .btn-danger {
-    @apply border-transparent bg-err text-on-accent hover:opacity-90;
+    @apply border-transparent bg-err text-on-accent hover:bg-err hover:opacity-90;
   }
   .btn-ghost {
-    @apply border-transparent bg-transparent text-fg-dim hover:bg-surface hover:text-fg;
+    @apply border-transparent bg-transparent text-fg-dim shadow-none hover:bg-bg hover:text-fg;
   }
   .btn-sm {
-    @apply px-2 py-1 text-xs;
+    @apply px-2.5 py-1.5 text-xs;
+  }
+  .btn .ico {
+    @apply w-4 text-center;
   }
 
   /* --- form --- */
   .field {
-    @apply mb-3;
+    @apply mb-3.5;
   }
   .label {
-    @apply mb-1 block text-sm text-fg-dim;
+    @apply mb-1.5 block text-sm font-bold text-fg-dim;
   }
   .input {
-    @apply w-full rounded-md border border-line bg-bg px-3 py-2 text-fg
+    @apply w-full rounded-lg border border-surface bg-bg px-3 py-2 text-fg
            placeholder:text-fg-faint focus:border-accent;
   }
   .hint {
-    @apply mt-1 block text-xs text-fg-faint;
+    @apply mt-1.5 block text-xs text-fg-faint;
   }
   .check {
     @apply flex items-center gap-2 text-sm;
@@ -247,10 +402,10 @@
 
   /* Etiket-değer ızgarası (kişi sayfası başlığı): tablo çizgisi olmadan okunur */
   .kv {
-    @apply grid gap-x-8 gap-y-3 sm:grid-cols-2;
+    @apply grid gap-x-8 gap-y-4 sm:grid-cols-2;
   }
   .kv dt {
-    @apply text-xs tracking-wide text-fg-faint;
+    @apply mb-0.5 text-xs tracking-wide text-fg-faint;
   }
   .kv dd {
     @apply break-words;
@@ -258,7 +413,8 @@
 
   /* Vurgulu panel: müdahale / acil gibi dikkat isteyen bloklar */
   .panel {
-    @apply rounded-xl border border-line bg-bg-soft p-4;
+    @apply rounded-xl border border-line bg-card p-4;
+    box-shadow: var(--ctp-shadow);
   }
   /* Yumuşak tonlar tema başına token: Tailwind'in `/20` saydamlık değiştiricisi
      `var()` token'larında düşüyor, `color-mix` ise eski tarayıcı için düz renge
@@ -277,19 +433,21 @@
     @apply w-full border-collapse text-sm;
   }
   .tbl th {
-    @apply border-b border-line px-2 py-2 text-left font-bold text-fg-dim;
+    @apply border-b border-line px-3 py-2.5 text-left text-xs font-bold tracking-wide text-fg-faint;
   }
   .tbl td {
-    @apply border-b border-line px-2 py-2 align-top;
+    @apply border-b border-line px-3 py-3 align-top;
   }
-  /* Kart (bg-soft) içindeki tabloda fark edilsin diye bir ton daha koyu */
+  .tbl tbody tr:last-child td {
+    @apply border-b-0;
+  }
   .tbl tbody tr:hover {
-    @apply bg-bg-hard;
+    @apply bg-bg;
   }
 
   /* --- durum etiketleri --- */
   .badge {
-    @apply inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5
+    @apply inline-flex items-center gap-1 rounded-full border border-line px-2.5 py-0.5
            text-xs font-bold text-fg-dim;
   }
   .badge-ok {
@@ -318,28 +476,41 @@
 
   /* --- uyarı blokları --- */
   .alert {
-    @apply mb-4 rounded-lg border px-3 py-2 text-sm;
+    @apply mb-4 flex items-start gap-2 rounded-lg border px-3 py-2.5 text-sm;
+  }
+  .alert::before {
+    display: inline-block;
+    flex-shrink: 0;
   }
   .alert-err {
     border-color: var(--ctp-err);
     background-color: var(--ctp-err-soft);
     color: var(--ctp-err);
   }
+  .alert-err::before {
+    content: "\f071";
+  }
   .alert-warn {
     border-color: var(--ctp-warn);
     background-color: var(--ctp-warn-soft);
     color: var(--ctp-warn);
+  }
+  .alert-warn::before {
+    content: "\f071";
   }
   .alert-info {
     border-color: var(--ctp-info);
     background-color: var(--ctp-info-soft);
     color: var(--ctp-info);
   }
+  .alert-info::before {
+    content: "\f05a";
+  }
 
   .link {
-    @apply underline decoration-from-font;
+    @apply font-bold no-underline hover:underline hover:decoration-from-font;
   }
   .stack {
-    @apply space-y-4;
+    @apply space-y-5;
   }
 }

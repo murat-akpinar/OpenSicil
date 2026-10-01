@@ -2,26 +2,34 @@
 {% block title %}{{ lang.t("nav.upcoming") }} — OpenSicil{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1 class="h1">{{ lang.t("nav.upcoming") }} — {{ lang.t1("upcoming.days_window", days) }}</h1>
+  <div>
+    <h1 class="h1">{{ lang.t("nav.upcoming") }}</h1>
+    <p class="sub">{{ lang.t1("upcoming.days_window", days) }}</p>
+  </div>
+  <form method="get" action="/upcoming" class="flex items-end gap-2 text-sm">
+    <label class="flex items-center gap-2">{{ lang.t("upcoming.days") }} <input class="input w-24" type="number" min="1" max="365" name="days" value="{{ days }}"></label>
+    <button class="btn" type="submit">{{ lang.t("upcoming.show") }}</button>
+  </form>
 </div>
-<form method="get" action="/upcoming" class="flex gap-2 items-end mb-4 text-sm">
-  <label>{{ lang.t("upcoming.days") }} <input class="input w-24" type="number" min="1" max="365" name="days" value="{{ days }}"></label>
-  <button class="btn btn-primary" type="submit">{{ lang.t("upcoming.show") }}</button>
-</form>
 {% if rows.is_empty() %}
-<p class="muted">{{ lang.t("upcoming.empty") }}</p>
+<div class="empty">
+  <span class="ico-tile ico-tile-lg"><i class="ico ico-calendar" aria-hidden="true"></i></span>
+  <p class="empty-hint">{{ lang.t("upcoming.empty") }}</p>
+</div>
 {% else %}
-<table class="tbl">
-  <thead><tr><th>{{ lang.t("upcoming.day") }}</th><th>{{ lang.t("field.event") }}</th><th>{{ lang.t("field.person") }}</th></tr></thead>
-  <tbody>
-  {% for r in rows %}
-    <tr>
-      <td>{{ r.day }}</td>
-      <td>{{ lang.key("upcomingkind", r.kind) }}{% if !r.detail.is_empty() %}: {{ r.detail }}{% endif %}</td>
-      <td><a class="link" href="/identities/{{ r.identity_id }}">{{ r.name }}</a></td>
-    </tr>
-  {% endfor %}
-  </tbody>
-</table>
+<div class="card overflow-x-auto p-0">
+  <table class="tbl">
+    <thead><tr><th>{{ lang.t("upcoming.day") }}</th><th>{{ lang.t("field.event") }}</th><th>{{ lang.t("field.person") }}</th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td class="whitespace-nowrap">{{ r.day }}</td>
+        <td>{{ lang.key("upcomingkind", r.kind) }}{% if !r.detail.is_empty() %}: {{ r.detail }}{% endif %}</td>
+        <td><a class="link" href="/identities/{{ r.identity_id }}">{{ r.name }}</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
 {% endif %}
 {% endblock %}

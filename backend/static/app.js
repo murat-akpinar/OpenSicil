@@ -1,5 +1,7 @@
-// Tema geçişi (ADR-088): varsayılan sistem tercihi, elle seçim localStorage'da.
+// Tema geçişi ve aktif gezinme bağlantısı (ADR-088).
 // CSP script-src 'self' satır içi script'e izin vermiyor, bu yüzden ayrı dosya.
+// Metin üretmez: tema ikonu CSS sınıfı (.ico-sun/.ico-moon), aria-label şablondan
+// i18n ile gelir — JS'te çevrilecek dize kalmaz (ADR-089).
 (function () {
   var KEY = "opensicil-theme";
   var root = document.documentElement;
@@ -28,21 +30,16 @@
     return window.matchMedia("(prefers-color-scheme: dark)").matches;
   }
 
-  apply(stored());
-
-  document.addEventListener("DOMContentLoaded", function () {
+  function themeToggle() {
     var button = document.getElementById("theme-toggle");
     if (!button) {
       return;
     }
-    function label() {
-      button.textContent = dark() ? "☀" : "☾";
-      button.setAttribute(
-        "aria-label",
-        dark() ? "Açık temaya geç" : "Koyu temaya geç",
-      );
+    function icon() {
+      button.classList.toggle("ico-sun", dark());
+      button.classList.toggle("ico-moon", !dark());
     }
-    label();
+    icon();
     button.addEventListener("click", function () {
       var next = dark() ? "light" : "dark";
       apply(next);
@@ -51,7 +48,37 @@
       } catch (e) {
         // saklanamadı: seçim yalnızca bu sayfa için geçerli
       }
-      label();
+      icon();
     });
+  }
+
+  // Yolu en uzun eşleşen gezinme bağlantısı aktif olur; kimlik sayfaları "/" altında.
+  function activeNav() {
+    var path = window.location.pathname;
+    var best = null;
+    var bestLength = -1;
+    var links = document.querySelectorAll(".side .nav-link");
+    for (var i = 0; i < links.length; i++) {
+      var href = links[i].getAttribute("href");
+      var hit =
+        path === href ||
+        (href !== "/" && path.indexOf(href + "/") === 0) ||
+        (href === "/" && path.indexOf("/identities") === 0);
+      if (hit && href.length > bestLength) {
+        best = links[i];
+        bestLength = href.length;
+      }
+    }
+    if (best) {
+      best.classList.add("nav-link-active");
+      best.setAttribute("aria-current", "page");
+    }
+  }
+
+  apply(stored());
+
+  document.addEventListener("DOMContentLoaded", function () {
+    themeToggle();
+    activeNav();
   });
 })();

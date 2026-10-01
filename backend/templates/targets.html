@@ -8,7 +8,11 @@
 {% if !info.is_empty() %}<p class="alert alert-info">{{ info }}</p>{% endif %}
 {% for v in targets %}
 <div class="card mb-6 space-y-3">
-  <h2 class="h2">{{ v.target.name }} <a class="link ml-2 text-sm" href="/targets/{{ v.target.id }}/mappings">{{ lang.t("targets.mappings_link") }}</a></h2>
+  <div class="card-head">
+    <span class="ico-tile"><i class="ico ico-server" aria-hidden="true"></i></span>
+    <h2 class="h2">{{ v.target.name }}</h2>
+    <a class="link ml-auto text-sm" href="/targets/{{ v.target.id }}/mappings">{{ lang.t("targets.mappings_link") }}</a>
+  </div>
   <div class="kv">
     <span>{{ lang.t("catalog.last_refresh") }}</span>
     <span>
@@ -18,7 +22,7 @@
   </div>
   {% if can_edit %}
   <form method="post" action="/targets/{{ v.target.id }}/catalog-refresh">
-    <button class="btn btn-sm" type="submit">{{ lang.t("catalog.refresh") }}</button>
+    <button class="btn btn-sm" type="submit"><i class="ico ico-refresh" aria-hidden="true"></i>{{ lang.t("catalog.refresh") }}</button>
   </form>
   {% endif %}
 <form method="post" action="/targets/{{ v.target.id }}" class="space-y-3">

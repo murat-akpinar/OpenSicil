@@ -16,7 +16,7 @@
     <label class="label" for="password">{{ lang.t("login.password") }}</label>
     <input class="input" type="password" id="password" name="password" required>
   </div>
-  <button class="btn btn-primary w-full" type="submit">{{ lang.t("login.submit") }}</button>
+  <button class="btn btn-primary w-full" type="submit"><i class="ico ico-lock" aria-hidden="true"></i>{{ lang.t("login.submit") }}</button>
   <p class="hint">{{ lang.t("login.bootstrap_hint") }}</p>
 </form>
 {% if oidc_configured %}

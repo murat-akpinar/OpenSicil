@@ -8,20 +8,21 @@
 <script src="/static/app.js"></script>
 {% block head %}{% endblock %}
 </head>
-<body>
+<body class="flex min-h-screen flex-col">
   <header class="topbar">
     <div class="topbar-inner">
-      <a class="brand" href="/"><span class="brand-mark">OS</span>OpenSicil</a>
+      <a class="brand" href="/"><span class="brand-mark"><i class="ico ico-shield" aria-hidden="true"></i></span>OpenSicil</a>
       <div class="ml-auto flex items-center gap-2">
         {% block lang_switch %}
         {# ADR-089: tercih operator oturumunda saklanir; dugme obur dile gecer #}
         <form method="post" action="/lang">
-          <button class="btn btn-ghost btn-sm" type="submit" name="lang" value="{{ lang.other_code() }}" aria-label="{{ lang.t("shell.language") }}">{{ lang.other_label() }}</button>
+          <button class="btn btn-ghost btn-sm" type="submit" name="lang" value="{{ lang.other_code() }}" aria-label="{{ lang.t("shell.language") }}"><i class="ico ico-globe" aria-hidden="true"></i>{{ lang.other_label() }}</button>
         </form>
         {% endblock %}
-        <button class="btn btn-ghost btn-sm" id="theme-toggle" type="button" aria-label="{{ lang.t("shell.theme") }}">☾</button>
+        {# app.js ikon sinifini (ay/gunes) ve aria-label'i temaya gore degistirir #}
+        <button class="btn btn-ghost btn-sm ico ico-moon" id="theme-toggle" type="button" aria-label="{{ lang.t("shell.theme") }}"></button>
         {% block topbar_end %}
-        <form method="post" action="/logout"><button class="btn btn-ghost btn-sm" type="submit">{{ lang.t("shell.logout") }}</button></form>
+        <form method="post" action="/logout"><button class="btn btn-ghost btn-sm" type="submit"><i class="ico ico-logout" aria-hidden="true"></i>{{ lang.t("shell.logout") }}</button></form>
         {% endblock %}
       </div>
     </div>
@@ -31,12 +32,12 @@
   <div class="shell">
     {% block nav %}
     <nav class="side">
-      <a class="nav-link" href="/">{{ lang.t("nav.identities") }}</a>
-      <a class="nav-link" href="/upcoming">{{ lang.t("nav.upcoming") }}</a>
-      <a class="nav-link" href="/roles">{{ lang.t("nav.roles") }}</a>
-      <a class="nav-link" href="/departments">{{ lang.t("nav.departments") }}</a>
-      <a class="nav-link" href="/targets">{{ lang.t("nav.targets") }}</a>
-      <a class="nav-link" href="/used-names">{{ lang.t("nav.used_names") }}</a>
+      <a class="nav-link" href="/"><i class="ico ico-users" aria-hidden="true"></i>{{ lang.t("nav.identities") }}</a>
+      <a class="nav-link" href="/upcoming"><i class="ico ico-calendar" aria-hidden="true"></i>{{ lang.t("nav.upcoming") }}</a>
+      <a class="nav-link" href="/roles"><i class="ico ico-key" aria-hidden="true"></i>{{ lang.t("nav.roles") }}</a>
+      <a class="nav-link" href="/departments"><i class="ico ico-sitemap" aria-hidden="true"></i>{{ lang.t("nav.departments") }}</a>
+      <a class="nav-link" href="/targets"><i class="ico ico-server" aria-hidden="true"></i>{{ lang.t("nav.targets") }}</a>
+      <a class="nav-link" href="/used-names"><i class="ico ico-tag" aria-hidden="true"></i>{{ lang.t("nav.used_names") }}</a>
     </nav>
     {% endblock %}
     <main class="{% block page_class %}page{% endblock %}">

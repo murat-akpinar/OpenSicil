@@ -5,37 +5,52 @@
   <h1 class="h1">{{ lang.t("nav.departments") }}</h1>
 </div>
 {% if !error.is_empty() %}<p class="alert alert-err">{{ error }}</p>{% endif %}
-<table class="tbl mb-6">
-  <thead><tr><th>{{ lang.t("field.name") }}</th><th>{{ lang.t("field.code") }}</th><th>{{ lang.t("field.items") }}</th></tr></thead>
-  <tbody>
-  {% for d in departments %}
-    <tr>
-      <td>{{ d.indent }}<a class="link" href="/departments/{{ d.id }}">{{ d.name }}</a></td>
-      <td>{{ d.code }}</td>
-      <td>{{ d.entitlements }}</td>
-    </tr>
-  {% endfor %}
-  </tbody>
-</table>
+{% if departments.is_empty() %}
+<div class="empty mb-6">
+  <span class="ico-tile ico-tile-lg"><i class="ico ico-sitemap" aria-hidden="true"></i></span>
+  <p class="empty-title">{{ lang.t("departments.empty") }}</p>
+  <p class="empty-hint">{{ lang.t("departments.empty_hint") }}</p>
+</div>
+{% else %}
+<div class="card mb-6 overflow-x-auto p-0">
+  <table class="tbl">
+    <thead><tr><th>{{ lang.t("field.name") }}</th><th>{{ lang.t("field.code") }}</th><th>{{ lang.t("field.items") }}</th></tr></thead>
+    <tbody>
+    {% for d in departments %}
+      <tr>
+        <td>{{ d.indent }}<a class="link" href="/departments/{{ d.id }}">{{ d.name }}</a></td>
+        <td class="muted">{{ d.code }}</td>
+        <td class="muted">{{ d.entitlements }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
 {% if can_edit %}
-<h2 class="h2">{{ lang.t("departments.new") }}</h2>
-<form method="post" action="/departments" class="card grid items-end gap-3 sm:grid-cols-3">
-  <div>
-    <label class="label" for="name">{{ lang.t("field.name") }}</label>
-    <input class="input" type="text" id="name" name="name" required>
+<div class="card">
+  <div class="card-head">
+    <span class="ico-tile"><i class="ico ico-plus" aria-hidden="true"></i></span>
+    <h2 class="h2">{{ lang.t("departments.new") }}</h2>
   </div>
-  <div>
-    <label class="label" for="code">{{ lang.t("field.code") }}</label>
-    <input class="input" type="text" id="code" name="code">
-  </div>
-  <div>
-    <label class="label" for="parent_id">{{ lang.t("departments.parent") }}</label>
-    <select class="input" id="parent_id" name="parent_id">
-      <option value="">{{ lang.t("departments.root") }}</option>
-      {% for d in departments %}<option value="{{ d.id }}">{{ d.indent }}{{ d.name }}</option>{% endfor %}
-    </select>
-  </div>
-  <button class="btn btn-primary col-span-3" type="submit">{{ lang.t("common.save") }}</button>
-</form>
+  <form method="post" action="/departments" class="grid items-end gap-3 sm:grid-cols-3">
+    <div>
+      <label class="label" for="name">{{ lang.t("field.name") }}</label>
+      <input class="input" type="text" id="name" name="name" required>
+    </div>
+    <div>
+      <label class="label" for="code">{{ lang.t("field.code") }}</label>
+      <input class="input" type="text" id="code" name="code">
+    </div>
+    <div>
+      <label class="label" for="parent_id">{{ lang.t("departments.parent") }}</label>
+      <select class="input" id="parent_id" name="parent_id">
+        <option value="">{{ lang.t("departments.root") }}</option>
+        {% for d in departments %}<option value="{{ d.id }}">{{ d.indent }}{{ d.name }}</option>{% endfor %}
+      </select>
+    </div>
+    <button class="btn btn-primary sm:col-span-3" type="submit">{{ lang.t("common.save") }}</button>
+  </form>
+</div>
 {% endif %}
 {% endblock %}
