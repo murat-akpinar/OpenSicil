@@ -14,6 +14,10 @@ sqlx = { version = "0.9", default-features = false, features = [
   "migrate",
 ] }
 askama = "0.12"
+# AD bind giris kapisi (ADR-095 madde 1); ADR-069'da secilmis crate, worker'la ayni surum
+ldap3 = { version = "0.12", default-features = false, features = ["tls-rustls-ring"] }
+# rustls zaten agacta (sqlx ve ldap3 uzerinden, ring); CA'li ClientConfig kurmak icin dogrudan
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 argon2 = "0.5"
 chacha20poly1305 = "0.10"
 rand = "0.8"

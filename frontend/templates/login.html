@@ -10,14 +10,14 @@
 <form method="post" action="/login">
   <div class="field">
     <label class="label" for="username">{{ lang.t("login.username") }}</label>
-    <input class="input" type="text" id="username" name="username" value="admin" required>
+    <input class="input" type="text" id="username" name="username" autocomplete="username" required>
   </div>
   <div class="field">
     <label class="label" for="password">{{ lang.t("login.password") }}</label>
     <input class="input" type="password" id="password" name="password" required>
   </div>
   <button class="btn btn-primary w-full" type="submit"><i class="ico ico-lock" aria-hidden="true"></i>{{ lang.t("login.submit") }}</button>
-  <p class="hint">{{ lang.t("login.bootstrap_hint") }}</p>
+  <p class="hint">{{ lang.t("login.hint") }}</p>
 </form>
 {% if oidc_configured %}
 <a href="/oidc/login" class="btn btn-ok mt-4 w-full">{{ lang.t("login.oidc") }}</a>

@@ -26,4 +26,11 @@ run samba-tool group addmembers "Domain Admins" GG-Nested-Admin
 run sh -c "printf 'dn: CN=GG-AdminCount,OU=Gruplar,$BASE\nchangetype: modify\nreplace: adminCount\nadminCount: 1\n' | ldbmodify -H /var/lib/samba/private/sam.ldb"
 # mevcut personel (sahiplenme testleri, 3e)
 run samba-tool user create mevcut.personel 'Lab-only-Pass1' --userou="OU=Personel" --given-name=Mevcut --surname=Personel
+# AD bind giris kapisi (ADR-095): yetkisi ic ice uyelikten gelen bir operator.
+# Kapsam disi OU'da durur — operator (BT personeli) yonetilen personel OU'sunda
+# olmak zorunda degil, ve kapsamdaki hesap sayisini bozmaz (mutabakat testleri).
+run samba-tool group add GG-Lab-Operators --groupou="OU=Disarida"
+run samba-tool group addmembers OpenSicil-Admins GG-Lab-Operators
+run samba-tool user create lab.operator 'Lab-only-Pass1' --userou="OU=Disarida" --given-name=Lab --surname=Operator
+run samba-tool group addmembers GG-Lab-Operators lab.operator
 echo "seed tamam"

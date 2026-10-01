@@ -121,6 +121,10 @@ const CONFIG_AUTHORITIES: &[&str] = &[crate::oidc::ADMIN_AUTHORITY];
 // sabit bir degerle durur (ADR-095 madde 5).
 const LOCAL_SUBJECT: &str = "local:admin";
 
+// AD kapisinda "subject" objectGUID'dir: kullanici adi degisse de denetim
+// kaydindaki aktor ayni kalir (ADR-095 madde 6).
+const AD_SUBJECT_PREFIX: &str = "ad:";
+
 pub fn routes() -> Router<AppState> {
     Router::new()
         // Kabuktaki marka ve "Kimlikler" baglantisi, dil seciciden donus (local_path
@@ -194,13 +198,27 @@ struct LoginForm {
     password: String,
 }
 
+// ADR-095 madde 1 ve 3: tek form, kapıyı kullanıcı adı seçer. Yerel break-glass
+// hesabının adı tek ve sabittir (`admin`), başka her ad AD kapısına gider.
+// "Önce AD, sonra yerel" sırası denenmedi: yanlış yazılan yerel parola AD'ye
+// `admin` kullanıcısının parolası olarak gider (AD kilitleme politikasını
+// tetikler) ve yanlış kullanıcı adı da yerel sayacı artırdığı için her AD girişi
+// break-glass hesabını kilide yaklaştırırdı.
 async fn login_submit(
     State(state): State<AppState>,
     headers: HeaderMap,
     Form(form): Form<LoginForm>,
 ) -> Response {
-    use crate::bootstrap_account::LoginOutcome;
     let lang = Lang::from_headers(&headers);
+    if form.username == crate::bootstrap_account::BOOTSTRAP_USERNAME {
+        local_login(&state, lang, &form).await
+    } else {
+        ad_login(&state, lang, &form).await
+    }
+}
+
+async fn local_login(state: &AppState, lang: Lang, form: &LoginForm) -> Response {
+    use crate::bootstrap_account::LoginOutcome;
     match crate::bootstrap_account::verify_login(&state.pool, &form.username, &form.password).await
     {
         Ok(LoginOutcome::Ok) => {}
@@ -227,8 +245,41 @@ async fn login_submit(
         auth_source: AuthSource::Local,
         lang,
     };
-    establish_operator_session(&state, operator).await
+    establish_operator_session(state, operator).await
 }
+
+// --- START FEATURE: ad-login ---
+// Asıl kapı (ADR-095 madde 1): doğrulama AD'de, yetki AD gruplarında, eşleşme
+// `sAMAccountName` ile (madde 2 ve 6). Ayrılmış/askıdaki operatörün reddi ve
+// oturum satırı üç kapıda ortak (`establish_operator_session`, madde 5).
+async fn ad_login(state: &AppState, lang: Lang, form: &LoginForm) -> Response {
+    use crate::ad_auth::AuthError;
+    match crate::ad_auth::authenticate(&state.pool, &state.aead_key, &form.username, &form.password)
+        .await
+    {
+        Ok(found) => {
+            let operator = Operator {
+                subject: format!("{AD_SUBJECT_PREFIX}{}", found.guid),
+                username: found.username,
+                email: found.email,
+                authorities: found.authorities,
+                auth_source: AuthSource::Ad,
+                lang,
+            };
+            establish_operator_session(state, operator).await
+        }
+        Err(AuthError::BadCredentials | AuthError::NotConfigured) => {
+            render_login(&state.pool, lang, lang.t("err.bad_credentials").to_string()).await
+        }
+        // Giriş sessizce başarısız olmaz: ekranda AD'ye ulaşılamadığı yazar,
+        // ayrıntı yalnızca sunucu log'una gider, yerel kapı çalışmaya devam eder.
+        Err(unavailable) => {
+            eprintln!("web: AD girişi yapılamadı: {unavailable}");
+            render_login(&state.pool, lang, lang.t("err.ad_unreachable").to_string()).await
+        }
+    }
+}
+// --- END FEATURE: ad-login ---
 
 async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let mut response_headers = HeaderMap::new();
@@ -1229,4 +1280,195 @@ mod tests {
         crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
     }
     // --- END FEATURE: oidc-login ---
+
+    // --- START FEATURE: ad-login ---
+    // Kapiyi kullanici adi secer: AD adiyla yapilan deneme yerel hesabin kilit
+    // sayacina dokunmaz. Dokunsaydi (yanlis kullanici adi da deneme sayilir)
+    // her AD girisi break-glass hesabini kilide yaklastirirdi.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn an_ad_username_never_touches_the_local_lockout_counter() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        crate::migrate::seed_bootstrap_account(&pool)
+            .await
+            .expect("bootstrap hesabı seed edilemedi");
+        let app = crate::server::build_router(test_state(pool.clone(), "https://localhost"));
+
+        // AD yapilandirilmamis: kapi yok, ekranda ayrimsiz hata
+        for _ in 0..=crate::bootstrap_account::MAX_FAILED_ATTEMPTS {
+            let response = app
+                .clone()
+                .oneshot(form_request(
+                    "POST",
+                    "/login",
+                    "username=ayse.yilmaz&password=bir-parola",
+                    None,
+                ))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            assert!(response.headers().get(header::SET_COOKIE).is_none());
+        }
+        let failed: i32 =
+            sqlx::query_scalar("SELECT failed_attempts FROM bootstrap_account WHERE id = TRUE")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(failed, 0, "yerel sayaç AD denemelerinden etkilenmedi");
+
+        // Yerel kapi hala calisiyor (kilitlenmedi)
+        let response = app
+            .clone()
+            .oneshot(form_request(
+                "POST",
+                "/login",
+                "username=admin&password=admin",
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert_eq!(location_of(&response), "/change-password");
+
+        drop(app);
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
+    // Lab Samba'ya karsi gercek bind (ADR-095 madde 1/2/6 kabul kriterleri):
+    // dogru parola girer, yanlis parola reddedilir, yonetim grubunda olmayan
+    // kullanici girer ama hicbir ekrani goremez, ayrilmis operator reddedilir.
+    //
+    // `docker compose -f compose.yaml -f compose.lab.yaml up -d samba-ad` +
+    // `sh samba-lab/gen-tls.sh` + `sh samba-lab/seed.sh` sonrasi:
+    //   DATABASE_URL=postgres://testuser:testpass@localhost:15432/testdb \
+    //   AD_LAB_URL=ldaps://localhost:6360 AD_LAB_BIND_DN=... AD_LAB_PASSWORD=... \
+    //   AD_CA_FILE=samba-lab/tls/ca.pem \
+    //   cargo test --include-ignored ad_login_flow_against_lab_samba
+    #[tokio::test]
+    #[ignore = "gerçek Postgres ve lab Samba AD gerektirir: DATABASE_URL + AD_LAB_URL/AD_LAB_BIND_DN/AD_LAB_PASSWORD + AD_CA_FILE ile çalıştır (--include-ignored)"]
+    async fn ad_login_flow_against_lab_samba() {
+        let var = |n: &str| std::env::var(n).unwrap_or_else(|_| panic!("{n} ayarlanmalı"));
+        std::env::var("AD_CA_FILE").expect("AD_CA_FILE lab CA'sına işaret etmeli");
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        // test_state'in kurdugu AppState.aead_key ile ayni olmali
+        crate::settings::save(
+            &pool,
+            &[3u8; crate::crypto::KEY_LEN],
+            &crate::settings::AppSettingsInput {
+                ad_host: var("AD_LAB_URL"),
+                ad_bind_dn: var("AD_LAB_BIND_DN"),
+                ad_service_password: var("AD_LAB_PASSWORD"),
+                zimbra_url: String::new(),
+                zimbra_admin_password: String::new(),
+                oidc_issuer: String::new(),
+                oidc_client_id: String::new(),
+                oidc_client_secret: String::new(),
+            },
+        )
+        .await
+        .expect("AD ayarları kaydedilemedi");
+        let app = crate::server::build_router(test_state(pool.clone(), "https://localhost"));
+        let login = |app: Router, body: String| async move {
+            app.oneshot(form_request("POST", "/login", &body, None))
+                .await
+                .unwrap()
+        };
+
+        // 1) Yanlis parola: hata gosterilir, oturum acilmaz.
+        let response = login(
+            app.clone(),
+            "username=lab.operator&password=yanlis-parola".to_string(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(response.headers().get(header::SET_COOKIE).is_none());
+        assert!(body_string(response).await.contains("parola yanlış"));
+
+        // 2) Dogru parola: oturum acilir, yetki ic ice grup uyeliginden gelir
+        // (lab.operator -> GG-Lab-Operators -> OpenSicil-Admins).
+        let response = login(
+            app.clone(),
+            "username=lab.operator&password=Lab-only-Pass1".to_string(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let cookie = set_cookie_value(&response);
+        let session: (Vec<String>, String, String) = sqlx::query_as(
+            "SELECT authorities, auth_source, subject FROM operator_sessions \
+             WHERE username = 'lab.operator'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(session.0, vec![crate::oidc::ADMIN_AUTHORITY.to_string()]);
+        assert_eq!(session.1, "ad", "oturum kapıyı taşır (ADR-095 madde 5)");
+        assert!(
+            session.2.starts_with(AD_SUBJECT_PREFIX) && session.2.contains('-'),
+            "aktör objectGUID ile yazılır: {}",
+            session.2
+        );
+        let login_source: String = sqlx::query_scalar(
+            "SELECT detail->>'source' FROM audit_log WHERE event_type = $1 ORDER BY id DESC LIMIT 1",
+        )
+        .bind(crate::audit::OPERATOR_LOGIN)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(login_source, "ad");
+        let response = app
+            .clone()
+            .oneshot(get_request("/identities/new", Some(&cookie)))
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "Sistem yöneticisi kayıt ekranını açar"
+        );
+
+        // 3) Yonetim grubunda olmayan AD kullanicisi girer ama hicbir ekrani goremez.
+        let response = login(
+            app.clone(),
+            "username=mevcut.personel&password=Lab-only-Pass1".to_string(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let plain_cookie = set_cookie_value(&response);
+        let authorities: Vec<String> = sqlx::query_scalar(
+            "SELECT authorities FROM operator_sessions WHERE username = 'mevcut.personel'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(authorities.is_empty(), "yetki yok: {authorities:?}");
+        let response = app
+            .clone()
+            .oneshot(get_request("/identities/new", Some(&plain_cookie)))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+        // 4) ADR-095 madde 5: ayrilmis operator bu kapida da reddedilir.
+        let ids = crate::test_support::seed_two_identities(&pool).await;
+        sqlx::query(
+            "UPDATE identities SET username = 'mevcut.personel', \
+             end_at = now() - interval '1 hour' WHERE id = $1",
+        )
+        .bind(ids[0])
+        .execute(&pool)
+        .await
+        .unwrap();
+        let response = login(
+            app.clone(),
+            "username=mevcut.personel&password=Lab-only-Pass1".to_string(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+        drop(app);
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+    // --- END FEATURE: ad-login ---
 }

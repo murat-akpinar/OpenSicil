@@ -105,4 +105,5 @@
 - Sahiplenilmeyen AD hesapları için panel ve liste yönlendirmesi
 - Devreye alma kartı — kurulumun dört adımı panelde
 - Hata sayfaları ve nginx istek sertleştirmesi
+- AD bind giriş kapısı — yetkiler AD gruplarından okunuyor
 

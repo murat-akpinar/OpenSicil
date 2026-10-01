@@ -1,3 +1,4 @@
+mod ad_auth;
 mod assets;
 mod audit;
 mod auth;
