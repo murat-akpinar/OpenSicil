@@ -50,11 +50,15 @@ pub async fn fresh_migrated_db() -> (PgPool, PgPool, String) {
     (admin_pool, pool, db_name)
 }
 
+// FORCE: `run()` testinde okuma seridi gorevi (gece mutabakati istegi) SIGTERM'den
+// sonra bir an daha bagli kalabilir; test veritabani ona bakmadan dusurulur.
 pub async fn drop_temp_db(admin_pool: &PgPool, db_name: &str) {
-    sqlx::query(sqlx::AssertSqlSafe(format!("DROP DATABASE {db_name}")))
-        .execute(admin_pool)
-        .await
-        .expect("test veritabanı silinemedi");
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "DROP DATABASE {db_name} WITH (FORCE)"
+    )))
+    .execute(admin_pool)
+    .await
+    .expect("test veritabanı silinemedi");
 }
 
 pub struct ExampleModel {

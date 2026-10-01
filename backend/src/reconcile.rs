@@ -6,7 +6,7 @@
 // "Yeniden tara" okuma seridine istek yazar (ADR-051); taramayi worker yapar.
 use askama::Template;
 use axum::extract::{Path, State};
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::Router;
 use sqlx::PgPool;
@@ -19,6 +19,8 @@ use crate::web::{render, AppState};
 
 /// "Yeniden tara" yetkisi; okuma her operatorde (auditor dahil).
 const SCAN_AUTHORITIES: [&str; 2] = ["admin", "role_admin"];
+/// "Yeniden uygula" (F-13): kimlik isi acar — kayit yetkisi olanlar + rol yoneticisi.
+const REAPPLY_AUTHORITIES: [&str; 3] = ["admin", "role_admin", "hr"];
 
 pub struct Row {
     /// managed | observed | unmanaged | missing — ekran karsiligi i18n'de
@@ -147,6 +149,10 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/targets/{id}/reconcile", get(page))
         .route("/targets/{id}/reconcile/scan", post(scan))
+        .route(
+            "/targets/{id}/reconcile/reapply/{identity_id}",
+            post(reapply),
+        )
         // --- START FEATURE: bulk-adoption ---
         .route("/targets/{id}/reconcile/adopt", post(adopt))
     // --- END FEATURE: bulk-adoption ---
@@ -161,6 +167,8 @@ struct ReconcileTemplate {
     v: View,
     notice: Notice,
     can_scan: bool,
+    /// F-13: bulgu satirinda "yeniden uygula" dugmesi
+    can_reapply: bool,
     /// ADR-102 toplu sahiplenme: yetki + formun doldurulacak secenekleri
     can_adopt: bool,
     candidates: Vec<crate::bulk_adopt::Candidate>,
@@ -192,6 +200,7 @@ async fn render_page(
             v,
             notice,
             can_scan: allowed(op, &SCAN_AUTHORITIES),
+            can_reapply: allowed(op, &REAPPLY_AUTHORITIES),
             can_adopt: allowed(op, crate::bulk_adopt::AUTHORITIES),
             candidates,
             departments: options.departments,
@@ -232,6 +241,55 @@ async fn scan(
         false => "reconcile.already_open",
     };
     render_page(&state, &op, id, Notice::info(op.lang.t(key).into())).await
+}
+
+// F-13 "yeniden uygula": bulgudaki kimlik icin tek kimlik oncelikli is. Motor
+// farki yeniden hesaplar ve yonetilen baglantida uygular; gozlemdekinde yalnizca
+// farki tazeler (ADR-087). Yonetilmeyen hesabin kimligi yok, onun yolu sahiplenme.
+async fn reapply(
+    OperatorSession(op): OperatorSession,
+    State(state): State<AppState>,
+    Path((target, identity_id)): Path<(i64, i64)>,
+) -> Response {
+    if !allowed(&op, &REAPPLY_AUTHORITIES) {
+        return forbidden(op.lang);
+    }
+    let listed: bool = match sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM reconcile_findings \
+         WHERE target_system_id = $1 AND identity_id = $2)",
+    )
+    .bind(target)
+    .bind(identity_id)
+    .fetch_one(&state.pool)
+    .await
+    {
+        Ok(listed) => listed,
+        Err(e) => return internal("bulgu okunamadı", e),
+    };
+    if !listed {
+        return axum::http::StatusCode::NOT_FOUND.into_response();
+    }
+    if let Err(e) = crate::jobs::enqueue(
+        &state.pool,
+        identity_id,
+        target,
+        crate::jobs::Priority::Single,
+    )
+    .await
+    {
+        return internal("yeniden uygulama işi açılamadı", e);
+    }
+    let detail = serde_json::json!({ "target_system_id": target });
+    audit_operator(
+        &state,
+        &op,
+        crate::audit::RECONCILE_REAPPLY,
+        Some(identity_id),
+        detail,
+    )
+    .await;
+    let notice = Notice::info(op.lang.t("reconcile.reapplied").into());
+    render_page(&state, &op, target, notice).await
 }
 // --- END FEATURE: reconcile ---
 
@@ -581,6 +639,149 @@ mod tests {
             !auditor.contains("data-select-all"),
             "formu olmayan kutuyu da görmez"
         );
+
+        drop(app);
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
+    /// F-13 "yeniden uygula": kimligi olan bulguda dugme, yetkiyle is + denetim;
+    /// listede olmayan kimlik 404; yonetilmeyen hesapta dugme yok.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn reapply_opens_a_job_for_a_listed_identity_with_authority_only() {
+        use axum::body::Body;
+        use axum::http::{header, Request, StatusCode};
+        use tower::ServiceExt;
+
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        let ids = crate::test_support::seed_two_identities(&pool).await;
+        let app = crate::web::routes()
+            .with_state(crate::web::test_state(pool.clone(), "https://localhost"));
+        let target: i64 = sqlx::query_scalar("SELECT id FROM target_systems WHERE kind = 'ad'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let read_job: i64 = sqlx::query_scalar(
+            "INSERT INTO read_jobs (kind, target_system_id, requested_by) \
+             VALUES ('reconcile', $1, 'test') RETURNING id",
+        )
+        .bind(target)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        for (kind, guid, sam, identity) in [
+            ("managed", "g-m", "ali.kaya", Some(ids[0])),
+            ("unmanaged", "g-u", "yabanci", None),
+        ] {
+            sqlx::query(
+                "INSERT INTO reconcile_findings (target_system_id, read_job_id, kind, \
+                 external_id, account_name, identity_id) VALUES ($1, $2, $3, $4, $5, $6)",
+            )
+            .bind(target)
+            .bind(read_job)
+            .bind(kind)
+            .bind(guid)
+            .bind(sam)
+            .bind(identity)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        let session = |authority: &'static str| {
+            let pool = pool.clone();
+            async move {
+                let operator = crate::operator_session::Operator {
+                    subject: "sub-x".to_string(),
+                    username: "ik.operatoru".to_string(),
+                    email: "ik@example.org".to_string(),
+                    authorities: vec![authority.to_string()],
+                    auth_source: crate::operator_session::AuthSource::Oidc,
+                    lang: crate::i18n::DEFAULT,
+                };
+                let token = crate::operator_session::create_session(&pool, &operator)
+                    .await
+                    .unwrap();
+                format!("{}={token}", crate::cookie::OPERATOR_SESSION_COOKIE_NAME)
+            }
+        };
+        let send = |method: &'static str, uri: String, cookie: String| {
+            let app = app.clone();
+            async move {
+                app.oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(uri)
+                        .header(header::COOKIE, cookie)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap()
+            }
+        };
+        let body = |r: axum::response::Response| async move {
+            let bytes = axum::body::to_bytes(r.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            String::from_utf8(bytes.to_vec()).unwrap()
+        };
+        let reapply = format!("/targets/{target}/reconcile/reapply/{}", ids[0]);
+        let page = format!("/targets/{target}/reconcile");
+
+        // Dugme yalnizca kimligi olan satirda ve yalnizca yetkiliye
+        let hr = session("hr").await;
+        let html = body(send("GET", page.clone(), hr.clone()).await).await;
+        assert_eq!(html.matches("/reconcile/reapply/").count(), 1, "{html}");
+        let auditor = session("auditor").await;
+        let html = body(send("GET", page.clone(), auditor.clone()).await).await;
+        assert!(!html.contains("/reconcile/reapply/"), "auditor düğmesiz");
+
+        // Yetkisiz 403, is acilmadi
+        let r = send("POST", reapply.clone(), auditor).await;
+        assert_eq!(r.status(), StatusCode::FORBIDDEN);
+        let jobs: i64 = sqlx::query_scalar("SELECT count(*) FROM jobs WHERE identity_id = $1")
+            .bind(ids[0])
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(jobs, 0);
+
+        // hr: tek kimlik oncelikli is + denetim satiri + ekranda bildirim
+        let r = send("POST", reapply.clone(), hr.clone()).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        let html = body(r).await;
+        assert!(
+            html.contains(crate::i18n::DEFAULT.t("reconcile.reapplied")),
+            "{html}"
+        );
+        let job: (i64, i16) = sqlx::query_as(
+            "SELECT count(*), min(priority) FROM jobs WHERE identity_id = $1 AND target_system_id = $2",
+        )
+        .bind(ids[0])
+        .bind(target)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(job, (1, crate::jobs::Priority::Single as i16));
+        let audited: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM audit_log WHERE event_type = $1 AND identity_id = $2",
+        )
+        .bind(crate::audit::RECONCILE_REAPPLY)
+        .bind(ids[0])
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(audited, 1);
+
+        // Listede olmayan kimlik 404
+        let r = send(
+            "POST",
+            format!("/targets/{target}/reconcile/reapply/{}", ids[1]),
+            hr,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::NOT_FOUND);
 
         drop(app);
         drop(pool);

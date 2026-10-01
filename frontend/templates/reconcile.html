@@ -27,6 +27,8 @@
     <p class="meta"><span class="badge badge-{{ lang.key("readjobkind", v.status.as_str()) }}">{{ lang.key("readjob", v.status.as_str()) }}</span> {{ v.scanned_at }}</p>
     {% if !v.result.is_empty() %}<p class="meta">{{ v.result }}</p>{% endif %}
   {% endif %}
+  {# ADR-051/099 (F-13): gece koşusu zamanlayıcıda, buradan yalnızca duyurulur #}
+  <p class="meta">{{ lang.t("reconcile.nightly") }}</p>
 </div>
 
 {# Panel'deki sayac kutusuyla ayni yapi (.stat-head/.stat-label/.stat-value) #}
@@ -153,6 +155,7 @@
       <th>{{ lang.t("reconcile.container") }}</th>
       <th>{{ lang.t("reconcile.state") }}</th>
       <th>{{ lang.t("reconcile.kind") }}</th>
+      <th></th>
     </tr></thead>
     <tbody>
     {% for r in v.rows %}
@@ -172,6 +175,17 @@
           {% endmatch %}
         </td>
         <td><span class="badge badge-{% if r.kind == "missing" %}warn{% else if r.kind == "unmanaged" %}info{% else %}ok{% endif %}">{{ lang.key("reconcilekind", r.kind.as_str()) }}</span></td>
+        {# F-13: kimligi olan bulguda "yeniden uygula"; yonetilmeyen hesabin yolu sahiplenme #}
+        <td>
+          {% match r.identity_id %}
+            {% when Some with (id) %}{% if can_reapply %}
+            <form method="post" action="/targets/{{ target_id }}/reconcile/reapply/{{ id }}">
+              <button class="btn btn-sm" type="submit" title="{{ lang.t("reconcile.reapply_title") }}">{{ lang.t("reconcile.reapply") }}</button>
+            </form>
+            {% endif %}
+            {% when None %}
+          {% endmatch %}
+        </td>
       </tr>
     {% endfor %}
     </tbody>

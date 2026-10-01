@@ -122,4 +122,5 @@
 - Toplu sahiplenmede başlangıç tarihi AD whenCreated'dan gelir (ADR-103 madde 6)
 - TC kimlik no özniteliği kurulum ayarı — tarama şifreli okur, toplu sahiplenme doğrulayıp yazar (ADR-106 madde 5)
 - Rol ve departman adresleri okunur ada döndü, sayısal adres 301 (ADR-107)
+- Mutabakat gece koşusu ve bulgudan yeniden uygula (F-13)
 

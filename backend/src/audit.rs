@@ -29,6 +29,8 @@ pub const IDENTITY_SUSPENSION_LIFTED: &str = "identity.suspension_lifted";
 pub const ACCOUNT_MANAGE_REQUESTED: &str = "account.manage_requested";
 pub const FIRST_PASSWORD_REQUESTED: &str = "first_password.requested";
 pub const FIRST_PASSWORD_SHOWN: &str = "first_password.shown";
+/// F-13: mutabakat bulgusundan "yeniden uygula" — kimlik icin is acildi
+pub const RECONCILE_REAPPLY: &str = "reconcile.reapply";
 
 pub struct Actor<'a> {
     pub subject: Option<&'a str>,

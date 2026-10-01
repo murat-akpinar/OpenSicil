@@ -193,6 +193,39 @@ async fn open_retention_jobs(
     Ok(opened.rows_affected() as usize)
 }
 
+/// ADR-051/099 gece mutabakati: kurulum saat diliminde bu saatten sonra, o gun icin
+/// henuz acilmamissa AD hedefine katalog yenileme + mutabakat istegi yazilir.
+pub const NIGHTLY_SCAN_AFTER: &str = "02:00";
+
+/// Sorguya dayali (ADR-028): worker gece kapaliysa acildigi ilk tikte acilir; ayni
+/// gun ikinci kez acilmaz (o saatten sonra yazilmis bir istek varsa — operatorun
+/// "Yeniden tara"si da sayilir). AD yapilandirilmamissa hic yazilmaz; acik is
+/// varken kismi tekil indeks ikinciyi engeller. Doner: yazilan istek sayisi.
+pub async fn open_nightly_scans(
+    pool: &PgPool,
+    time_zone: &str,
+    after: &str,
+) -> Result<usize, String> {
+    let opened = sqlx::query(
+        "INSERT INTO read_jobs (kind, target_system_id) \
+         SELECT k.kind, t.id FROM target_systems t \
+         CROSS JOIN (VALUES ('catalog_refresh'), ('reconcile')) AS k(kind) \
+         WHERE t.kind = 'ad' \
+           AND (SELECT ad_host <> '' FROM app_settings WHERE id = TRUE) \
+           AND (now() AT TIME ZONE $1)::time >= $2::time \
+           AND NOT EXISTS (SELECT 1 FROM read_jobs r WHERE r.kind = k.kind \
+                 AND r.target_system_id = t.id \
+                 AND r.created_at >= ((now() AT TIME ZONE $1)::date + $2::time) AT TIME ZONE $1) \
+         ON CONFLICT DO NOTHING",
+    )
+    .bind(time_zone)
+    .bind(after)
+    .execute(pool)
+    .await
+    .map_err(|e| format!("gece mutabakatı açılamadı: {e}"))?;
+    Ok(opened.rows_affected() as usize)
+}
+
 // `silindi` icin is acilmaz: silme zaten uygulanmistir, her dakika bos is uretilirdi.
 pub fn needs_job(state: LifecycleState, applied: Option<&str>) -> bool {
     state != LifecycleState::Deleted && applied != Some(state_name(state))
@@ -546,6 +579,45 @@ mod tests {
             tick(&pool, "Europe/Istanbul").await.unwrap(),
             1,
             "onaylandı"
+        );
+
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
+    // ADR-051/099 (F-13): gece taramasi saat gelince bir kez, AD yapilandirilmissa.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn nightly_scans_open_once_per_day_after_the_hour_only_when_ad_is_configured() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        let tz = "Europe/Istanbul";
+        let open = |after: &'static str| open_nightly_scans(&pool, tz, after);
+
+        assert_eq!(open("00:00").await.unwrap(), 0, "AD yapılandırılmamış");
+        sqlx::query("UPDATE app_settings SET ad_host = 'dc1.example.org'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(open("24:00").await.unwrap(), 0, "saat gelmedi");
+        assert_eq!(open("00:00").await.unwrap(), 2, "katalog + mutabakat");
+        let kinds: Vec<String> = sqlx::query_scalar("SELECT kind FROM read_jobs ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(kinds, ["catalog_refresh", "reconcile"]);
+        assert_eq!(
+            open("00:00").await.unwrap(),
+            0,
+            "aynı gün ikinci kez açılmaz"
+        );
+        sqlx::query("UPDATE read_jobs SET status = 'succeeded', finished_at = now()")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            open("00:00").await.unwrap(),
+            0,
+            "bittiyse de o gün yeniden açılmaz"
         );
 
         drop(pool);

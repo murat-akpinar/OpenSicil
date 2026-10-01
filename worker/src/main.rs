@@ -339,6 +339,12 @@ async fn tick_if_due(pool: &PgPool, time_zone: &str, next_tick: &mut Instant) {
         Ok(opened) => println!("worker: zamanlayıcı {opened} geçiş işi açtı"),
         Err(e) => eprintln!("worker: zamanlayıcı tiki başarısız: {e}"),
     }
+    // ADR-051/099: gece mutabakati okuma seridine istek olarak yazilir (F-13)
+    match scheduler::open_nightly_scans(pool, time_zone, scheduler::NIGHTLY_SCAN_AFTER).await {
+        Ok(0) => {}
+        Ok(opened) => println!("worker: gece mutabakatı için {opened} okuma işi açıldı"),
+        Err(e) => eprintln!("worker: {e}"),
+    }
 }
 
 fn unreachable_targets(marks: &HashMap<i64, Instant>, now: Instant) -> Vec<i64> {
