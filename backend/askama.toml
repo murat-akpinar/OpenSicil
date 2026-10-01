@@ -1,0 +1,5 @@
+# Sablonlar backend crate'inin disinda, repo kokundeki frontend/ altinda durur
+# (ADR-097). Yol crate kokune goredir ve imajda da ayni: crate /app/backend,
+# arayuz /app/frontend.
+[general]
+dirs = ["../frontend/templates"]

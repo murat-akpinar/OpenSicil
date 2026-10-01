@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
-# Arayüz CSS'ini yeniden üretir (ADR-088): girdi backend/assets/app.css,
-# çıktı backend/static/app.css (commit'lenir, include_bytes! ile binary'ye gömülür).
+# Arayüz CSS'ini yeniden üretir (ADR-088): girdi frontend/assets/app.css,
+# çıktı frontend/static/app.css (commit'lenir, include_bytes! ile binary'ye gömülür).
 # Şablonlarda yeni bir sınıf kullanan her kutucuk bunu çalıştırıp çıktıyı aynı commit'e koyar.
 # Derleyici Tailwind'in standalone CLI binary'si: Node yok, npm yok, sürüm sabit.
 set -eu
@@ -24,5 +24,5 @@ if [ ! -x "$BIN" ]; then
   chmod +x "$BIN"
 fi
 
-"$BIN" --input backend/assets/app.css --output backend/static/app.css --minify
-echo "backend/static/app.css üretildi ($(wc -c < backend/static/app.css) bayt)"
+"$BIN" --input frontend/assets/app.css --output frontend/static/app.css --minify
+echo "frontend/static/app.css üretildi ($(wc -c < frontend/static/app.css) bayt)"

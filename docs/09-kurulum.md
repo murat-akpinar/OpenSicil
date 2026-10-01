@@ -62,6 +62,7 @@ DC'nin CA sertifikası Zimbra'nın güven deposuna eklenir. Kullanıcılar için
 - MFA IdP'de zorunlu tutulur.
 
 ### Sunucu
+- **İmajları kendiniz derliyorsanız BuildKit gerekir** (`docker buildx`; Docker'ın güncel sürümlerinde varsayılan derleyicidir, Arch/CachyOS'ta `docker-buildx` paketi ayrıdır). Backend imajı arayüz kaynaklarını `frontend/` dizininden adlandırılmış ek bağlamla alır ([ADR-097](decisions/097-frontend-dizini.md)); klasik derleyici bunu desteklemez ve `the classic builder doesn't support additional contexts` hatası verir. Hazır imaj kullanan kurum için gerekmez.
 - `.env` dosyası `600` izinli ve servis kullanıcısına ait. **Docker grubuna üyelik sır erişimi demektir**; `docker inspect` ortam değişkenlerini düz metin gösterir ([ADR-006](decisions/006-sirlar-env.md)).
 - Şifreleme ve blind index anahtarlarının yedeği veritabanı yedeğinden **ayrı** tutulur; anahtar kaybolursa kimlik numaraları okunamaz ([ADR-010](decisions/010-kisisel-veri-kimlik-no-telefon.md)).
 - **PostgreSQL yedeği kurumun işidir** (günlük döküm ya da PITR). Yedek yoksa hesap bağlantıları (kimlik ↔ objectGUID/zimbraId) kaybolur ve bütün kurum yeniden sahiplenilir; [yedekten dönüş](#yedekten-dönüş) adımları bir yedeğin var olduğunu varsayar.

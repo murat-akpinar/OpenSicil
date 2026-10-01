@@ -39,6 +39,10 @@
 - Fren ve onay fazı kapanışı — güvenlik ve test
 - Gerçek Windows AD doğrulaması — üç ⊞ sorusu cevaplandı
 
+### Yeniden düzenleme
+
+- Arayüz dosyaları frontend/ dizinine taşındı
+
 ### Özellikler
 
 - Backend, worker ve nginx iskeletini ayağa kaldır

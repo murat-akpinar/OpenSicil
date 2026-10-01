@@ -8,10 +8,11 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
 
-const CSS: &[u8] = include_bytes!("../static/app.css");
-const JS: &[u8] = include_bytes!("../static/app.js");
-const FONT_REGULAR: &[u8] = include_bytes!("../static/CaskaydiaMonoNerdFont-Regular.ttf");
-const FONT_BOLD: &[u8] = include_bytes!("../static/CaskaydiaMonoNerdFont-Bold.ttf");
+const CSS: &[u8] = include_bytes!("../../frontend/static/app.css");
+const JS: &[u8] = include_bytes!("../../frontend/static/app.js");
+const FONT_REGULAR: &[u8] =
+    include_bytes!("../../frontend/static/CaskaydiaMonoNerdFont-Regular.ttf");
+const FONT_BOLD: &[u8] = include_bytes!("../../frontend/static/CaskaydiaMonoNerdFont-Bold.ttf");
 
 // Varlık adı derlemede sabit; istenen ad listede yoksa 404 (dizin gezinmesi imkânsız).
 const ASSETS: [(&str, &str, &[u8]); 4] = [

@@ -21,6 +21,10 @@ services:
   backend:
     build:
       context: ./backend
+      # Arayuz kaynaklari (templates/assets/static/i18n) ayri bir baglamdan gelir;
+      # backend'in `./backend` izolasyonu korunur (ADR-097).
+      additional_contexts:
+        frontend: ./frontend
     environment:
       DATABASE_URL: postgres://${POSTGRES_BACKEND_USER}:${POSTGRES_BACKEND_PASSWORD}@db:5432/${POSTGRES_DB}
       AEAD_MASTER_KEY: ${AEAD_MASTER_KEY}
@@ -97,6 +101,8 @@ services:
   migrate:
     build:
       context: ./backend
+      additional_contexts:
+        frontend: ./frontend
     command: ["migrate"]
     environment:
       DATABASE_URL: postgres://${POSTGRES_OWNER_USER}:${POSTGRES_OWNER_PASSWORD}@db:5432/${POSTGRES_DB}

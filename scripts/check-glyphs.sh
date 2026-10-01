@@ -3,13 +3,13 @@
 # Eksik glyph ekranda tofu kutusu (□) demek, bu yuzden ikon eklemek bu betigi
 # calistirmayi gerektirir (ADR-067: ikon seti CaskaydiaMono Nerd Font'tan gelir).
 #
-# Kaynak: backend/assets/app.css icindeki `content: "\fXXX"` kod noktalari.
+# Kaynak: frontend/assets/app.css icindeki `content: "\fXXX"` kod noktalari.
 # Olcum: fc-query'nin bildirdigi charset araliklari (fontconfig, ek bagimlilik yok).
 set -eu
 cd "$(dirname "$0")/.."
 
-FONT=backend/static/CaskaydiaMonoNerdFont-Regular.ttf
-CSS=backend/assets/app.css
+FONT=frontend/static/CaskaydiaMonoNerdFont-Regular.ttf
+CSS=frontend/assets/app.css
 
 [ -r "$FONT" ] || { echo "font yok: $FONT" >&2; exit 1; }
 

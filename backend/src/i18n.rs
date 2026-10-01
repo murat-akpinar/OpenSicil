@@ -17,8 +17,8 @@ pub enum Lang {
 
 pub const DEFAULT: Lang = Lang::Tr;
 
-const TR_SOURCE: &str = include_str!("../i18n/tr.toml");
-const EN_SOURCE: &str = include_str!("../i18n/en.toml");
+const TR_SOURCE: &str = include_str!("../../frontend/i18n/tr.toml");
+const EN_SOURCE: &str = include_str!("../../frontend/i18n/en.toml");
 
 impl Lang {
     pub fn from_code(code: &str) -> Lang {
@@ -270,7 +270,8 @@ mod tests {
 
     fn sources() -> Vec<(String, String)> {
         let mut out = Vec::new();
-        for dir in ["templates", "src"] {
+        // Sablonlar crate'in disinda, repo kokundeki frontend/ altinda (ADR-097).
+        for dir in ["../frontend/templates", "src"] {
             let entries = std::fs::read_dir(dir).expect("dizin okunamadı");
             for entry in entries.flatten() {
                 let path = entry.path();

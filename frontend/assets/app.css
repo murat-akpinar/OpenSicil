@@ -1,4 +1,4 @@
-/* Arayüz girdi dosyası (ADR-088). Çıktı: backend/static/app.css — `sh scripts/build-css.sh`
+/* Arayüz girdi dosyası (ADR-088). Çıktı: frontend/static/app.css — `sh scripts/build-css.sh`
    ile üretilir ve commit'lenir, include_bytes! ile binary'ye gömülür (backend/src/assets.rs).
    Renkler Catppuccin: açık Latte, koyu Mocha (ADR-067). Şablonlarda satır içi renk yoktur;
    buradaki token ve bileşen sınıfları kullanılır.
