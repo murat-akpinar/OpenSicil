@@ -6,6 +6,7 @@ mod change_set;
 mod common_settings;
 mod cookie;
 mod crypto;
+mod dashboard;
 mod db;
 // Ikiz dosya (worker ile birebir ayni); backend durum turetme ve etki onizlemesi
 // icin cagirir, motora ozel alanlari kullanmaz (ADR-038).
@@ -29,8 +30,10 @@ mod operator_guard;
 mod operator_session;
 mod org;
 mod org_web;
+mod search;
 mod server;
 mod settings;
+mod shell;
 #[cfg(test)]
 mod test_support;
 mod token;

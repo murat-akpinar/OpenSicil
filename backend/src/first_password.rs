@@ -14,6 +14,8 @@ use sqlx::PgPool;
 use crate::audit::{FIRST_PASSWORD_REQUESTED, FIRST_PASSWORD_SHOWN};
 use crate::i18n::Lang;
 use crate::identity_web::{allowed, audit_operator, forbidden, internal, OperatorSession};
+use crate::operator_session::Operator;
+use crate::shell::Shell;
 use crate::web::{render, AppState};
 
 pub const AUTHORITIES: &[&str] = &["hr", "helpdesk", "admin"];
@@ -118,6 +120,7 @@ async fn create(
 #[derive(Template)]
 #[template(path = "first_password.html")]
 struct FirstPasswordTemplate {
+    shell: Shell,
     lang: Lang,
     identity_id: i64,
     name: String,
@@ -132,9 +135,10 @@ struct FirstPasswordTemplate {
 
 impl FirstPasswordTemplate {
     /// `header`: (ad soyad, kullanici adi, e-posta) — `person_header` cikti sirasi
-    fn new(lang: Lang, identity_id: i64, header: (String, String, String)) -> Self {
+    fn new(op: &Operator, identity_id: i64, header: (String, String, String)) -> Self {
         Self {
-            lang,
+            shell: Shell::of(op),
+            lang: op.lang,
             identity_id,
             name: header.0,
             username: header.1,
@@ -169,7 +173,7 @@ async fn show(
         }
         Err(e) => return internal("ilk parola okunamadı", e),
     };
-    let mut page = FirstPasswordTemplate::new(op.lang, id, header);
+    let mut page = FirstPasswordTemplate::new(&op, id, header);
     match status {
         Status::Pending => {
             page.pending = true;

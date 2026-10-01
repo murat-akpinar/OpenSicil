@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}{{ lang.t("search.title") }} · OpenSicil{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1 class="h1">{{ lang.t("search.title") }}</h1>
+    {% if query != "" %}<p class="sub">{{ lang.t1("search.for", query) }}</p>{% endif %}
+  </div>
+</div>
+{% if too_short %}
+<div class="empty">
+  <span class="ico-tile ico-tile-lg"><i class="ico ico-search" aria-hidden="true"></i></span>
+  <p class="empty-title">{{ lang.t("search.too_short_title") }}</p>
+  <p class="empty-hint">{{ lang.t("search.too_short_hint") }}</p>
+</div>
+{% else if results.is_empty() %}
+<div class="empty">
+  <span class="ico-tile ico-tile-lg"><i class="ico ico-search" aria-hidden="true"></i></span>
+  <p class="empty-title">{{ lang.t("search.empty_title") }}</p>
+  <p class="empty-hint">{{ lang.t("search.empty_hint") }}</p>
+</div>
+{% else %}
+<div class="card p-0">
+  <div class="overflow-x-auto">
+    <table class="tbl">
+      <thead><tr><th>{{ lang.t("field.full_name") }}</th><th>{{ lang.t("field.employee_number") }}</th><th>{{ lang.t("field.state") }}</th></tr></thead>
+      <tbody>
+      {% for i in results %}
+        <tr>
+          <td>
+            <span class="flex items-center gap-2.5">
+              <span class="avatar" aria-hidden="true">{{ i.initials }}</span>
+              <a class="link" href="/identities/{{ i.id }}">{{ i.name }}</a>
+            </span>
+          </td>
+          <td class="muted">{{ i.employee_number }}</td>
+          <td><span class="badge badge-{{ i.state_kind }}">{{ lang.key("state", i.state) }}</span></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+<p class="meta mt-3">{{ lang.t1("search.count", results.len()) }}</p>
+{% endif %}
+{% endblock %}

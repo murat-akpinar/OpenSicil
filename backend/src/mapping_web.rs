@@ -15,6 +15,7 @@ use crate::i18n::Lang;
 use crate::identity_web::{allowed, audit_operator, forbidden, internal, OperatorSession};
 use crate::mapping_rules;
 use crate::operator_session::Operator;
+use crate::shell::Shell;
 use crate::web::{render, AppState};
 
 const WRITE_AUTHORITIES: &[&str] = &["role_admin", "admin"];
@@ -138,6 +139,7 @@ pub fn routes() -> Router<AppState> {
 #[derive(Template)]
 #[template(path = "mappings.html")]
 struct MappingsTemplate {
+    shell: Shell,
     lang: Lang,
     target_id: i64,
     target_name: String,
@@ -168,6 +170,7 @@ async fn render_page(state: &AppState, op: &Operator, id: i64, error: String) ->
     match list(&state.pool, id).await {
         Ok(rows) => render(&MappingsTemplate {
             lang: op.lang,
+            shell: Shell::of(op),
             target_id: id,
             target_name: name,
             rows,

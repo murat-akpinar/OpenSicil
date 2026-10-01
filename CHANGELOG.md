@@ -88,4 +88,5 @@
 - Gezinme sol sidebar'a taşındı
 - Tek oturum mekanizması, yerel giriş kalıcı break-glass oldu (ADR-095)
 - Arayüz görsel yenilemesi — yüzey, tipografi, ikon ve boş durumlar
+- Arayüz mockup düzenine geçti — gösterge paneli ana sayfası ve üst bar araması
 

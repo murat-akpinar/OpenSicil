@@ -13,6 +13,7 @@ use crate::cookie::{
 use crate::i18n::Lang;
 use crate::identity_web::{allowed, forbidden, OperatorSession};
 use crate::operator_session::{AuthSource, Operator};
+use crate::shell::Shell;
 
 const MIN_PASSWORD_LENGTH: usize = 12;
 
@@ -49,8 +50,9 @@ struct LoginTemplate {
 #[template(path = "operator_home.html")]
 struct OperatorHomeTemplate {
     lang: Lang,
-    username: String,
-    authorities: Vec<String>,
+    shell: Shell,
+    // ADR-096 madde 3: ana sayfa gosterge paneli
+    dash: crate::dashboard::Dashboard,
     identities: Vec<crate::identity::Listed>,
 }
 
@@ -60,15 +62,19 @@ async fn render_operator_home(
     username: String,
     authorities: Vec<String>,
 ) -> Response {
-    match crate::identity::recent(&state.pool, &state.time_zone).await {
-        Ok(identities) => render(&OperatorHomeTemplate {
+    let loaded = tokio::try_join!(
+        crate::dashboard::load(&state.pool, &state.time_zone),
+        crate::identity::recent(&state.pool, &state.time_zone),
+    );
+    match loaded {
+        Ok((dash, identities)) => render(&OperatorHomeTemplate {
             lang,
-            username,
-            authorities,
+            shell: Shell::from_parts(&username, &authorities),
+            dash,
             identities,
         }),
         Err(e) => {
-            eprintln!("web: kimlik listesi okunamadı: {e}");
+            eprintln!("web: gösterge paneli okunamadı: {e}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
@@ -86,6 +92,7 @@ struct ChangePasswordTemplate {
 #[template(path = "config.html")]
 struct ConfigTemplate {
     lang: Lang,
+    shell: Shell,
     ad_host: String,
     ad_bind_dn: String,
     ad_service_password_set: bool,
@@ -138,6 +145,7 @@ pub fn routes() -> Router<AppState> {
         .merge(crate::used_names::routes())
         .merge(crate::mapping_web::routes())
         .merge(crate::upcoming::routes())
+        .merge(crate::search::routes())
         .merge(crate::first_password::routes())
 }
 
@@ -457,6 +465,7 @@ async fn config_form(
     match crate::settings::load(&state.pool).await {
         Ok(s) => render(&ConfigTemplate {
             lang: operator.lang,
+            shell: Shell::of(&operator),
             ad_host: s.ad_host,
             ad_bind_dn: s.ad_bind_dn,
             ad_service_password_set: s.ad_service_password_set,
@@ -668,7 +677,7 @@ mod tests {
 
         let body = home(test_app(pool.clone()), cookie.clone()).await;
         assert!(
-            body.contains("Kimlikler") && body.contains(">EN<"),
+            body.contains("Ana Sayfa") && body.contains(">EN<"),
             "{body}"
         );
 
@@ -697,7 +706,7 @@ mod tests {
 
         let body = home(test_app(pool.clone()), cookie).await;
         assert!(
-            body.contains("Identities") && body.contains("Upcoming ends"),
+            body.contains("Home") && body.contains("Upcoming ends"),
             "{body}"
         );
         assert!(!body.contains("Yaklaşan bitişler"), "{body}");

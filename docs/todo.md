@@ -202,6 +202,34 @@ Kurallar:
   - Not (2026-10-01, ikonlar): glyph'ler yalnızca `backend/assets/app.css`'te (`.ico-<ad>::before { content: "\fXXX" }`), şablonlarda ham karakter yok. Doğrulama komutu: **`sh scripts/check-glyphs.sh`** — CSS'teki her kod noktasını `fc-query`'nin bildirdiği font charset'inde arar, eksikse çıkış kodu 1. Kullanılan 22 kod noktasının hepsi Nerd Font'un Font Awesome bloğunda (`f000–f385`) ve gömülü TTF'te doğrulandı
   - Doğrulama (2026-10-01): backend 135 test (gerçek Postgres + lab Keycloak, `--include-ignored`), fmt + clippy temiz; `grep -rn 'cdn.tailwindcss.com\|style="' backend/templates` boş, `grep -rnE 'https?://' backend/templates backend/assets backend/static/app.js` boş; `sh scripts/build-css.sh` çıktısı commit'li. Arayüz **gerçekten tarayıcıda açıldı**: çalışan compose yığınında `test-hr` ile OIDC girişi yapıldı, `/`, `/roles`, `/departments`, `/upcoming`, `/targets`, `/used-names` 200 döndü ve altı sayfa Firefox ile hem koyu hem açık temada ekran görüntüsüne alındı — ikonlar tofu değil, aktif gezinme pill'i doğru sayfada, boş durum ekranları çiziliyor. İlk denemede ikon etiket aralığı glyph ilerleme genişliğine göre kayıyordu, `.nav-link .ico`/`.btn .ico` sabit kutuya alındı
 
+## Arayüz: mockup düzeni ([ADR-096](decisions/096-arayuz-mockup-duzeni-stack-degismez.md))
+
+> Fazlar arası iş. Kullanıcı 2026-10-01'de görsel yenilemenin sonucunu reddetti ("şu anki tasarım hiç güzel değil, istediğimi vermiyor") ve `tmp/opensicil.png`'i düzen hedefi olarak gösterdi; renk (Catppuccin) ve font (CaskaydiaMono) sabit kalır. Node/npm/SPA'ya geçilmedi — gerekçe ve ertelenen SPA kararı ADR-096'da.
+
+- [x] Kabuk mockup düzenine geçer ve ana sayfa gösterge paneli olur ([ADR-096](decisions/096-arayuz-mockup-duzeni-stack-degismez.md) madde 2, 3)
+  - Not: kabuk ve panel tek kutucuk — kabul kriteri görsel ("mockup'a benziyor mu") ve bu ancak ana sayfanın kendisiyle ölçülebilir; kabuk tek başına düz bir tablonun üstünde gösterilemez
+  - Kabul: kenar çubuğu tam boy ve sayfanın en üstünden başlar, marka onun içinde, altında ürün adı + sürüm; üst bar yalnızca içerik sütununun üstünde
+  - Kabul: üst barda kullanıcı çipi (baş harf avatarı + operatör adı + yetkisi), dil, tema, çıkış; 18 şablon kabuk bağlamını (ad + yetki + dil) ortak yoldan alır, şablon başına plumbing yok
+  - Kabul: gezinme bağlantısı ikon + etiket + sağda chevron, aktif bağlantı dolu vurgu pill'i (mevcut `app.js` yol eşleşmesi korunur)
+  - Kabul: ana sayfa — hoş geldiniz kartı, sayaç kutuları satırı, son etkinlikler (denetim kaydı) + eğilim grafiği, son kimlikler tablosu + departman dağılımı + hızlı işlemler; [ADR-076](decisions/076-gosterge-paneli-v1-kapsami.md)'nın v1 kapsamı karşılanır
+  - Kabul: grafikler native CSS (ADR-076), yeni bağımlılık yok, CDN yok, satır içi stil yok; `sh scripts/build-css.sh` ve `sh scripts/check-glyphs.sh` çalıştırılır, çıktı aynı commit'te
+  - Kabul: panel sorguları mevcut tablolardan okur (kimlik, denetim, iş, departman); yeni migration yok
+  - Kabul: arayüz çalışan compose yığınında tarayıcıda açılır, açık ve koyu temada ekran görüntüsü alınır; mevcut testler geçer
+  - Not (2026-10-01): kabuk — `base.html` `.shell` > `.side` (tam boy, marka + `.side-nav` + `.side-foot` sürüm) + `.col` (`.topbar` + `.page`); üst barda arama, dil, tema, `.userchip` (baş harf avatarı + ad + yetki) ve çıkış. Kullanıcı çipi için 13 şablon struct'ına tek `shell: Shell` alanı eklendi (önceki kutucukta "19 struct'a alan eklemek pahalı" diye reddedilmişti; tek alan ve tek yapım noktası `Shell::of` ile maliyet kalktı). `identity_web::render_form`/`form_error` `lang: Lang` yerine `op: &Operator` alıyor — parametre sayısı 5'te kaldı
+  - Not (2026-10-01): panel — `backend/src/dashboard.rs`; dört sayaç kutusu (toplam kimlik, son 30 günde giren/ayrılan/görev değişen) + müdahale ve onay bekleyen sayıları **yalnızca sıfır değilken** uyarı satırı olarak, operatör etkinlik akışı (worker niyet/sonuç satırları akışa girmez), yedi günlük native CSS çubuk grafik, son kimlikler tablosu (baş harf avatarlı), departman dağılımı ve hızlı işlemler. Altı sayaç + tarih tek sorguda. ADR-076'nın v1 kapsamından tarih aralığı filtresi ve rol kırılımı pastası Faz 4'te kaldı
+  - Not (2026-10-01): yüzdeler **sınıfla** veriliyor (`.v-0` … `.v-100`, beşer adım) — nginx CSP'si `style-src`ten `'unsafe-inline'`i kaldırdığı için (ADR-088) satır içi `style="--v:42"` sessizce düşerdi; `dashboard::percent` en yakın beşe yuvarlar ve bir test her (değer, zirve) çiftinin tanımlı bir sınıfa düştüğünü doğruluyor. Sıfır değerli gün çubuk basmaz (2px'lik hayalet çizgi "o gün bir şey oldu" gibi okunuyordu). Koyu temada ikinci seri için `--ctp-accent-dim` token'ı açıldı: `accent-soft` bir zemin tonu, çubuk olarak kart zemininden ayırt edilmiyordu
+  - Doğrulama (2026-10-01): backend 147 test (gerçek Postgres + lab Keycloak, `--include-ignored`), fmt + clippy iki crate'te temiz; `grep -rn 'cdn.tailwindcss.com\|style="' backend/templates` ve `grep -rnE 'https?://' backend/templates backend/assets backend/static/app.js` boş; `sh scripts/build-css.sh` ve `sh scripts/check-glyphs.sh` (sekiz yeni ikon dahil hepsi fontta) çalıştırıldı, çıktı commit'li. Ekran görüntüsü: tek kullanımlık test veritabanında 12 demo kimlik + 12 denetim olayıyla gerçek binary çalıştırıldı, Firefox ile açık ve koyu temada çekildi — ikonlar tofu değil, aktif gezinme pill'i doğru, grafik ve dağılım çubukları çiziliyor
+- [x] Üst bar araması kimlik aramasına bağlanır ([ADR-096](decisions/096-arayuz-mockup-duzeni-stack-degismez.md) madde 4)
+  - Kabul: ad, soyad, kullanıcı adı ve sicil üstünden arar; sonuç listesi kimlik sayfalarına bağlanır
+  - Kabul: yetki kontrolü servis katmanında, sorgu parametreli; kimlik no ile arama yok (blind index ayrı iş)
+  - Not (2026-10-01): kabuk kutucuğuyla **aynı commit'te** yapıldı — `base.html`'deki arama formu rotası olmadan 404 verirdi, iki kutucuğa bölmek çalışmayan bir ara commit bırakırdı
+  - Not: `backend/src/search.rs` + `identity::search`; `ILIKE` kalıbında kullanıcının yazdığı `%` ve `_` kaçışlanır (joker değil harf, testli), silinmiş kayıt aramaya girmez, liste 50 ile sınırlı. En dar yetkili operatör (`auditor`) de arayabiliyor — kutu her operatöre açık; oturumsuz istek girişe düşer
+- [ ] `frontend/` dizini açılır (kullanıcı isteği, 2026-10-01)
+  - Not: `templates/`, `assets/`, `static/`, `i18n/` `backend/`ten repo kökündeki `frontend/`e taşınır; Compose `additional_contexts` ile backend'in `context: ./backend` izolasyonu ([ADR-070](decisions/070-bagimsiz-crate-per-crate-komut.md)) bozulmadan derlemeye girer. Kendi ADR'si kutucuk başında yazılır
+  - Kabul: `docker compose build backend` ve `cargo build` ikisi de çalışır; `include_bytes!`/`include_str!` yolları ve askama şablon dizini yeni konuma bakar
+- [ ] Kapanış: güvenlik ve test
+  - (1a'daki kapanış şablonunun aynısı)
+
 ## Gerçek Windows AD doğrulaması
 
 > Fazlar arası iş. Bugüne kadar bütün AD testleri `compose.lab.yaml`'daki **Samba**'ya karşı koştu; `tmp/lab-ad-notlari.md`'deki gerçek Windows Server AD'ye (192.168.1.231, `Hogwarts` örnek OU) hiç bağlanılmadı — kullanıcı 2026-10-01'de bunu sordu ve sıraya aldı. Host o gün ayaktaydı (389 ve 636 açık).
@@ -252,6 +280,7 @@ Kurallar:
   - Kabul: `worker/src/read_lane.rs` testi — tek iş, tekilleştirme (açık iş varken ikinci istek yok), sonuç/başarısızlık kaydı; `org_web` HTTP testi — düğme istek yazıyor, ikincisi "zaten açık", auditor 403
 - [ ] Mutabakat raporu: gece ve istendiğinde, "yeniden uygula" ile (F-13)
 - [ ] Gösterge paneli ([ADR-076](decisions/076-gosterge-paneli-v1-kapsami.md)): tarih aralığı filtresi (varsayılan son 30 gün); işe giren/ayrılan/görev değiştiren sayısı; departman ve rol kırılımı (pasta, native CSS `conic-gradient`, kütüphane yok); "ayrılmış ama kapatılamamış" ve onay bekleyen taslak sayısı
+  - Not (2026-10-01): panelin gövdesi "Arayüz: mockup düzeni" bölümüne alındı ([ADR-096](decisions/096-arayuz-mockup-duzeni-stack-degismez.md) madde 3) — ana sayfanın mockup'a benzeyip benzemediği ancak panelle ölçülebiliyordu. Burada kalan kısım: tarih aralığı filtresi ve rol kırılımı pastası
   - Kabul: beş panel de doğru sayıları gösteriyor; tarih aralığı değiştirilince sayılar güncelleniyor; yeni JS/CSS grafik bağımlılığı eklenmedi
 - [ ] Hedef sistem başına saklama + "silinmeyi bekleyenler" listesi ([ADR-024](decisions/024-hedef-sistem-basina-saklama-suresi.md))
 - [ ] Metrik ucu: hedef sistem başına son başarılı bağlantı dahil (F-19)

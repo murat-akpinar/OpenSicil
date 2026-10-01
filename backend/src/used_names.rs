@@ -15,6 +15,7 @@ use sqlx::PgPool;
 use crate::i18n::Lang;
 use crate::identity_web::{allowed, audit_operator, forbidden, internal, OperatorSession};
 use crate::operator_session::Operator;
+use crate::shell::Shell;
 use crate::web::{render, AppState};
 
 const RELEASE_AUTHORITIES: &[&str] = &["admin"];
@@ -88,6 +89,7 @@ pub fn routes() -> Router<AppState> {
 #[derive(Template)]
 #[template(path = "used_names.html")]
 struct UsedNamesTemplate {
+    shell: Shell,
     lang: Lang,
     names: Vec<UsedName>,
     error: String,
@@ -98,6 +100,7 @@ async fn render_page(state: &AppState, op: &Operator, error: String) -> Response
     match list(&state.pool, &state.time_zone).await {
         Ok(names) => render(&UsedNamesTemplate {
             lang: op.lang,
+            shell: Shell::of(op),
             names,
             error,
             can_release: allowed(op, RELEASE_AUTHORITIES),

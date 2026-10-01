@@ -8,41 +8,61 @@
 <script src="/static/app.js"></script>
 {% block head %}{% endblock %}
 </head>
-<body class="flex min-h-screen flex-col">
-  <header class="topbar">
-    <div class="topbar-inner">
-      <a class="brand" href="/"><span class="brand-mark"><i class="ico ico-shield" aria-hidden="true"></i></span>OpenSicil</a>
-      <div class="ml-auto flex items-center gap-2">
-        {% block lang_switch %}
-        {# ADR-089: tercih operator oturumunda saklanir; dugme obur dile gecer #}
-        <form method="post" action="/lang">
-          <button class="btn btn-ghost btn-sm" type="submit" name="lang" value="{{ lang.other_code() }}" aria-label="{{ lang.t("shell.language") }}"><i class="ico ico-globe" aria-hidden="true"></i>{{ lang.other_label() }}</button>
-        </form>
-        {% endblock %}
-        {# app.js ikon sinifini (ay/gunes) ve aria-label'i temaya gore degistirir #}
-        <button class="btn btn-ghost btn-sm ico ico-moon" id="theme-toggle" type="button" aria-label="{{ lang.t("shell.theme") }}"></button>
-        {% block topbar_end %}
-        <form method="post" action="/logout"><button class="btn btn-ghost btn-sm" type="submit"><i class="ico ico-logout" aria-hidden="true"></i>{{ lang.t("shell.logout") }}</button></form>
-        {% endblock %}
-      </div>
-    </div>
-  </header>
-  {# Gezinme sol sidebar'da; config.html bu blogu bosaltinca sidebar hic cizilmez
-     ve icerik tum genisligi alir (ADR-068: bootstrap hesabi is ekranlarina girmez). #}
+<body>
+  {# ADR-096 madde 2: kenar cubugu tam boy ve en ustten baslar, marka onun icinde;
+     ust bar yalnizca icerik sutununun ustunde. config.html `nav` blogunu bosaltinca
+     kenar cubugu hic cizilmez ve icerik tum genisligi alir (ADR-068). #}
   <div class="shell">
     {% block nav %}
-    <nav class="side">
-      <a class="nav-link" href="/"><i class="ico ico-users" aria-hidden="true"></i>{{ lang.t("nav.identities") }}</a>
-      <a class="nav-link" href="/upcoming"><i class="ico ico-calendar" aria-hidden="true"></i>{{ lang.t("nav.upcoming") }}</a>
-      <a class="nav-link" href="/roles"><i class="ico ico-key" aria-hidden="true"></i>{{ lang.t("nav.roles") }}</a>
-      <a class="nav-link" href="/departments"><i class="ico ico-sitemap" aria-hidden="true"></i>{{ lang.t("nav.departments") }}</a>
-      <a class="nav-link" href="/targets"><i class="ico ico-server" aria-hidden="true"></i>{{ lang.t("nav.targets") }}</a>
-      <a class="nav-link" href="/used-names"><i class="ico ico-tag" aria-hidden="true"></i>{{ lang.t("nav.used_names") }}</a>
-    </nav>
+    <aside class="side">
+      <a class="side-brand" href="/"><span class="brand-mark"><i class="ico ico-shield" aria-hidden="true"></i></span>OpenSicil</a>
+      <nav class="side-nav">
+        <a class="nav-link" href="/"><i class="ico ico-home" aria-hidden="true"></i>{{ lang.t("nav.home") }}<i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
+        <a class="nav-link" href="/upcoming"><i class="ico ico-calendar" aria-hidden="true"></i>{{ lang.t("nav.upcoming") }}<i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
+        <a class="nav-link" href="/roles"><i class="ico ico-key" aria-hidden="true"></i>{{ lang.t("nav.roles") }}<i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
+        <a class="nav-link" href="/departments"><i class="ico ico-sitemap" aria-hidden="true"></i>{{ lang.t("nav.departments") }}<i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
+        <a class="nav-link" href="/targets"><i class="ico ico-server" aria-hidden="true"></i>{{ lang.t("nav.targets") }}<i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
+        <a class="nav-link" href="/used-names"><i class="ico ico-tag" aria-hidden="true"></i>{{ lang.t("nav.used_names") }}<i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
+      </nav>
+      <div class="side-foot">
+        <p class="text-sm font-bold">OpenSicil</p>
+        <p class="meta">v{{ shell.version }}</p>
+      </div>
+    </aside>
     {% endblock %}
-    <main class="{% block page_class %}page{% endblock %}">
-      {% block content %}{% endblock %}
-    </main>
+    <div class="col">
+      <header class="topbar">
+        {% block topbar_start %}
+        <form class="search" method="get" action="/search" role="search">
+          <i class="ico ico-search" aria-hidden="true"></i>
+          <input class="input" type="search" name="q" value="{{ shell.query }}" placeholder="{{ lang.t("search.placeholder") }}" aria-label="{{ lang.t("search.placeholder") }}">
+        </form>
+        {% endblock %}
+        <div class="ml-auto flex items-center gap-2">
+          {% block lang_switch %}
+          {# ADR-089: tercih operator oturumunda saklanir; dugme obur dile gecer #}
+          <form method="post" action="/lang">
+            <button class="btn btn-ghost btn-sm" type="submit" name="lang" value="{{ lang.other_code() }}" aria-label="{{ lang.t("shell.language") }}"><i class="ico ico-globe" aria-hidden="true"></i>{{ lang.other_label() }}</button>
+          </form>
+          {% endblock %}
+          {# app.js ikon sinifini (ay/gunes) ve aria-label'i temaya gore degistirir #}
+          <button class="btn btn-ghost btn-sm ico ico-moon" id="theme-toggle" type="button" aria-label="{{ lang.t("shell.theme") }}"></button>
+          {% block topbar_end %}
+          <span class="userchip">
+            <span class="avatar" aria-hidden="true">{{ shell.initials }}</span>
+            <span class="hidden leading-tight sm:block">
+              <span class="userchip-name block">{{ shell.username }}</span>
+              <span class="meta">{{ shell.authority(lang) }}</span>
+            </span>
+          </span>
+          <form method="post" action="/logout"><button class="btn btn-ghost btn-sm" type="submit" aria-label="{{ lang.t("shell.logout") }}"><i class="ico ico-logout" aria-hidden="true"></i><span class="hidden md:inline">{{ lang.t("shell.logout") }}</span></button></form>
+          {% endblock %}
+        </div>
+      </header>
+      <main class="{% block page_class %}page{% endblock %}">
+        {% block content %}{% endblock %}
+      </main>
+    </div>
   </div>
 </body>
 </html>

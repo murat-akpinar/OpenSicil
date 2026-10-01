@@ -14,6 +14,7 @@ use crate::i18n::Lang;
 use crate::identity_web::{allowed, audit_operator, forbidden, internal, OperatorSession};
 use crate::operator_session::Operator;
 use crate::org::{self, CatalogOptions, Definition, Owner, SaveError, TargetSetting};
+use crate::shell::Shell;
 use crate::web::{render, AppState};
 
 const WRITE_AUTHORITIES: &[&str] = &["role_admin", "admin"];
@@ -201,6 +202,7 @@ fn save_error(e: SaveError, what: &str) -> Result<&'static str, Box<Response>> {
 #[derive(Template)]
 #[template(path = "roles.html")]
 struct RolesTemplate {
+    shell: Shell,
     lang: Lang,
     roles: Vec<org::RoleRow>,
     kinds: &'static [&'static str],
@@ -211,6 +213,7 @@ struct RolesTemplate {
 #[derive(Template)]
 #[template(path = "role.html")]
 struct RoleTemplate {
+    shell: Shell,
     lang: Lang,
     role: org::RoleDetail,
     targets: Vec<TargetView>,
@@ -224,6 +227,7 @@ struct RoleTemplate {
 #[derive(Template)]
 #[template(path = "departments.html")]
 struct DepartmentsTemplate {
+    shell: Shell,
     lang: Lang,
     departments: Vec<org::DepartmentRow>,
     error: String,
@@ -233,6 +237,7 @@ struct DepartmentsTemplate {
 #[derive(Template)]
 #[template(path = "department.html")]
 struct DepartmentTemplate {
+    shell: Shell,
     lang: Lang,
     dept: org::DepartmentDetail,
     parents: Vec<ItemView>,
@@ -357,6 +362,7 @@ struct TargetFormView {
 #[derive(Template)]
 #[template(path = "targets.html")]
 struct TargetsTemplate {
+    shell: Shell,
     lang: Lang,
     targets: Vec<TargetFormView>,
     error: String,
@@ -368,6 +374,7 @@ async fn render_roles(state: &AppState, op: &Operator, error: String) -> Respons
     match org::list_roles(&state.pool).await {
         Ok(roles) => render(&RolesTemplate {
             lang: op.lang,
+            shell: Shell::of(op),
             roles,
             kinds: &org::ROLE_KINDS,
             error,
@@ -419,6 +426,7 @@ async fn render_role(state: &AppState, op: &Operator, id: i64, notice: Notice) -
     };
     render(&RoleTemplate {
         lang: op.lang,
+        shell: Shell::of(op),
         targets: target_views(&role.def, &options, op.lang),
         show_settings: role.kind == "primary",
         role,
@@ -650,6 +658,7 @@ async fn render_departments(state: &AppState, op: &Operator, error: String) -> R
     match org::list_departments(&state.pool).await {
         Ok(departments) => render(&DepartmentsTemplate {
             lang: op.lang,
+            shell: Shell::of(op),
             departments,
             error,
             can_edit: allowed(op, WRITE_AUTHORITIES),
@@ -705,6 +714,7 @@ async fn render_department(state: &AppState, op: &Operator, id: i64, notice: Not
     };
     render(&DepartmentTemplate {
         lang: op.lang,
+        shell: Shell::of(op),
         targets: target_views(&dept.def, &options, op.lang),
         parents: parent_options(&dept, &departments),
         dept,
@@ -863,6 +873,7 @@ async fn render_targets(state: &AppState, op: &Operator, notice: Notice) -> Resp
         .collect();
     render(&TargetsTemplate {
         lang: op.lang,
+        shell: Shell::of(op),
         targets: views,
         error: notice.error,
         info: notice.info,

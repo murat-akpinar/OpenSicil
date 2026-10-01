@@ -408,26 +408,29 @@ pub async fn load_state(
 pub struct Listed {
     pub id: i64,
     pub name: String,
+    /// Listedeki bas harf avatari (ADR-096 madde 3); kabugun cipiyle ayni yardimci
+    pub initials: String,
     pub employee_number: String,
     pub state: &'static str,
     pub state_kind: &'static str,
 }
 
-// ponytail: kimlik basina bir durum sorgusu, liste 50 ile sinirli; arama
-// ekrani (3b) tek sorguya alir.
-pub async fn recent(pool: &PgPool, time_zone: &str) -> Result<Vec<Listed>, sqlx::Error> {
-    let rows: Vec<(i64, String, Option<String>)> = sqlx::query_as(
-        "SELECT id, given_name || ' ' || surname, employee_number FROM identities \
-         WHERE deleted_at IS NULL ORDER BY created_at DESC, id DESC LIMIT $1",
-    )
-    .bind(RECENT_LIMIT)
-    .fetch_all(pool)
-    .await?;
+/// (id, ad soyad, sicil) satirlari — liste sorgularinin ortak cikti sirasi
+type ListedRow = (i64, String, Option<String>);
+
+// ponytail: kimlik basina bir durum sorgusu, listeler 50 ile sinirli; tek
+// sorguya almak `lifecycle_state`i SQL'e kopyalamak demek (ADR-038 tek yer).
+async fn with_state(
+    pool: &PgPool,
+    time_zone: &str,
+    rows: Vec<ListedRow>,
+) -> Result<Vec<Listed>, sqlx::Error> {
     let mut listed = Vec::with_capacity(rows.len());
     for (id, name, employee_number) in rows {
         let state = load_state(pool, time_zone, id).await?;
         listed.push(Listed {
             id,
+            initials: crate::shell::initials(&name),
             name,
             employee_number: employee_number.unwrap_or_default(),
             state: state.map(state_key).unwrap_or(""),
@@ -435,6 +438,49 @@ pub async fn recent(pool: &PgPool, time_zone: &str) -> Result<Vec<Listed>, sqlx:
         });
     }
     Ok(listed)
+}
+
+pub async fn recent(pool: &PgPool, time_zone: &str) -> Result<Vec<Listed>, sqlx::Error> {
+    let rows: Vec<ListedRow> = sqlx::query_as(
+        "SELECT id, given_name || ' ' || surname, employee_number FROM identities \
+         WHERE deleted_at IS NULL ORDER BY created_at DESC, id DESC LIMIT $1",
+    )
+    .bind(RECENT_LIMIT)
+    .fetch_all(pool)
+    .await?;
+    with_state(pool, time_zone, rows).await
+}
+
+/// Ust bardaki arama (ADR-096 madde 4): ad, soyad, tam ad, kullanici adi ve
+/// sicil. Kimlik numarasi **aranmaz** — sifreli ve blind index'li (ADR-010),
+/// aramasi `pii_reader` yetkisi ister; bu kutu her operatore acik.
+pub async fn search(
+    pool: &PgPool,
+    time_zone: &str,
+    query: &str,
+) -> Result<Vec<Listed>, sqlx::Error> {
+    let rows: Vec<ListedRow> = sqlx::query_as(
+        "SELECT id, given_name || ' ' || surname, employee_number FROM identities \
+         WHERE deleted_at IS NULL AND ( \
+               given_name ILIKE $1 ESCAPE '\\' OR surname ILIKE $1 ESCAPE '\\' \
+            OR given_name || ' ' || surname ILIKE $1 ESCAPE '\\' \
+            OR username ILIKE $1 ESCAPE '\\' OR employee_number ILIKE $1 ESCAPE '\\') \
+         ORDER BY surname, given_name, id LIMIT $2",
+    )
+    .bind(like_contains(query))
+    .bind(RECENT_LIMIT)
+    .fetch_all(pool)
+    .await?;
+    with_state(pool, time_zone, rows).await
+}
+
+/// `%ara%` kalibi; kullanicinin yazdigi `%` ve `_` joker degil harf sayilir.
+fn like_contains(query: &str) -> String {
+    let escaped = query
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_");
+    format!("%{escaped}%")
 }
 
 pub struct Person {

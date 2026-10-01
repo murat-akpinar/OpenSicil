@@ -27,6 +27,8 @@
   --ctp-fg-faint: #8c8fa1;
   --ctp-accent: #1e66f5;
   --ctp-accent-soft: #dde6fd;
+  /* Grafigin ikinci serisi: `accent-soft` zemin tonu, cubuk olarak karttan ayrilmiyor */
+  --ctp-accent-dim: #a9c5fb;
   --ctp-ok: #40a02b;
   --ctp-err: #d20f39;
   --ctp-warn: #df8e1d;
@@ -55,6 +57,7 @@
     --ctp-fg-faint: #a6adc8;
     --ctp-accent: #89b4fa;
     --ctp-accent-soft: #2b3148;
+    --ctp-accent-dim: #5a6f9e;
     --ctp-ok: #a6e3a1;
     --ctp-err: #f38ba8;
     --ctp-warn: #f9e2af;
@@ -83,6 +86,7 @@
   --ctp-fg-faint: #a6adc8;
   --ctp-accent: #89b4fa;
   --ctp-accent-soft: #2b3148;
+  --ctp-accent-dim: #5a6f9e;
   --ctp-ok: #a6e3a1;
   --ctp-err: #f38ba8;
   --ctp-warn: #f9e2af;
@@ -110,6 +114,7 @@
   --color-fg-faint: var(--ctp-fg-faint);
   --color-accent: var(--ctp-accent);
   --color-accent-soft: var(--ctp-accent-soft);
+  --color-accent-dim: var(--ctp-accent-dim);
   --color-ok: var(--ctp-ok);
   --color-err: var(--ctp-err);
   --color-warn: var(--ctp-warn);
@@ -233,6 +238,30 @@
   .ico-mail::before {
     content: "\f0e0";
   }
+  .ico-home::before {
+    content: "\f015";
+  }
+  .ico-search::before {
+    content: "\f002";
+  }
+  .ico-chevron-right::before {
+    content: "\f054";
+  }
+  .ico-chart::before {
+    content: "\f080";
+  }
+  .ico-bolt::before {
+    content: "\f0e7";
+  }
+  .ico-building::before {
+    content: "\f1ad";
+  }
+  .ico-user-plus::before {
+    content: "\f234";
+  }
+  .ico-sign-in::before {
+    content: "\f090";
+  }
 
   /* Yuvarlak köşeli ikon karesi: kart başlığı, liste satırı, boş durum */
   .ico-tile {
@@ -242,45 +271,86 @@
     @apply size-12 rounded-xl text-xl;
   }
 
-  /* --- kabuk --- */
-  .topbar {
-    @apply sticky top-0 z-10 border-b border-line bg-card;
-    box-shadow: var(--ctp-shadow-sm);
+  /* --- kabuk (ADR-096 madde 2) ---
+     Kenar çubuğu tam boy ve sayfanın en üstünden başlar; marka onun içindedir.
+     Üst bar yalnızca içerik sütununun üstünde durur ve arama + kullanıcı çipini
+     taşır. Dar ekranda sütunlar üst üste gelir, kenar çubuğu yatay şeride döner. */
+  .shell {
+    @apply flex min-h-screen w-full flex-col md:flex-row;
   }
-  .topbar-inner {
-    @apply flex w-full flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 md:px-6;
+  .side {
+    @apply flex shrink-0 flex-col gap-1 border-b border-line bg-card px-3 py-3
+           text-sm md:w-64 md:border-r md:border-b-0 md:px-4 md:py-5;
   }
-  .brand {
-    @apply flex items-center gap-2.5 text-base font-bold tracking-tight text-fg no-underline;
+  /* Marka kenar çubuğunun içinde, gezinmeden bir çizgiyle değil boşlukla ayrılır */
+  .side-brand {
+    @apply mb-4 flex items-center gap-3 px-1 text-lg font-bold tracking-tight text-fg no-underline;
   }
   .brand-mark {
-    @apply grid size-8 place-items-center rounded-lg bg-accent text-sm text-on-accent;
+    @apply grid size-10 shrink-0 place-items-center rounded-xl bg-accent text-base text-on-accent;
+    box-shadow: var(--ctp-shadow-sm);
   }
-  .shell {
-    @apply flex w-full flex-1 flex-col md:flex-row;
+  /* Gezinme; dar ekranda yatay kayan şerit, md'den sonra dikey sütun */
+  .side-nav {
+    @apply flex flex-row gap-1 overflow-x-auto md:flex-col md:overflow-visible;
   }
-  /* Dar ekranda icerigin ustunde yatay seride kayar, md'den sonra sol sutun olur. */
-  .side {
-    @apply flex shrink-0 flex-row gap-1 overflow-x-auto border-b border-line bg-card px-3 py-2
-           text-sm md:w-56 md:flex-col md:border-r md:border-b-0 md:px-3 md:py-5;
+  /* Ürün adı + sürüm: kenar çubuğunun dibine yapışır, dar ekranda gizlenir */
+  .side-foot {
+    @apply mt-auto hidden px-1 pt-5 md:block;
   }
   .nav-link {
-    @apply flex items-center gap-2.5 rounded-lg px-3 py-2 whitespace-nowrap text-fg-dim
+    @apply flex items-center gap-3 rounded-lg px-3 py-2.5 whitespace-nowrap text-fg-dim
            no-underline hover:bg-bg hover:text-fg;
   }
   /* Glyph'lerin ilerleme genişliği farklı; sabit kutu etiketleri aynı hizada tutar */
   .nav-link .ico {
     @apply w-5 text-center text-fg-faint;
   }
+  /* Sağdaki chevron yalnızca geniş ekranda; şeride dönünce yer kaplamasın */
+  .nav-link .nav-chevron {
+    @apply ml-auto hidden text-xs text-fg-faint md:inline-block;
+  }
   /* Aktif bağlantıyı app.js yol eşleşmesiyle isaretler; sablon basina plumbing yok */
   .nav-link-active {
     @apply bg-accent font-bold text-on-accent hover:bg-accent hover:text-on-accent;
+    box-shadow: var(--ctp-shadow-sm);
   }
-  .nav-link-active .ico {
+  .nav-link-active .ico,
+  .nav-link-active .nav-chevron {
     @apply text-on-accent;
   }
+
+  /* İçerik sütunu: üst bar + sayfa */
+  .col {
+    @apply flex min-w-0 flex-1 flex-col;
+  }
+  .topbar {
+    @apply sticky top-0 z-10 flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-line
+           bg-card px-4 py-3 md:px-6;
+  }
+  /* Arama kutusu: ikon input'un içinde durur (ayrı bileşen değil, konumlandırma) */
+  .search {
+    @apply relative min-w-0 flex-1 md:max-w-md;
+  }
+  .search .ico {
+    @apply pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-sm text-fg-faint;
+  }
+  .search .input {
+    @apply pl-9;
+  }
+  /* Kullanıcı çipi: baş harf avatarı + ad + yetki */
+  .userchip {
+    @apply flex items-center gap-2.5 rounded-lg border border-line bg-bg px-2.5 py-1.5;
+  }
+  .userchip-name {
+    @apply text-sm leading-tight font-bold;
+  }
+  .avatar {
+    @apply grid size-8 shrink-0 place-items-center rounded-full bg-accent-soft text-xs
+           font-bold text-accent;
+  }
   .page {
-    @apply mx-auto w-full min-w-0 max-w-6xl px-4 py-7 md:px-6;
+    @apply mx-auto w-full min-w-0 max-w-7xl px-4 py-6 md:px-6;
   }
   .page-narrow {
     @apply mx-auto w-full max-w-xl px-4 py-7;
@@ -345,6 +415,190 @@
   }
   .empty-hint {
     @apply max-w-md text-sm text-fg-faint;
+  }
+
+  /* --- gösterge paneli (ADR-076, ADR-096 madde 3) ---
+     Grafikler native CSS: çubuk yüksekliği ve dağılım çizgisi genişliği `--v`
+     değişkeninden gelir. Değer satır içi `style` ile verilemez — nginx CSP'si
+     `style-src`ten `'unsafe-inline'`i kaldırdı (ADR-088 madde 4 sonucu) — bu
+     yüzden şablon beşer adımlı hazır `.v-NN` sınıflarından birini seçer; backend
+     yüzdeyi en yakın beşe yuvarlar. */
+  .v-0 {
+    --v: 0;
+  }
+  .v-5 {
+    --v: 5;
+  }
+  .v-10 {
+    --v: 10;
+  }
+  .v-15 {
+    --v: 15;
+  }
+  .v-20 {
+    --v: 20;
+  }
+  .v-25 {
+    --v: 25;
+  }
+  .v-30 {
+    --v: 30;
+  }
+  .v-35 {
+    --v: 35;
+  }
+  .v-40 {
+    --v: 40;
+  }
+  .v-45 {
+    --v: 45;
+  }
+  .v-50 {
+    --v: 50;
+  }
+  .v-55 {
+    --v: 55;
+  }
+  .v-60 {
+    --v: 60;
+  }
+  .v-65 {
+    --v: 65;
+  }
+  .v-70 {
+    --v: 70;
+  }
+  .v-75 {
+    --v: 75;
+  }
+  .v-80 {
+    --v: 80;
+  }
+  .v-85 {
+    --v: 85;
+  }
+  .v-90 {
+    --v: 90;
+  }
+  .v-95 {
+    --v: 95;
+  }
+  .v-100 {
+    --v: 100;
+  }
+  .hero {
+    @apply flex flex-wrap items-center gap-4 rounded-xl border border-line bg-card p-5;
+    box-shadow: var(--ctp-shadow);
+  }
+  .hero-text {
+    @apply min-w-0 flex-1;
+  }
+  .hero-actions {
+    @apply flex flex-wrap items-center gap-2;
+  }
+
+  /* Sayaç kutusu: ikon karesi + etiket + büyük sayı + alt not */
+  .stat {
+    @apply rounded-xl border border-line bg-card p-4;
+    box-shadow: var(--ctp-shadow);
+  }
+  .stat-head {
+    @apply flex items-start gap-3;
+  }
+  .stat-label {
+    @apply text-sm text-fg-dim;
+  }
+  .stat-value {
+    @apply mt-1 text-3xl leading-none font-bold tracking-tight tabular-nums;
+  }
+  .stat-foot {
+    @apply mt-2 text-xs text-fg-faint;
+  }
+
+  /* Etkinlik akışı: ikon karesi + başlık/alt satır + sağda saat */
+  .feed {
+    @apply divide-y divide-line;
+  }
+  .feed-row {
+    @apply flex items-center gap-3 py-2.5;
+  }
+  .feed-main {
+    @apply min-w-0 flex-1;
+  }
+  .feed-title {
+    @apply truncate text-sm font-bold;
+  }
+  .feed-sub {
+    @apply truncate text-xs text-fg-faint;
+  }
+  .feed-time {
+    @apply shrink-0 text-xs text-fg-faint tabular-nums;
+  }
+
+  /* Kart içeriğinin kalan yüksekliği doldurması gereken yerler (grafik kartı
+     yanındaki liste kartı kadar uzuyor; grafik ortada asılı kalmasın) */
+  .card-fill {
+    @apply flex flex-col;
+  }
+
+  /* Çubuk grafik: sütunlar eşit paylaşır, yükseklik `--v` yüzdesinden gelir */
+  .chart {
+    @apply flex min-h-44 flex-1 items-end gap-2;
+  }
+  .chart-col {
+    @apply flex h-full flex-1 flex-col items-center justify-end gap-1;
+  }
+  .chart-stack {
+    @apply flex w-full max-w-10 flex-col-reverse justify-start gap-0.5;
+    height: 100%;
+  }
+  /* `min-height` yok: sifir degerli gun icin sablon cubugu hic basmaz, 2px'lik
+     hayalet cizgi "o gun bir sey oldu" gibi okunurdu */
+  .bar {
+    @apply w-full rounded-sm bg-accent;
+    height: calc(var(--v, 0) * 1%);
+  }
+  .bar-soft {
+    background-color: var(--ctp-accent-dim);
+  }
+  .chart-x {
+    @apply text-[0.65rem] whitespace-nowrap text-fg-faint;
+  }
+  .legend {
+    @apply mt-3 flex flex-wrap items-center gap-4 text-xs text-fg-faint;
+  }
+  .legend-dot {
+    @apply inline-block size-2.5 rounded-full bg-accent align-middle;
+  }
+  .legend-dot-soft {
+    background-color: var(--ctp-accent-dim);
+  }
+
+  /* Dağılım satırı: etiket + sayı + ölçek çubuğu + yüzde */
+  .dist-row {
+    @apply flex items-center gap-3 py-2 text-sm;
+  }
+  .dist-name {
+    @apply min-w-0 flex-1 truncate;
+  }
+  .meter {
+    @apply h-2 w-24 shrink-0 overflow-hidden rounded-full bg-bg sm:w-32;
+  }
+  .meter-fill {
+    @apply block h-full rounded-full bg-accent;
+    width: calc(var(--v, 0) * 1%);
+  }
+
+  /* Hızlı işlem: ikon karesi + etiket + sağda chevron */
+  .qa {
+    @apply flex flex-col gap-1.5;
+  }
+  .qa-row {
+    @apply flex items-center gap-3 rounded-lg border border-line px-3 py-2.5 text-sm
+           font-bold text-fg no-underline hover:bg-bg;
+  }
+  .qa-row .nav-chevron {
+    @apply ml-auto text-xs text-fg-faint;
   }
 
   /* --- düğmeler --- */

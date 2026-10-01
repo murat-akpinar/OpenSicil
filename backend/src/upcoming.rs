@@ -14,6 +14,7 @@ use sqlx::PgPool;
 
 use crate::i18n::Lang;
 use crate::identity_web::{internal, OperatorSession};
+use crate::shell::Shell;
 use crate::web::{render, AppState};
 
 const DEFAULT_DAYS: i32 = 30;
@@ -82,6 +83,7 @@ struct DaysQuery {
 #[derive(Template)]
 #[template(path = "upcoming.html")]
 struct UpcomingTemplate {
+    shell: Shell,
     lang: Lang,
     days: i32,
     rows: Vec<Upcoming>,
@@ -96,6 +98,7 @@ async fn page(
     match list(&state.pool, &state.time_zone, days).await {
         Ok(rows) => render(&UpcomingTemplate {
             lang: op.lang,
+            shell: Shell::of(&op),
             days,
             rows,
         }),

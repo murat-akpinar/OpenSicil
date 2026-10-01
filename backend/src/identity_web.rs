@@ -16,6 +16,7 @@ use crate::cookie::{get_cookie, OPERATOR_SESSION_COOKIE_NAME};
 use crate::i18n::Lang;
 use crate::identity::{self, FormOptions, IdentityForm, PersonPage};
 use crate::operator_session::Operator;
+use crate::shell::Shell;
 use crate::web::{render, AppState};
 
 const REGISTER_AUTHORITIES: &[&str] = &["hr", "admin"];
@@ -384,9 +385,7 @@ async fn edit_form(
         return forbidden(op.lang);
     }
     match identity::load_form(&state.pool, id).await {
-        Ok(Some(form)) => {
-            render_form(&state, op.lang, form, String::new(), FormMode::Edit(id)).await
-        }
+        Ok(Some(form)) => render_form(&state, &op, form, String::new(), FormMode::Edit(id)).await,
         Ok(None) => (StatusCode::NOT_FOUND, op.lang.t("err.identity_not_found")).into_response(),
         Err(e) => internal("kimlik okunamadı", e),
     }
@@ -403,18 +402,18 @@ async fn edit_submit(
     }
     let new = match identity::validate(&form) {
         Ok(n) => n,
-        Err(key) => return form_error(&state, op.lang, form, key, FormMode::Edit(id)).await,
+        Err(key) => return form_error(&state, &op, form, key, FormMode::Edit(id)).await,
     };
     if let Err(e) = identity::update_mover(&state.pool, id, &new).await {
         let db = e.as_database_error();
         if db.is_some_and(|d| d.is_unique_violation()) {
             let key = "err.duplicate_employee_number";
-            return form_error(&state, op.lang, form, key, FormMode::Edit(id)).await;
+            return form_error(&state, &op, form, key, FormMode::Edit(id)).await;
         }
         // docs/03: kadrolu disinda bitis zorunlu; bitis ayrilis ekranindan girilir (3c)
         if db.is_some_and(|d| d.is_check_violation()) {
             let key = "err.non_permanent_needs_end";
-            return form_error(&state, op.lang, form, key, FormMode::Edit(id)).await;
+            return form_error(&state, &op, form, key, FormMode::Edit(id)).await;
         }
         return internal("kimlik güncellenemedi", e);
     }
@@ -585,6 +584,7 @@ async fn request_names(
 #[derive(Template)]
 #[template(path = "identity_form.html")]
 struct IdentityFormTemplate {
+    shell: Shell,
     lang: Lang,
     form: IdentityForm,
     options: FormOptions,
@@ -602,6 +602,7 @@ struct IdentityFormTemplate {
 #[derive(Template)]
 #[template(path = "identity.html")]
 struct PersonTemplate {
+    shell: Shell,
     lang: Lang,
     page: PersonPage,
     can_retry: bool,
@@ -617,7 +618,7 @@ async fn new_form(OperatorSession(op): OperatorSession, State(state): State<AppS
         national_id_country: "TR".to_string(),
         ..IdentityForm::default()
     };
-    render_form(&state, op.lang, form, String::new(), FormMode::New).await
+    render_form(&state, &op, form, String::new(), FormMode::New).await
 }
 
 // Formun gorunumu: yeni kayit, mukerrer uyarisi ya da duzenleme (ADR-078/083).
@@ -631,18 +632,18 @@ enum FormMode {
 /// Formu i18n anahtarindan cozulmus hata mesajiyla yeniden gosterir
 async fn form_error(
     state: &AppState,
-    lang: Lang,
+    op: &Operator,
     form: IdentityForm,
     key: &'static str,
     mode: FormMode,
 ) -> Response {
-    let error = lang.t(key).to_string();
-    render_form(state, lang, form, error, mode).await
+    let error = op.lang.t(key).to_string();
+    render_form(state, op, form, error, mode).await
 }
 
 async fn render_form(
     state: &AppState,
-    lang: Lang,
+    op: &Operator,
     form: IdentityForm,
     error: String,
     mode: FormMode,
@@ -653,7 +654,8 @@ async fn render_form(
         .collect();
     match identity::form_options(&state.pool).await {
         Ok(options) => render(&IdentityFormTemplate {
-            lang,
+            lang: op.lang,
+            shell: Shell::of(op),
             form,
             options,
             employment_types,
@@ -681,11 +683,11 @@ async fn create(
     }
     let new = match identity::validate(&form) {
         Ok(n) => n,
-        Err(key) => return form_error(&state, op.lang, form, key, FormMode::New).await,
+        Err(key) => return form_error(&state, &op, form, key, FormMode::New).await,
     };
     match duplicate_person(&state, &form, &new).await {
         Ok(true) => {
-            return render_form(&state, op.lang, form, String::new(), FormMode::Duplicate).await
+            return render_form(&state, &op, form, String::new(), FormMode::Duplicate).await
         }
         Ok(false) => {}
         Err(e) => return internal("mükerrer kişi kontrolü", e),
@@ -700,7 +702,7 @@ async fn create(
             Ok(true) => {}
             Ok(false) => {
                 let key = "err.first_password_start_date";
-                return form_error(&state, op.lang, form, key, FormMode::New).await;
+                return form_error(&state, &op, form, key, FormMode::New).await;
             }
             Err(e) => return internal("tarih kontrolü", e),
         }
@@ -715,7 +717,7 @@ async fn create(
         Ok(created) => created,
         Err(identity::CreateError::DuplicateNationalId) => {
             let key = "err.duplicate_national_id";
-            return form_error(&state, op.lang, form, key, FormMode::New).await;
+            return form_error(&state, &op, form, key, FormMode::New).await;
         }
         Err(identity::CreateError::Db(e)) => return internal("kimlik kaydedilemedi", e),
     };
@@ -767,6 +769,7 @@ async fn show(
     match identity::load_page(&state.pool, &state.time_zone, &state.aead_key, id, op.lang).await {
         Ok(Some(page)) => render(&PersonTemplate {
             lang: op.lang,
+            shell: Shell::of(&op),
             page,
             can_retry: allowed(&op, RETRY_AUTHORITIES),
             can_edit_names: allowed(&op, REGISTER_AUTHORITIES),
