@@ -108,8 +108,9 @@ Kurallar:
 - [x] Belirsiz bileşen kuralı: "hesap açılsın=hayır" mevcut hesabı silmez ([ADR-040](decisions/040-motor-belirsiz-degere-dokunmaz.md))
   - Not: etki önizlemesi burada yoktur; model farkı 3f'te tek fonksiyonla yazılır
   - Not: `desired_state` zaten ayarı yalnızca hesap yokken okuyordu; `provision_not_expected` bayrağı eklendi (iş sonucunda "rol hesap öngörmüyor" bilgisi, 3d mutabakat aynı bayrağı bulgu yapar). Kayıp hesap ve yönetici belirsizliği lab/birim testinde; "bağlantıyı kopar ve yeniden aç" (Sistem yöneticisi) 3c silme/saklama kutucuğuyla
-- [ ] Faz kapanışı: güvenlik ve test
+- [x] Faz kapanışı: güvenlik ve test
   - (1a'daki kapanış şablonunun aynısı)
+  - Not (2026-10-01): backend 109 / worker 68 test (lab Keycloak + Samba dahil), format ve clippy temiz, `cargo audit` yalnızca ADR-073 `rsa`; kapsam backend %92,71 / worker %91,22; imaj taraması Faz 3a tabanıyla aynı (backend 60, worker 58, `Status: fixed` yok); faz commit'lerinde sır sızıntısı taraması boş; TODO yok; 50 satırı aşan yalnızca test fonksiyonları. docs/07'den ADR-022, ADR-029 ve ADR-040 maddeleri işaretlendi; ADR-034 "boş değeri dolduruyor" ve ADR-035 "serbest bırakılan ad yeniden üretiliyor" lab'da sınanmadı (3c/3e kapanışında)
 
 ### 3c. Yaşam döngüsü
 - [ ] İşe giriş, görev değişikliği (önce ekleme, sonra çıkarma — [ADR-050](decisions/050-verme-sayaci-ve-is-butunlugu.md))
