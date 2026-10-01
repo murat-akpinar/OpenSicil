@@ -21,6 +21,7 @@
 - Arayüz kabuğu kutucuğu işaretlendi, durum notu
 - Zimbra v1'den sonraya alındı, todo.md'nin sonuna taşındı (ADR-090)
 - Ürün adı OpenSicil, eski OpenIAM kalıntıları düzeltildi (ADR-063)
+- Görsel yenileme ve gerçek Windows AD kutucukları açıldı
 
 ### Düzeltmeler
 

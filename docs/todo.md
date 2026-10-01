@@ -189,6 +189,23 @@ Kurallar:
   - Kabul: `config.html` gezinmeyi boşalttığı için orada sidebar hiç çizilmez, içerik tüm genişliği alır (ADR-068)
   - Not (2026-10-01): ADR-088 kabuğu "üst bar + gezinme" diye tarif ediyordu ama kararın maddelerinde yön yoktu — yeni ADR gerekmedi. `base.html`'de `{% block nav %}` üst bardan çıkıp `.shell` flex satırına `<aside>` olarak girdi; CSS'te `.nav` → `.side` (dar ekranda satır, `md:` sonrası sütun), `.page`'in `mx-auto max-w-6xl`'i `.shell`'e taşındı. 18 şablon kabuğu miras aldığı için hiçbirine dokunulmadı. `sh scripts/build-css.sh` ile çıktı yenilendi
   - Doğrulama: backend 135 test (lab Keycloak dahil), worker 67; fmt + clippy temiz; çalışan compose yığınında `test-hr` ile OIDC girişi yapılıp operatör ana sayfası çekildi: `class="shell"` 1, `class="side"` 1, `class="nav-link"` 6
+- [ ] Görsel yenileme: arayüz "bayat" görünüyor (kullanıcı isteği, 2026-10-01)
+  - Karar (2026-10-01): **Node/npm'e geçilmedi.** Kullanılan Tailwind npm'den gelecek olanın aynısı (ADR-088 yalnızca derleyiciyi standalone binary yaptı), npm görsel olarak hiçbir şey değiştirmezdi; hazır bileşen kütüphaneleri (shadcn/Material/Ant) React/Vue isteyeceği için 19 askama şablonunun SPA'ya çevrilmesi, araya JSON API, CSP gevşetmesi ve 1000+ geçişli bağımlılık demekti. ADR-064 ve ADR-088 yürürlükte; iş CSS + şablon işi, yeni ADR gerekmedi
+  - Teşhis: her şey 1px `border-line` kutusunda (kart/tablo/panel ayrımı yok), tipografi düz (başlık ↔ gövde ölçek farkı neredeyse yok), **ikon hiç kullanılmamış** — oysa CaskaydiaMono Nerd Font glyph seti ADR-067'de tam bu iş için seçilip gömüldü —, tablolar gri ızgara, boş durum ekranı yok, vurgu rengi neredeyse kullanılmıyor, satır yoğunluğu ayarsız
+  - Kabul: tipografi ölçeği (başlık/gövde/meta), çerçeve yerine yüzey + yumuşak gölge, tablo ve liste yoğunluğu, boş durum ekranları, vurgu renginin işi olan yerlerde kullanımı; aktif gezinme bağlantısı belli (yol eşleşmesi `static/app.js`'te, şablon başına plumbing yok)
+  - Kabul: ikonlar yalnızca **TTF'te varlığı doğrulanmış** glyph'lerle konur (eksik glyph tofu kutusu demek); doğrulama komutu kutucuk notuna yazılır
+  - Kabul: yeni bağımlılık yok, CDN yok, satır içi stil yok; `sh scripts/build-css.sh` çıktısı aynı commit'te; mevcut testler geçer
+  - Not: htmx (sayfa yenilenmeden filtre/satır içi düzenleme) bu kutucuğun dışında — ADR-088 madde 7 onu hâlâ erteliyor, kullanıcı şimdilik yalnızca görsel yenileme istedi
+
+## Gerçek Windows AD doğrulaması
+
+> Fazlar arası iş. Bugüne kadar bütün AD testleri `compose.lab.yaml`'daki **Samba**'ya karşı koştu; `tmp/lab-ad-notlari.md`'deki gerçek Windows Server AD'ye (192.168.1.231, `Hogwarts` örnek OU) hiç bağlanılmadı — kullanıcı 2026-10-01'de bunu sordu ve sıraya aldı. Host o gün ayaktaydı (389 ve 636 açık).
+
+- [ ] `docs/08`'deki ⊞ işaretli sorular gerçek Windows Server AD'de cevaplanır
+  - Kapsam: `pwdLastSet` davranışı, `<GUID=…>` ile modify/modifyDN/delete, `Unexpire-Password` hakkı olmadan parola sıfırlama, ad parçası içeren parolanın reddi
+  - Kabul: bağlantı Yapılandırma sayfasından girilir (`.env`'e yazılmaz, ADR-068); kapsam `Hogwarts` OU'su
+  - Kabul: her cevap `docs/11-dogrulama-notlari.md`'ye sonuç + kanıt olarak girer; Samba ile farklı davranan madde varsa ADR'si yazılır
+  - Not: parola `tmp/lab-ad-notlari.md`'de, git'e girmez; bulgular yazılırken host/parola dokümana kopyalanmaz
 
 ## Giriş: kendi ekranımız ([ADR-095](decisions/095-giris-kendi-ekranimiz-ad-bind-asil.md))
 
