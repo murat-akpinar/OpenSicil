@@ -83,4 +83,5 @@
 - Onay anında etki önizlemesi yeniden hesaplanır (ADR-055)
 - Bekleme sebebi, kalan süre ve onaylayacak grup ekranda (F-12)
 - Okuma şeridi — katalog yenileme ayrı görevde, sayaca dokunmaz (ADR-094)
+- Gezinme sol sidebar'a taşındı
 

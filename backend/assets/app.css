@@ -147,14 +147,18 @@
   .brand-mark {
     @apply grid size-7 place-items-center rounded-md bg-accent text-sm font-bold text-on-accent;
   }
-  .nav {
-    @apply flex flex-wrap items-center gap-1 text-sm;
+  .shell {
+    @apply mx-auto flex w-full max-w-6xl flex-col md:flex-row;
+  }
+  /* Dar ekranda icerigin ustunde yatay seride kayar, md'den sonra sol sutun olur. */
+  .side {
+    @apply flex shrink-0 flex-row gap-1 overflow-x-auto border-b border-line px-4 py-2 text-sm md:w-52 md:flex-col md:border-r md:border-b-0 md:px-3 md:py-6;
   }
   .nav-link {
-    @apply rounded-md px-2 py-1 text-fg-dim no-underline hover:bg-surface hover:text-fg;
+    @apply rounded-md px-2 py-1 whitespace-nowrap text-fg-dim no-underline hover:bg-surface hover:text-fg;
   }
   .page {
-    @apply mx-auto w-full max-w-6xl px-4 py-6;
+    @apply w-full min-w-0 px-4 py-6;
   }
   .page-narrow {
     @apply mx-auto w-full max-w-xl px-4 py-6;

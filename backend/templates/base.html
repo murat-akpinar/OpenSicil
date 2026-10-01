@@ -12,16 +12,6 @@
   <header class="topbar">
     <div class="topbar-inner">
       <a class="brand" href="/"><span class="brand-mark">OS</span>OpenSicil</a>
-      {% block nav %}
-      <nav class="nav">
-        <a class="nav-link" href="/">{{ lang.t("nav.identities") }}</a>
-        <a class="nav-link" href="/upcoming">{{ lang.t("nav.upcoming") }}</a>
-        <a class="nav-link" href="/roles">{{ lang.t("nav.roles") }}</a>
-        <a class="nav-link" href="/departments">{{ lang.t("nav.departments") }}</a>
-        <a class="nav-link" href="/targets">{{ lang.t("nav.targets") }}</a>
-        <a class="nav-link" href="/used-names">{{ lang.t("nav.used_names") }}</a>
-      </nav>
-      {% endblock %}
       <div class="ml-auto flex items-center gap-2">
         {% block lang_switch %}
         {# ADR-089: tercih operator oturumunda saklanir; dugme obur dile gecer #}
@@ -36,8 +26,22 @@
       </div>
     </div>
   </header>
-  <main class="{% block page_class %}page{% endblock %}">
-    {% block content %}{% endblock %}
-  </main>
+  {# Gezinme sol sidebar'da; config.html bu blogu bosaltinca sidebar hic cizilmez
+     ve icerik tum genisligi alir (ADR-068: bootstrap hesabi is ekranlarina girmez). #}
+  <div class="shell">
+    {% block nav %}
+    <nav class="side">
+      <a class="nav-link" href="/">{{ lang.t("nav.identities") }}</a>
+      <a class="nav-link" href="/upcoming">{{ lang.t("nav.upcoming") }}</a>
+      <a class="nav-link" href="/roles">{{ lang.t("nav.roles") }}</a>
+      <a class="nav-link" href="/departments">{{ lang.t("nav.departments") }}</a>
+      <a class="nav-link" href="/targets">{{ lang.t("nav.targets") }}</a>
+      <a class="nav-link" href="/used-names">{{ lang.t("nav.used_names") }}</a>
+    </nav>
+    {% endblock %}
+    <main class="{% block page_class %}page{% endblock %}">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
 </body>
 </html>
