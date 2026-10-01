@@ -7,6 +7,23 @@
 </div>
 {% if !error.is_empty() %}<p class="alert alert-err">{{ error }}</p>{% endif %}
 {% if !info.is_empty() %}<p class="alert alert-info">{{ info }}</p>{% endif %}
+{% if !pending.summary.is_empty() %}
+<div class="alert alert-warn">
+  <strong>{{ lang.t("changeset.pending") }}</strong> {{ pending.summary }}
+  <div class="text-sm mt-1">{{ pending.note }}</div>
+  {% if can_edit %}
+  <div class="mt-2 flex gap-2">
+    <form method="post" action="/roles/{{ role.def.id }}/approve">
+      <button class="btn" type="submit"{% if !pending.approvable %} disabled{% endif %}>{{ lang.t("changeset.approve") }}</button>
+    </form>
+    <form method="post" action="/roles/{{ role.def.id }}/reject">
+      <button class="btn" type="submit">{{ lang.t("changeset.reject") }}</button>
+    </form>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
 <form method="post" action="/roles/{{ role.def.id }}" class="space-y-6">
   <div class="grid gap-4 sm:grid-cols-2">
     <div>

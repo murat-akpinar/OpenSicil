@@ -92,7 +92,7 @@ async fn base_role_exists(pool: &PgPool) -> Result<bool, sqlx::Error> {
         .await
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TargetSetting {
     pub target_id: i64,
     pub target_name: String,
@@ -262,6 +262,7 @@ pub async fn load_department(
     }))
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DefinitionEdit {
     pub name: String,
     pub entitlement_ids: Vec<i64>,
@@ -313,6 +314,25 @@ fn required_name(name: &str, key: &'static str) -> Result<String, SaveError> {
     blank_to_null(name).ok_or(SaveError::Invalid(key))
 }
 
+/// Kaydetmeden once de, taslaga almadan once de ayni dogrulamalar (ADR-031):
+/// onaylanacak taslak gecerli olmali. Doner: kirpilmis ad.
+pub async fn validate_definition(
+    pool: &PgPool,
+    owner: Owner,
+    id: i64,
+    edit: &DefinitionEdit,
+    parent_id: Option<i64>,
+) -> Result<String, SaveError> {
+    let name = match owner {
+        Owner::Role => required_name(&edit.name, "err.role_name_blank")?,
+        Owner::Department => required_name(&edit.name, "err.department_name_blank")?,
+    };
+    if owner == Owner::Department {
+        validate_parent(pool, id, parent_id).await?;
+    }
+    Ok(name)
+}
+
 // ADR-007: tek degerli ayar yalnizca birincil rolde; digerlerinde gelen ayar yok sayilir.
 pub async fn save_role(
     pool: &PgPool,
@@ -320,7 +340,7 @@ pub async fn save_role(
     title: &str,
     edit: &DefinitionEdit,
 ) -> Result<(), SaveError> {
-    let name = required_name(&edit.name, "err.role_name_blank")?;
+    let name = validate_definition(pool, Owner::Role, id, edit, None).await?;
     let kind: String = sqlx::query_scalar("SELECT kind FROM roles WHERE id = $1")
         .bind(id)
         .fetch_one(pool)
@@ -404,8 +424,7 @@ pub async fn save_department(
     parent_id: Option<i64>,
     edit: &DefinitionEdit,
 ) -> Result<(), SaveError> {
-    let name = required_name(&edit.name, "err.department_name_blank")?;
-    validate_parent(pool, id, parent_id).await?;
+    let name = validate_definition(pool, Owner::Department, id, edit, parent_id).await?;
     let mut tx = pool.begin().await?;
     sqlx::query("UPDATE departments SET name = $2, code = $3, parent_id = $4 WHERE id = $1")
         .bind(id)

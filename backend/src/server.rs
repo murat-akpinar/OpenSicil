@@ -33,6 +33,7 @@ struct Config {
     public_url: String,
     time_zone: String,
     change_set_threshold: usize,
+    approval_timelock_hours: u32,
 }
 
 // Butun ortam degiskenleri acilista dogrulanir: eksik anahtar ya da bozuk ortak
@@ -51,6 +52,7 @@ fn load_config() -> Result<Config, String> {
         public_url,
         time_zone: common.time_zone,
         change_set_threshold: crate::change_set::threshold_from_env()?,
+        approval_timelock_hours: crate::change_set::timelock_from_env()?,
     })
 }
 
@@ -69,6 +71,7 @@ async fn startup() -> Result<AppState, String> {
         public_url: c.public_url,
         time_zone: c.time_zone,
         change_set_threshold: c.change_set_threshold,
+        approval_timelock_hours: c.approval_timelock_hours,
     })
 }
 
@@ -151,6 +154,7 @@ mod tests {
             public_url: "https://localhost".to_string(),
             time_zone: "Europe/Istanbul".to_string(),
             change_set_threshold: crate::change_set::DEFAULT_THRESHOLD,
+            approval_timelock_hours: 0,
         }
     }
 

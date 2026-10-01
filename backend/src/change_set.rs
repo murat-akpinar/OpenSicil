@@ -63,12 +63,22 @@ pub const DEFAULT_THRESHOLD: usize = 10;
 /// ADR-031: esik backend'in kendi ortam degiskenidir ve mutlak sayidir.
 /// Verilmezse varsayilan; 0 her duzenlemeyi onaya dusurur ve gecerlidir.
 pub fn threshold_from_env() -> Result<usize, String> {
-    let Ok(raw) = std::env::var("CHANGE_SET_THRESHOLD") else {
-        return Ok(DEFAULT_THRESHOLD);
+    env_number("CHANGE_SET_THRESHOLD", DEFAULT_THRESHOLD)
+}
+
+/// ADR-026: onay zaman kilidi (saat). Varsayilan 0 = kapali; aciksa baslatan da
+/// N saat sonra onaylayabilir (tek Sistem yoneticisi olan kurum icin).
+pub fn timelock_from_env() -> Result<u32, String> {
+    env_number("APPROVAL_TIMELOCK_HOURS", 0)
+}
+
+fn env_number<T: std::str::FromStr>(name: &'static str, default: T) -> Result<T, String> {
+    let Ok(raw) = std::env::var(name) else {
+        return Ok(default);
     };
     raw.trim()
         .parse()
-        .map_err(|_| format!("CHANGE_SET_THRESHOLD tam sayı olmalı, '{raw}' geldi"))
+        .map_err(|_| format!("{name} tam sayı olmalı, '{raw}' geldi"))
 }
 
 pub async fn preview(
@@ -590,6 +600,136 @@ impl Data {
         items
     }
 }
+
+// ---- sahneleme ve onay (ADR-031, ADR-026) ----
+
+/// Taslagin icerigi: tanim + tur ozel alanlar + kaydedildigi andaki etki sayilari.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StagedDefinition {
+    pub edit: DefinitionEdit,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub code: String,
+    #[serde(default)]
+    pub parent_id: Option<i64>,
+    pub applies: usize,
+    pub observed: usize,
+}
+
+pub struct Pending {
+    pub definition: StagedDefinition,
+    /// Baslatanin OIDC `sub`'i; onay kuralinin tarafi (ADR-026).
+    pub by: String,
+    pub by_username: String,
+    pub age_seconds: i64,
+}
+
+const SECONDS_PER_HOUR: i64 = 3_600;
+
+impl Pending {
+    /// ADR-026: onaylayan != baslatan, YA DA kilit acik ve set yasi >= N saat.
+    pub fn approvable_by(&self, approver_subject: &str, timelock_hours: u32) -> bool {
+        self.by != approver_subject
+            || (timelock_hours > 0
+                && self.age_seconds >= i64::from(timelock_hours) * SECONDS_PER_HOUR)
+    }
+
+    /// Baslatanin kendi setini onaylayabilmesine kalan saniye; kilit kapaliysa None.
+    pub fn timelock_remaining(&self, timelock_hours: u32) -> Option<i64> {
+        (timelock_hours > 0)
+            .then(|| i64::from(timelock_hours) * SECONDS_PER_HOUR - self.age_seconds)
+            .filter(|left| *left > 0)
+    }
+}
+
+fn stage_sql(owner: Owner) -> &'static str {
+    match owner {
+        Owner::Role => {
+            "UPDATE roles SET pending_definition = $2::jsonb, pending_by = $3, \
+             pending_by_username = $4, pending_at = now() WHERE id = $1"
+        }
+        Owner::Department => {
+            "UPDATE departments SET pending_definition = $2::jsonb, pending_by = $3, \
+             pending_by_username = $4, pending_at = now() WHERE id = $1"
+        }
+    }
+}
+
+fn pending_sql(owner: Owner) -> &'static str {
+    match owner {
+        Owner::Role => {
+            "SELECT pending_definition::text, COALESCE(pending_by, ''), \
+             COALESCE(pending_by_username, ''), EXTRACT(EPOCH FROM now() - pending_at)::bigint \
+             FROM roles WHERE id = $1 AND pending_definition IS NOT NULL"
+        }
+        Owner::Department => {
+            "SELECT pending_definition::text, COALESCE(pending_by, ''), \
+             COALESCE(pending_by_username, ''), EXTRACT(EPOCH FROM now() - pending_at)::bigint \
+             FROM departments WHERE id = $1 AND pending_definition IS NOT NULL"
+        }
+    }
+}
+
+fn clear_sql(owner: Owner) -> &'static str {
+    match owner {
+        Owner::Role => {
+            "UPDATE roles SET pending_definition = NULL, pending_by = NULL, \
+             pending_by_username = NULL, pending_at = NULL WHERE id = $1"
+        }
+        Owner::Department => {
+            "UPDATE departments SET pending_definition = NULL, pending_by = NULL, \
+             pending_by_username = NULL, pending_at = NULL WHERE id = $1"
+        }
+    }
+}
+
+/// Esigi asan duzenleme: modele yazilmaz, taslak olarak bekler. Bekleyen taslak
+/// varsa ustune yazilir ve set yenilenir (ADR-031).
+pub async fn stage(
+    pool: &PgPool,
+    owner: Owner,
+    id: i64,
+    definition: &StagedDefinition,
+    by: (&str, &str),
+) -> Result<(), sqlx::Error> {
+    // Denetim kaydiyla ayni desen: JSON metin baglanir, kolon jsonb'ye cevirir.
+    let json = serde_json::to_string(definition).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;
+    sqlx::query(stage_sql(owner))
+        .bind(id)
+        .bind(json)
+        .bind(by.0)
+        .bind(by.1)
+        .execute(pool)
+        .await
+        .map(|_| ())
+}
+
+pub async fn pending(pool: &PgPool, owner: Owner, id: i64) -> Result<Option<Pending>, sqlx::Error> {
+    let row: Option<(String, String, String, i64)> = sqlx::query_as(pending_sql(owner))
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
+    let Some((json, by, by_username, age_seconds)) = row else {
+        return Ok(None);
+    };
+    let definition = serde_json::from_str(&json).map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
+    Ok(Some(Pending {
+        definition,
+        by,
+        by_username,
+        age_seconds,
+    }))
+}
+
+pub async fn clear(pool: &PgPool, owner: Owner, id: i64) -> Result<(), sqlx::Error> {
+    sqlx::query(clear_sql(owner))
+        .bind(id)
+        .execute(pool)
+        .await
+        .map(|_| ())
+}
+
 // --- END FEATURE: change-set ---
 
 #[cfg(test)]
@@ -726,7 +866,63 @@ mod tests {
             "bağlantısı olan gözlemde, olmayan hesapsız"
         );
 
+        // ADR-031: taslak yazilir, okunur ve atilir; model degismez.
+        let staged = StagedDefinition {
+            edit: no_account,
+            title: "Uzman".to_string(),
+            code: String::new(),
+            parent_id: None,
+            applies: 42,
+            observed: 3,
+        };
+        stage(&pool, Owner::Role, role, &staged, ("sub-a", "ayse"))
+            .await
+            .unwrap();
+        let p = pending(&pool, Owner::Role, role)
+            .await
+            .unwrap()
+            .expect("taslak bekliyor");
+        assert_eq!((p.definition.applies, p.definition.observed), (42, 3));
+        assert_eq!(p.definition.title, "Uzman");
+        assert_eq!((p.by.as_str(), p.by_username.as_str()), ("sub-a", "ayse"));
+        clear(&pool, Owner::Role, role).await.unwrap();
+        assert!(pending(&pool, Owner::Role, role).await.unwrap().is_none());
+
         drop(pool);
         crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
+    // ADR-026: onaylayan != baslatan, YA DA kilit acik ve set yasi >= N saat.
+    #[test]
+    fn approval_rule_follows_adr_026() {
+        let waiting = |by: &str, age_hours: i64| Pending {
+            definition: StagedDefinition {
+                edit: edit(vec![], vec![]),
+                title: String::new(),
+                code: String::new(),
+                parent_id: None,
+                applies: 42,
+                observed: 0,
+            },
+            by: by.to_string(),
+            by_username: "ayse".to_string(),
+            age_seconds: age_hours * SECONDS_PER_HOUR,
+        };
+        assert!(
+            waiting("a", 0).approvable_by("b", 0),
+            "başka Sistem yöneticisi hemen onaylar"
+        );
+        assert!(
+            !waiting("a", 10).approvable_by("a", 0),
+            "kilit kapalı: başlatan hiç onaylayamaz"
+        );
+        assert!(!waiting("a", 3).approvable_by("a", 4), "süre dolmadı");
+        assert!(waiting("a", 4).approvable_by("a", 4), "süre doldu");
+        assert_eq!(
+            waiting("a", 3).timelock_remaining(4),
+            Some(SECONDS_PER_HOUR)
+        );
+        assert_eq!(waiting("a", 3).timelock_remaining(0), None, "kilit kapalı");
+        assert_eq!(waiting("a", 5).timelock_remaining(4), None, "süre doldu");
     }
 }
