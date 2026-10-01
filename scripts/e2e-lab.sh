@@ -86,7 +86,7 @@ psql -d $DB -c "INSERT INTO roles (kind, name) VALUES ('base', 'Herkes'), ('prim
 INSERT INTO departments (name) VALUES ('Bilgi İşlem');
 UPDATE target_systems SET default_container_item_id = (SELECT id FROM catalog_items WHERE kind = 'ou' AND display_name = 'Personel' LIMIT 1) WHERE kind = 'ad';" >/dev/null
 DEPT=$(psql -d $DB -c "SELECT id FROM departments LIMIT 1")
-ROLE=$(psql -d $DB -c "SELECT id FROM roles WHERE kind = 'primary' LIMIT 1")
+ROLE=$(psql -d $DB -c "SELECT id FROM roles WHERE kind = 'primary' AND NOT placeholder LIMIT 1")
 
 echo "6) OIDC girişi: test-hr (OpenSicil-HR)"
 AUTH_URL=$(curl -s -o /dev/null -w '%{redirect_url}' "$BASE/oidc/login")

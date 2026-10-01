@@ -91,6 +91,8 @@ const PAGE_SIZE: i64 = 50;
 struct ListQuery {
     q: Option<String>,
     offset: Option<i64>,
+    /// `unassigned=1`: yalnizca rolu yer tutucu olanlar (ADR-103 madde 4)
+    unassigned: Option<String>,
 }
 
 #[derive(Template)]
@@ -109,6 +111,9 @@ struct IdentitiesTemplate {
     /// Liste bosken "AD'de sahiplenilmeyi bekleyen hesap var" yonlendirmesi
     /// (ADR-103 madde 3); dolu listede sorgu hic calismaz
     unadopted: Vec<crate::reconcile::Unadopted>,
+    /// ADR-103 madde 4: filtre acik mi ve (kapaliyken) rolu atanmamis kac kisi var
+    unassigned_only: bool,
+    role_unassigned: i64,
 }
 
 /// Personel listesi: okuma her operatorde (auditor dahil), "Yeni kimlik"
@@ -120,7 +125,19 @@ async fn list_page(
 ) -> Response {
     let query = q.q.unwrap_or_default();
     let offset = q.offset.unwrap_or(0).max(0);
-    match identity::page(&state.pool, &state.time_zone, &query, offset, PAGE_SIZE).await {
+    let unassigned_only = q.unassigned.as_deref() == Some("1");
+    let listing = identity::Listing {
+        query: &query,
+        unassigned_only,
+        offset,
+        limit: PAGE_SIZE,
+    };
+    let role_unassigned = match identity::unassigned_role_count(&state.pool).await {
+        Ok(n) => n,
+        Err(e) => return internal("rolü atanmamış sayısı okunamadı", e),
+    };
+    let listed = identity::page(&state.pool, &state.time_zone, &listing).await;
+    match listed {
         Ok((rows, total)) => {
             let shown = rows.len() as i64;
             let from = if shown == 0 { 0 } else { offset + 1 };
@@ -149,6 +166,8 @@ async fn list_page(
                 prev_offset: (offset > 0).then(|| (offset - PAGE_SIZE).max(0)),
                 next_offset: (offset + shown < total).then_some(offset + PAGE_SIZE),
                 unadopted,
+                unassigned_only,
+                role_unassigned,
                 rows,
             })
         }
@@ -167,8 +186,9 @@ async fn manage(
     if !allowed(&op, REGISTER_AUTHORITIES) {
         return forbidden(op.lang);
     }
+    use identity::ManageOutcome;
     match identity::request_management(&state.pool, id, target_id).await {
-        Ok(true) => {
+        Ok(ManageOutcome::Requested) => {
             let detail = serde_json::json!({ "target_system_id": target_id });
             audit_operator(
                 &state,
@@ -186,7 +206,9 @@ async fn manage(
             }
             Redirect::to(&format!("/identities/{id}")).into_response()
         }
-        Ok(false) => bad(op.lang.t("err.observed_account_missing")),
+        Ok(ManageOutcome::NoObservedAccount) => bad(op.lang.t("err.observed_account_missing")),
+        // ADR-103 madde 5: gerekce operatorun dilinde, baglanti gozlemde kalir
+        Ok(ManageOutcome::RoleUndefined) => bad(op.lang.t("err.role_undefined_manage")),
         Err(e) => internal("yönetime alma isteği yazılamadı", e),
     }
 }
@@ -935,6 +957,140 @@ mod tests {
             .await
             .unwrap();
         String::from_utf8(bytes.to_vec()).unwrap()
+    }
+
+    /// ADR-103 madde 4 ve 5: yer tutucu rol seed'li gelir ve tektir; rolu o olan
+    /// kisi panelde ve listede sayilir, filtreyle listelenir, yonetime alinamaz.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn the_placeholder_role_is_counted_filtered_and_blocks_take_over() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        crate::test_support::seed_two_identities(&pool).await;
+        let app = crate::web::routes()
+            .with_state(crate::web::test_state(pool.clone(), "https://localhost"));
+        let hr = operator_cookie(&pool, &["hr"]).await;
+        let lang = crate::i18n::DEFAULT;
+        let get = |path: &'static str| {
+            let (app, hr) = (app.clone(), hr.clone());
+            async move { body_string(app.oneshot(request("GET", path, "", &hr)).await.unwrap()).await }
+        };
+
+        // Seed: tek yer tutucu, birincil, yetki ogesi yok; ikincisi acilamaz
+        let (role, name, kind): (i64, String, String) =
+            sqlx::query_as("SELECT id, name, kind FROM roles WHERE placeholder")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!((name.as_str(), kind.as_str()), ("Tanımsız", "primary"));
+        let entitlements: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM role_entitlements WHERE role_id = $1")
+                .bind(role)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(entitlements, 0);
+        let second = sqlx::query(
+            "INSERT INTO roles (kind, name, placeholder) VALUES ('primary', 'İkinci', true)",
+        )
+        .execute(&pool)
+        .await;
+        assert!(second.is_err(), "ikinci yer tutucu rol açılamaz");
+
+        // Kimse yer tutucu rolde degil: ne panelde ne listede serit var
+        assert!(!get("/").await.contains("/identities?unassigned=1"));
+        assert!(!get("/identities")
+            .await
+            .contains("/identities?unassigned=1"));
+
+        // Ali Kaya yer tutucu role gecer: sayac 1, serit iki ekranda, filtre yalnizca onu listeler
+        let ali: i64 = sqlx::query_scalar(
+            "UPDATE identities SET primary_role_id = $1 WHERE surname = 'Kaya' RETURNING id",
+        )
+        .bind(role)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(identity::unassigned_role_count(&pool).await.unwrap(), 1);
+        let strip = lang.t1("dash.role_unassigned", 1);
+        for path in ["/", "/identities"] {
+            let body = get(path).await;
+            assert!(
+                body.contains(&strip) && body.contains("/identities?unassigned=1"),
+                "{path}: {body}"
+            );
+        }
+        let filtered = get("/identities?unassigned=1").await;
+        assert!(
+            filtered.contains("Ali Kaya") && !filtered.contains("Ayşe Yılmaz"),
+            "{filtered}"
+        );
+        assert!(
+            filtered.contains(lang.t("identities.unassigned_clear")),
+            "filtreyi kaldır bağlantısı"
+        );
+
+        // Kapi: gozlem modundaki hesap yonetime alinamaz, istek yazilmaz, sayfa nedenini soyler
+        let target: i64 = sqlx::query_scalar("SELECT id FROM target_systems WHERE kind = 'ad'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO account_links (identity_id, target_system_id, external_id, origin, mode) \
+             VALUES ($1, $2, 'guid-ali', 'adopted', 'observed')",
+        )
+        .bind(ali)
+        .bind(target)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let manage = format!("/identities/{ali}/accounts/{target}/manage");
+        let r = app
+            .clone()
+            .oneshot(request("POST", &manage, "", &hr))
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::BAD_REQUEST);
+        assert!(body_string(r)
+            .await
+            .contains(lang.t("err.role_undefined_manage")));
+        let requested: Option<bool> = sqlx::query_scalar(
+            "SELECT manage_requested_at IS NOT NULL FROM account_links WHERE identity_id = $1",
+        )
+        .bind(ali)
+        .fetch_optional(&pool)
+        .await
+        .unwrap();
+        assert_eq!(requested, Some(false), "istek yazılmadı, bağlantı gözlemde");
+        let person = body_string(
+            app.clone()
+                .oneshot(request("GET", &format!("/identities/{ali}"), "", &hr))
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert!(person.contains(lang.t("person.role_undefined")), "{person}");
+        assert!(!person.contains(&manage), "düğme yerine neden yazılır");
+
+        // Rol atanınca kapı açılır
+        sqlx::query(
+            "UPDATE identities SET primary_role_id = (SELECT id FROM roles WHERE kind = 'primary' \
+             AND NOT placeholder LIMIT 1) WHERE id = $1",
+        )
+        .bind(ali)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let r = app
+            .clone()
+            .oneshot(request("POST", &manage, "", &hr))
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::SEE_OTHER);
+        assert_eq!(identity::unassigned_role_count(&pool).await.unwrap(), 0);
+
+        drop(app);
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
     }
 
     #[tokio::test]

@@ -895,7 +895,8 @@ mod tests {
             .await,
             Err(SaveError::Db(_))
         ));
-        assert_eq!(list_roles(&pool).await.unwrap().len(), 3);
+        // Uc tanimli rol + migration'in seed'ledigi yer tutucu `Tanimsiz` (ADR-103)
+        assert_eq!(list_roles(&pool).await.unwrap().len(), 4);
 
         // Departman agaci: dongu ve derinlik.
         let root = create_department(&pool, "Ankara", "ANK", None)

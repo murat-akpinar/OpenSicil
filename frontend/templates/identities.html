@@ -18,6 +18,15 @@
   </div>
 </div>
 
+{# ADR-103 madde 4: rolu atanmamis kisiler; filtre acikken kaldirma baglantisi #}
+{% if unassigned_only %}
+<p class="alert alert-info">{{ lang.t1("identities.unassigned_filter", total) }}
+  <a class="link" href="/identities">{{ lang.t("identities.unassigned_clear") }}</a></p>
+{% else if role_unassigned > 0 %}
+<p class="alert alert-info">{{ lang.t1("dash.role_unassigned", role_unassigned) }}
+  <a class="link" href="/identities?unassigned=1">{{ lang.t("dash.role_unassigned_cta") }}</a></p>
+{% endif %}
+
 {% if rows.is_empty() %}
 <div class="empty">
   <span class="ico-tile ico-tile-lg"><i class="ico ico-users" aria-hidden="true"></i></span>
@@ -69,6 +78,7 @@
   <p class="meta">{{ range }}</p>
   <form method="get" action="/identities" class="flex items-center gap-2">
     <input type="hidden" name="q" value="{{ q }}">
+    {% if unassigned_only %}<input type="hidden" name="unassigned" value="1">{% endif %}
     {% match prev_offset %}{% when Some with (o) %}
     <button class="btn btn-sm" type="submit" name="offset" value="{{ o }}">{{ lang.t("identities.prev") }}</button>
     {% when None %}{% endmatch %}

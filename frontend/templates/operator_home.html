@@ -62,6 +62,11 @@
   {% if dash.totals.pending_approvals > 0 %}
   <p class="alert alert-info">{{ lang.t1("dash.pending_approvals", dash.totals.pending_approvals) }}</p>
   {% endif %}
+  {# ADR-103 madde 4: rolu atanmamis (yer tutucu rol) kisiler operatorun is listesidir #}
+  {% if dash.totals.role_unassigned > 0 %}
+  <p class="alert alert-info">{{ lang.t1("dash.role_unassigned", dash.totals.role_unassigned) }}
+    <a class="link" href="/identities?unassigned=1">{{ lang.t("dash.role_unassigned_cta") }}</a></p>
+  {% endif %}
   {# ADR-103 madde 3: sahiplenmeyi bekleyen AD hesaplari. Sayi sifirsa serit yok #}
   {% for u in dash.unadopted %}
   <p class="alert alert-info">{{ u.target_name }}: {{ lang.t1("adopt.pending", u.count) }}

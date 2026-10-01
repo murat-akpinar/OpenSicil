@@ -513,36 +513,97 @@ pub async fn search(
     with_state(pool, time_zone, rows).await
 }
 
+/// Personel listesinin sorgusu: arama, "rolu atanmamis" filtresi ve sayfa.
+pub struct Listing<'a> {
+    pub query: &'a str,
+    /// ADR-103 madde 4: yalnizca yer tutucu (`Tanimsiz`) rolu tasiyanlar
+    pub unassigned_only: bool,
+    pub offset: i64,
+    pub limit: i64,
+}
+
+/// Yer tutucu rol filtresi; `listed_select!`in JOIN'lerinden sonra gelir.
+macro_rules! listed_join_placeholder {
+    () => {
+        "JOIN roles r ON r.id = i.primary_role_id AND r.placeholder "
+    };
+}
+
+macro_rules! listed_order_page {
+    () => {
+        " ORDER BY i.surname, i.given_name, i.id LIMIT $2 OFFSET $3"
+    };
+}
+
 /// Personel sayfasinin bir sayfasi (`/identities`): toplam sayi + satirlar.
 /// Ust bardaki arama kutusu en fazla `RECENT_LIMIT` satir dondururken burada
 /// liste sayfalanir — 20.000 kimlikte (N-03) tek sayfada basmak olmazdi.
+/// Iki filtre hali derleme aninda iki sabit; calisma aninda birlestirme yok.
 pub async fn page(
     pool: &PgPool,
     time_zone: &str,
-    query: &str,
-    offset: i64,
-    limit: i64,
+    listing: &Listing<'_>,
 ) -> Result<(Vec<Listed>, i64), sqlx::Error> {
-    let pattern = like_contains(query);
-    let total: i64 = sqlx::query_scalar(concat!(
-        "SELECT count(*) FROM identities i WHERE ",
-        listed_where_match!()
-    ))
-    .bind(&pattern)
-    .fetch_one(pool)
-    .await?;
-    let rows: Vec<ListedRow> = sqlx::query_as(concat!(
-        listed_select!(),
-        "WHERE ",
-        listed_where_match!(),
-        " ORDER BY i.surname, i.given_name, i.id LIMIT $2 OFFSET $3"
-    ))
-    .bind(&pattern)
-    .bind(limit)
-    .bind(offset)
-    .fetch_all(pool)
-    .await?;
+    let pattern = like_contains(listing.query);
+    let (count_sql, rows_sql) = match listing.unassigned_only {
+        false => (
+            concat!(
+                "SELECT count(*) FROM identities i WHERE ",
+                listed_where_match!()
+            ),
+            concat!(
+                listed_select!(),
+                "WHERE ",
+                listed_where_match!(),
+                listed_order_page!()
+            ),
+        ),
+        true => (
+            concat!(
+                "SELECT count(*) FROM identities i ",
+                listed_join_placeholder!(),
+                "WHERE ",
+                listed_where_match!()
+            ),
+            concat!(
+                listed_select!(),
+                listed_join_placeholder!(),
+                "WHERE ",
+                listed_where_match!(),
+                listed_order_page!()
+            ),
+        ),
+    };
+    let total: i64 = sqlx::query_scalar(count_sql)
+        .bind(&pattern)
+        .fetch_one(pool)
+        .await?;
+    let rows: Vec<ListedRow> = sqlx::query_as(rows_sql)
+        .bind(&pattern)
+        .bind(listing.limit)
+        .bind(listing.offset)
+        .fetch_all(pool)
+        .await?;
     Ok((with_state(pool, time_zone, rows).await?, total))
+}
+
+/// ADR-103 madde 4: rolu yer tutucu (`Tanimsiz`) olan silinmemis kimlikler —
+/// operatorun yapacak isi. Panel seridi ve personel listesi ayni sayiyi buradan okur.
+pub async fn unassigned_role_count(pool: &PgPool) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM identities i JOIN roles r ON r.id = i.primary_role_id \
+         WHERE r.placeholder AND i.deleted_at IS NULL",
+    )
+    .fetch_one(pool)
+    .await
+}
+
+/// Yer tutucu rolun id'si: toplu sahiplenme formunun varsayilani. Migration
+/// seed'ler; tek satirdir (kismi tekil indeks).
+pub async fn placeholder_role_id(pool: &PgPool) -> Result<Option<i64>, sqlx::Error> {
+    sqlx::query_scalar("SELECT id FROM roles WHERE placeholder")
+        .fetch_optional(pool)
+        .await
 }
 
 /// `%ara%` kalibi; kullanicinin yazdigi `%` ve `_` joker degil harf sayilir.
@@ -562,6 +623,8 @@ pub struct Person {
     pub national_id_masked: String,
     pub department: String,
     pub role: String,
+    /// ADR-103: rol yer tutucu (`Tanimsiz`) — ekran rozet basar, yonetime alma kapali
+    pub role_placeholder: bool,
     pub manager: String,
     pub employment_type: String,
     pub start_date: String,
@@ -1081,8 +1144,8 @@ pub async fn remove_role(pool: &PgPool, id: i64, role_id: i64) -> Result<bool, s
     Ok(done.rows_affected() == 1)
 }
 
+// sqlx tuple'lari en fazla 16 kolon tasir: ad ve soyad SQL'de birlestirilir.
 type PersonRow = (
-    String,
     String,
     Option<String>,
     Option<String>,
@@ -1098,6 +1161,7 @@ type PersonRow = (
     Option<String>,
     Option<String>,
     bool,
+    bool,
 );
 
 async fn load_person(
@@ -1108,11 +1172,11 @@ async fn load_person(
     lang: Lang,
 ) -> Result<Person, sqlx::Error> {
     let r: PersonRow = sqlx::query_as(
-        "SELECT i.given_name, i.surname, i.employee_number, i.mobile_phone, i.national_id_enc, \
-         d.name, r.name, m.given_name || ' ' || m.surname, i.employment_type, \
-         to_char(i.start_date, 'YYYY-MM-DD'), \
+        "SELECT i.given_name || ' ' || i.surname, i.employee_number, i.mobile_phone, \
+         i.national_id_enc, d.name, r.name, m.given_name || ' ' || m.surname, \
+         i.employment_type, to_char(i.start_date, 'YYYY-MM-DD'), \
          to_char(i.end_at AT TIME ZONE $2, 'YYYY-MM-DD HH24:MI'), i.username, i.email, i.upn, \
-         i.requested_username, i.name_conflict_override \
+         i.requested_username, i.name_conflict_override, r.placeholder \
          FROM identities i JOIN departments d ON d.id = i.department_id \
          JOIN roles r ON r.id = i.primary_role_id \
          LEFT JOIN identities m ON m.id = i.manager_id WHERE i.id = $1",
@@ -1123,25 +1187,26 @@ async fn load_person(
     .await?;
     Ok(Person {
         id,
-        name: format!("{} {}", r.0, r.1),
-        employee_number: r.2.unwrap_or_default(),
-        mobile_phone: r.3.unwrap_or_default(),
+        name: r.0,
+        employee_number: r.1.unwrap_or_default(),
+        mobile_phone: r.2.unwrap_or_default(),
         national_id_masked: r
-            .4
+            .3
             .as_deref()
             .map(|enc| masked(aead_key, enc, lang))
             .unwrap_or_default(),
-        department: r.5,
-        role: r.6,
-        manager: r.7.unwrap_or_default(),
-        employment_type: r.8,
-        start_date: r.9,
-        end_at: r.10.unwrap_or_default(),
-        username: r.11.unwrap_or_default(),
-        email: r.12.unwrap_or_default(),
-        upn: r.13.unwrap_or_default(),
-        requested_username: r.14.unwrap_or_default(),
-        name_conflict_override: r.15,
+        department: r.4,
+        role: r.5,
+        manager: r.6.unwrap_or_default(),
+        employment_type: r.7,
+        start_date: r.8,
+        end_at: r.9.unwrap_or_default(),
+        username: r.10.unwrap_or_default(),
+        email: r.11.unwrap_or_default(),
+        upn: r.12.unwrap_or_default(),
+        requested_username: r.13.unwrap_or_default(),
+        name_conflict_override: r.14,
+        role_placeholder: r.15,
     })
 }
 
@@ -1217,13 +1282,34 @@ async fn load_accounts(
 
 const OBSERVED_MODE: &str = "observed";
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum ManageOutcome {
+    Requested,
+    /// Gozlem modunda baglanti yok (yonetiliyor ya da silinmis)
+    NoObservedAccount,
+    /// ADR-103 madde 5: rolu yer tutucu olan kimlik yonetime alinamaz — motor
+    /// rolde karsiligi olmayan uyelikleri fazlalik sayip sokerdi
+    RoleUndefined,
+}
+
 // ADR-018/087: operator farki gorup onaylar; backend yalnizca istegi yazar, modu
-// worker cevirir. Yonetilen ya da silinmis baglantida islem yok (false).
+// worker cevirir. Ayrilis yolu (`request_management_observed`) bu kapidan gecmez:
+// orada uyeliklerin sokulmesi zaten istenen sonuctur.
 pub async fn request_management(
     pool: &PgPool,
     id: i64,
     target_system_id: i64,
-) -> Result<bool, sqlx::Error> {
+) -> Result<ManageOutcome, sqlx::Error> {
+    let undefined: Option<bool> = sqlx::query_scalar(
+        "SELECT r.placeholder FROM identities i JOIN roles r ON r.id = i.primary_role_id \
+         WHERE i.id = $1",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?;
+    if undefined == Some(true) {
+        return Ok(ManageOutcome::RoleUndefined);
+    }
     let done = sqlx::query(
         "UPDATE account_links SET manage_requested_at = now() \
          WHERE identity_id = $1 AND target_system_id = $2 AND mode = $3 \
@@ -1234,7 +1320,10 @@ pub async fn request_management(
     .bind(OBSERVED_MODE)
     .execute(pool)
     .await?;
-    Ok(done.rows_affected() == 1)
+    Ok(match done.rows_affected() == 1 {
+        true => ManageOutcome::Requested,
+        false => ManageOutcome::NoObservedAccount,
+    })
 }
 
 // ADR-018: gozlem modundaki kimlige ayrilis kaydedilirse ayni islem yonetime almayi
@@ -1542,9 +1631,24 @@ mod tests {
         let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
         crate::test_support::seed_two_identities(&pool).await;
         let tz = "Europe/Istanbul";
+        async fn listed(
+            pool: &PgPool,
+            tz: &str,
+            q: &str,
+            offset: i64,
+            limit: i64,
+        ) -> (Vec<Listed>, i64) {
+            let listing = Listing {
+                query: q,
+                unassigned_only: false,
+                offset,
+                limit,
+            };
+            page(pool, tz, &listing).await.unwrap()
+        }
 
         // Ilk sayfa: iki kisi, departman adi dolu, toplam dogru
-        let (rows, total) = page(&pool, tz, "", 0, 50).await.unwrap();
+        let (rows, total) = listed(&pool, tz, "", 0, 50).await;
         assert_eq!(total, 2);
         assert_eq!(rows.len(), 2);
         // Siralama soyada gore: Kaya, Yilmaz
@@ -1554,18 +1658,18 @@ mod tests {
         assert_eq!(rows[0].state, "active");
 
         // Sayfa boyu: ikinci sayfa bir satir, toplam degismez
-        let (first, total) = page(&pool, tz, "", 0, 1).await.unwrap();
+        let (first, total) = listed(&pool, tz, "", 0, 1).await;
         assert_eq!((first.len(), total), (1, 2));
-        let (second, _) = page(&pool, tz, "", 1, 1).await.unwrap();
+        let (second, _) = listed(&pool, tz, "", 1, 1).await;
         assert_eq!(second[0].name, "Ayşe Yılmaz");
 
         // Arama hem satirlari hem toplami daraltir
-        let (hit, total) = page(&pool, tz, "yılmaz", 0, 50).await.unwrap();
+        let (hit, total) = listed(&pool, tz, "yılmaz", 0, 50).await;
         assert_eq!((hit.len(), total), (1, 1));
         assert_eq!(hit[0].name, "Ayşe Yılmaz");
 
         // Joker karakter harf sayilir: `%` kimseyi getirmez
-        let (none, total) = page(&pool, tz, "%", 0, 50).await.unwrap();
+        let (none, total) = listed(&pool, tz, "%", 0, 50).await;
         assert!(none.is_empty());
         assert_eq!(total, 0);
 

@@ -17,7 +17,7 @@
     <div><dt>{{ lang.t("field.employee_number") }}</dt><dd>{{ page.person.employee_number }}</dd></div>
     <div><dt>{{ lang.t("field.national_id") }}</dt><dd>{{ page.person.national_id_masked }}</dd></div>
     <div><dt>{{ lang.t("field.department") }}</dt><dd>{{ page.person.department }}</dd></div>
-    <div><dt>{{ lang.t("field.primary_role") }}</dt><dd>{{ page.person.role }}</dd></div>
+    <div><dt>{{ lang.t("field.primary_role") }}</dt><dd>{{ page.person.role }}{% if page.person.role_placeholder %} <span class="badge badge-warn">{{ lang.t("person.role_unassigned") }}</span>{% endif %}</dd></div>
     <div><dt>{{ lang.t("field.manager") }}</dt><dd>{{ page.person.manager }}{% if page.lifecycle.manager_departed %} <span class="warn">{% if page.lifecycle.handover_name.is_empty() %}{{ lang.t("person.manager_no_effective") }}{% else %}{{ lang.t1("person.manager_handover", page.lifecycle.handover_name) }}{% endif %}</span>{% endif %}</dd></div>
     <div><dt>{{ lang.t("field.employment_type") }}</dt><dd>{{ lang.key("employment", page.person.employment_type) }}</dd></div>
     <div><dt>{{ lang.t("person.start") }}</dt><dd>{{ page.person.start_date }}</dd></div>
@@ -156,6 +156,8 @@
         {# ADR-018/087: gozlem modunda fark yukaridadir; onay yonetime alir #}
         {% if a.observed %}
           {% if a.manage_requested %}<span class="warn">{{ lang.t("person.manage_requested") }}</span>
+          {# ADR-103 madde 5: rolu yer tutucu olan kisi yonetime alinmaz; dugme yerine neden #}
+          {% else if page.person.role_placeholder %}<span class="warn">{{ lang.t("person.role_undefined") }}</span>
           {% else if can_edit_names %}
           <form method="post" action="/identities/{{ page.person.id }}/accounts/{{ a.target_id }}/manage">
             <button class="btn btn-sm" type="submit" title="{{ lang.t("person.take_over_title") }}">{{ lang.t("person.take_over") }}</button>

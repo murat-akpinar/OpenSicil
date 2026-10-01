@@ -166,6 +166,8 @@ struct ReconcileTemplate {
     candidates: Vec<crate::bulk_adopt::Candidate>,
     departments: Vec<crate::identity::Choice>,
     roles: Vec<crate::identity::Choice>,
+    /// Formun varsayilan rolu: yer tutucu `Tanimsiz` (ADR-103 madde 4); yoksa bos
+    default_role: String,
     today: String,
 }
 
@@ -180,9 +182,10 @@ async fn render_page(
         crate::bulk_adopt::candidates(&state.pool, target),
         crate::identity::form_options(&state.pool),
         crate::identity::today(&state.pool, &state.time_zone),
+        crate::identity::placeholder_role_id(&state.pool),
     );
     match loaded {
-        Ok((v, candidates, options, today)) => render(&ReconcileTemplate {
+        Ok((v, candidates, options, today, placeholder)) => render(&ReconcileTemplate {
             lang: op.lang,
             shell: Shell::of(op),
             target_id: target,
@@ -193,6 +196,7 @@ async fn render_page(
             candidates,
             departments: options.departments,
             roles: options.roles,
+            default_role: placeholder.map(|id| id.to_string()).unwrap_or_default(),
             today,
         }),
         Err(e) => internal("mutabakat bulguları okunamadı", e),
@@ -553,6 +557,15 @@ mod tests {
         assert!(
             hr.contains(r#"data-select-all="finding""#),
             "başlık kutusu yok"
+        );
+        // ADR-103 madde 4: formun varsayilan rolu yer tutucu
+        let placeholder: i64 = sqlx::query_scalar("SELECT id FROM roles WHERE placeholder")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert!(
+            hr.contains(&format!(r#"value="{placeholder}" selected"#)),
+            "varsayılan rol Tanımsız değil"
         );
         assert!(hr.contains(r#"name="finding""#), "satır kutusu yok");
         assert!(!hr.contains("onclick"), "satır içi script CSP'ye takılır");

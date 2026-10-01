@@ -107,6 +107,8 @@ pub struct Totals {
     intervention_identity: Option<i64>,
     /// Onay bekleyen rol/departman taslagi (ADR-031)
     pub pending_approvals: i64,
+    /// Rolu yer tutucu (`Tanimsiz`) olan kisi — operatorun is listesi (ADR-103 madde 4)
+    pub role_unassigned: i64,
 }
 
 impl Totals {
@@ -173,11 +175,13 @@ pub async fn load(pool: &PgPool, time_zone: &str) -> Result<Dashboard, sqlx::Err
 /// Devreye alma adimlari: dort kosul ve AD hedefinin id'si tek sorguda.
 /// "Katalog tarandi mi" kayip isaretli ogeyi saymaz — eski ortamdan kalan
 /// kayip satirlar adimi tamam gostermesin (ADR-014: katalog oge silmez).
+/// "Rol tanimli mi" seed'li yer tutucu rolu saymaz (ADR-103 madde 4).
 async fn setup(pool: &PgPool) -> Result<Setup, sqlx::Error> {
     let row: (bool, bool, bool, bool, Option<i64>) = sqlx::query_as(
         "SELECT (SELECT ad_host <> '' FROM app_settings), \
                 EXISTS (SELECT 1 FROM catalog_items WHERE missing_since IS NULL), \
-                EXISTS (SELECT 1 FROM departments) AND EXISTS (SELECT 1 FROM roles), \
+                EXISTS (SELECT 1 FROM departments) \
+                  AND EXISTS (SELECT 1 FROM roles WHERE NOT placeholder), \
                 EXISTS (SELECT 1 FROM identities WHERE deleted_at IS NULL), \
                 (SELECT id FROM target_systems WHERE kind = 'ad')",
     )
@@ -290,6 +294,8 @@ async fn totals(pool: &PgPool, time_zone: &str) -> Result<(Totals, String), sqlx
             needs_intervention: row.4,
             intervention_identity: row.5,
             pending_approvals: row.6,
+            // Personel listesiyle ayni yardimci, ayni sayi
+            role_unassigned: crate::identity::unassigned_role_count(pool).await?,
         },
         row.7,
     ))
