@@ -1,6 +1,8 @@
 tmp/
 .env
 .env.local
+# .env'in her yedegi: icinde parolalar ve AEAD/blind index anahtarlari var
+.env.yedek*
 *.log
 target/
 
