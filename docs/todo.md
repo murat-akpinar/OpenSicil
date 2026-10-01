@@ -123,7 +123,8 @@ Kurallar:
   - Not: türetme ve `manager` eşlemesi ADR-082 kutucuğuyla gelmişti; burada yöneticinin `ayrıldı`ya giriş/çıkış işi astlara iş açıyor (`enqueue_subordinates`), kişi sayfası "(ayrıldı → devir: X)" notunu, ast sayısını ve yöneticisiz kalan astlar uyarısını gösteriyor
 - [x] Süreli ek rol, tarih dolunca kendiliğinden kalkar (F-37, [ADR-020](decisions/020-sureli-ek-rol.md))
   - Not: zamanlayıcı tiki bitişi geçmiş atamayı siler, `identity.role_expired` ("süresi doldu") yazar ve her hedefe iş açar; gruplar o işte üyelik farkıyla düşer (ADR-050 yıkıcı sınıf)
-- [ ] Ayrılışta gecikmeli parola sıfırlama ([ADR-033](decisions/033-ayrilista-parola-gecikmesi.md))
+- [x] Ayrılışta gecikmeli parola sıfırlama ([ADR-033](decisions/033-ayrilista-parola-gecikmesi.md))
+  - Not: zamanlayıcı pencere dolunca (hedefin `password_reset_delay_days`; acilde hemen) iş açar, worker parolayı rastgeleleştirip `pwdLastSet = 0` yazar ve bağlantıda `password_reset_at_departure` işaretler (bir kez; öznitelik sınıfı, yıkıcı sayaca girmez); doğrulanmış iptalde yapılmaz
 - [ ] Yaklaşan bitişler listesi (F-36)
 - [ ] Faz kapanışı: güvenlik ve test
   - (1a'daki kapanış şablonunun aynısı)

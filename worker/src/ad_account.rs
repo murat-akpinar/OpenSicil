@@ -210,8 +210,27 @@ impl TargetWriter for AdWriter<'_> {
                 .success()
                 .map(|_| ())
                 .map_err(ad::classify),
+            WriteOp::ResetPassword { dn } => reset_password(self.ldap, dn).await,
         }
     }
+}
+
+// ADR-033: kimsenin bilmedigi rastgele parola + pwdLastSet 0; parola hic saklanmaz.
+async fn reset_password(ldap: &mut Ldap, dn: &str) -> Result<(), WriteError> {
+    let password = random_password();
+    let mods = vec![
+        Mod::Replace(
+            b"unicodePwd".to_vec(),
+            HashSet::from([unicode_pwd(&password)]),
+        ),
+        Mod::Replace(b"pwdLastSet".to_vec(), HashSet::from([b"0".to_vec()])),
+    ];
+    ldap.modify(dn, mods)
+        .await
+        .map_err(ad::classify)?
+        .success()
+        .map(|_| ())
+        .map_err(ad::classify)
 }
 
 /// DN'i (RDN, ust) olarak ayirir; kacisli virgul (`\,`) ayirici sayilmaz.

@@ -56,6 +56,7 @@ pub async fn tick(pool: &PgPool, time_zone: &str) -> Result<usize, String> {
     .await
     .map_err(|e| format!("bağlantılar okunamadı: {e}"))?;
     let mut opened = expire_additional_roles(&mut tx, time_zone).await?;
+    opened += open_password_reset_jobs(&mut tx).await?;
     for row in rows {
         let (identity_id, target_system_id, applied) = (row.0, row.1, row.2.as_deref());
         let state = derived_state(&row)?;
@@ -103,6 +104,32 @@ async fn expire_additional_roles(
     .execute(&mut **tx)
     .await
     .map_err(|e| format!("süresi dolan ek roller işlenemedi: {e}"))?;
+    Ok(opened.rows_affected() as usize)
+}
+
+// ADR-033: ayrilistan G gun sonra (acilde hemen) parola penceresi acilir; bu bir
+// durum gecisi degildir, applied_state esitken de is gerekir. Iptal (dogrulanmis
+// ya da henuz bakilmamis) parolaya dokunmaz; reddedilen iptal ayrilis gibidir.
+async fn open_password_reset_jobs(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+) -> Result<usize, String> {
+    let opened = sqlx::query(
+        "INSERT INTO jobs (identity_id, target_system_id, priority) \
+         SELECT l.identity_id, l.target_system_id, $1 FROM account_links l \
+         JOIN identities i ON i.id = l.identity_id \
+         JOIN target_systems t ON t.id = l.target_system_id \
+         WHERE l.mode = 'managed' AND NOT l.password_reset_at_departure \
+           AND l.deleted_by_us_at IS NULL AND i.deleted_at IS NULL \
+           AND (NOT i.cancelled OR l.verified_unused = FALSE) \
+           AND i.end_at IS NOT NULL AND i.end_at <= now() \
+           AND (i.emergency_departure \
+                OR i.end_at + make_interval(days => t.password_reset_delay_days) <= now()) \
+         ON CONFLICT (identity_id, target_system_id) WHERE status <> 'succeeded' DO NOTHING",
+    )
+    .bind(TRANSITION_PRIORITY)
+    .execute(&mut **tx)
+    .await
+    .map_err(|e| format!("parola penceresi işleri açılamadı: {e}"))?;
     Ok(opened.rows_affected() as usize)
 }
 
@@ -277,6 +304,74 @@ mod tests {
             tick(&pool, "Europe/Istanbul").await.unwrap(),
             0,
             "ikinci tik boş"
+        );
+
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
+    // ADR-033: pencere dolunca (G gun) parola isi acilir; dolmadan acilmaz; isaret
+    // yazildiktan sonra bir daha acilmaz; acil ayrilista hemen.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn tick_opens_password_reset_job_when_window_passes() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        let seed = crate::test_support::seed_example_model(&pool).await;
+        for (identity, days_ago) in [(seed.identity, 8), (seed.other_identity, 2)] {
+            sqlx::query(
+                "INSERT INTO account_links (identity_id, target_system_id, external_id, origin, mode, applied_state) \
+                 VALUES ($1, $2, $3, 'provisioned', 'managed', 'departed')",
+            )
+            .bind(identity)
+            .bind(seed.ad)
+            .bind(format!("guid-{identity}"))
+            .execute(&pool)
+            .await
+            .unwrap();
+            sqlx::query(
+                "UPDATE identities SET end_at = now() - make_interval(days => $2) WHERE id = $1",
+            )
+            .bind(identity)
+            .bind(days_ago)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        assert_eq!(
+            tick(&pool, "Europe/Istanbul").await.unwrap(),
+            1,
+            "yalnızca 8 gün önce ayrılan (G = 7)"
+        );
+        let queued: i64 = sqlx::query_scalar("SELECT identity_id FROM jobs")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(queued, seed.identity);
+        sqlx::query("UPDATE jobs SET status = 'succeeded'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "UPDATE account_links SET password_reset_at_departure = TRUE WHERE identity_id = $1",
+        )
+        .bind(seed.identity)
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            tick(&pool, "Europe/Istanbul").await.unwrap(),
+            0,
+            "işaret var, diğerinin penceresi dolmadı"
+        );
+        sqlx::query("UPDATE identities SET emergency_departure = TRUE WHERE id = $1")
+            .bind(seed.other_identity)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            tick(&pool, "Europe/Istanbul").await.unwrap(),
+            1,
+            "acil: hemen"
         );
 
         drop(pool);

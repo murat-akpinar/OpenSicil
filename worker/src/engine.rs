@@ -524,6 +524,8 @@ async fn reconcile_existing(
     let (dn, groups) = sync_groups_and_ou(c, ldap, &account).await?;
     let attrs = sync_attributes(c, ldap, &dn).await?;
     let expires = sync_account_expires(c, ldap, &dn).await?;
+    let reset = reset_password_if_due(c, ldap, &dn, link).await?;
+    let expires = format!("{expires}{reset}");
     if applied == Applied::DryRun || c.env.mode.dry_run {
         return Ok(format!(
             "kuru çalıştırma, uygulanacaktı: {note}{groups}{attrs}{expires} ({dn})"
@@ -540,6 +542,33 @@ async fn reconcile_existing(
     Ok(format!(
         "{note}{groups}{attrs}{expires}: {dn} → applied_state {state}"
     ))
+}
+
+// ADR-033: ayrilistan G gun sonra (acilde hemen) parola rastgelelestirilir, bir kez;
+// yikici sayaca girmez (hesap zaten pasif). Isaret baglantida kalir (ADR-046 ilk parola).
+async fn reset_password_if_due(
+    c: &AdJob<'_>,
+    ldap: &mut Ldap,
+    dn: &str,
+    link: &LinkRow,
+) -> Result<String, JobError> {
+    if !c.desired.password_reset_due || link.password_reset_at_departure {
+        return Ok(String::new());
+    }
+    let op = WriteOp::ResetPassword { dn: dn.to_string() };
+    if apply(c, ldap, op, OperationClass::Attribute).await? == Applied::DryRun {
+        return Ok(", parola sıfırlanır".to_string());
+    }
+    sqlx::query(
+        "UPDATE account_links SET password_reset_at_departure = TRUE \
+         WHERE identity_id = $1 AND target_system_id = $2",
+    )
+    .bind(c.job.identity_id)
+    .bind(c.job.target_system_id)
+    .execute(c.pool)
+    .await
+    .map_err(|e| JobError::Failed(format!("parola sıfırlama işareti yazılamadı: {e}")))?;
+    Ok(", parola sıfırlandı".to_string())
 }
 
 // Astlar icin ayni hedefe tek kimlik oncelikli is; acik is varsa yenisi acilmaz.
@@ -1226,6 +1255,33 @@ mod tests {
         );
         assert!(account.member_of.is_empty(), "{:?}", account.member_of);
         assert!(!account.enabled);
+        // ADR-033: G gun sonra parola rastgelelestirilir (bir kez); lab'da G = 0
+        sqlx::query("UPDATE target_systems SET password_reset_delay_days = 0 WHERE id = $1")
+            .bind(seed.ad)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let reset = run_job(&pool, &job, &env(false)).await.unwrap();
+        assert!(reset.contains("parola sıfırlandı"), "{reset}");
+        let flagged: bool = sqlx::query_scalar(
+            "SELECT password_reset_at_departure FROM account_links WHERE identity_id = $1",
+        )
+        .bind(seed.identity)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(flagged);
+        assert_eq!(
+            ad_account::find_by_guid(&mut ldap, &guid)
+                .await
+                .unwrap()
+                .unwrap()
+                .pwd_last_set
+                .as_deref(),
+            Some("0")
+        );
+        let once = run_job(&pool, &job, &env(false)).await.unwrap();
+        assert!(!once.contains("parola sıfırlandı"), "{once}");
 
         // ADR-059 madde 4: bitis kalkinca accountExpires 0 (suresiz) yazilir.
         let expires = ad_account::read_attributes(&mut ldap, &account.dn, &["accountExpires"])

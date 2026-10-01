@@ -71,6 +71,10 @@ pub enum WriteOp {
     DeleteAccount {
         dn: String,
     },
+    /// Ayrilista gecikmeli parola rastgelelestirme + pwdLastSet 0 (ADR-033); parola detaya girmez
+    ResetPassword {
+        dn: String,
+    },
 }
 
 impl WriteOp {
@@ -84,6 +88,7 @@ impl WriteOp {
             WriteOp::SetAttributes { .. } => "ad.account.attributes",
             WriteOp::MoveAccount { .. } => "ad.account.move",
             WriteOp::DeleteAccount { .. } => "ad.account.delete",
+            WriteOp::ResetPassword { .. } => "ad.account.password_reset",
         }
     }
 
@@ -103,7 +108,9 @@ impl WriteOp {
             WriteOp::SetEnabled { dn, enabled } => {
                 format!("{{\"dn\":\"{}\",\"enabled\":{enabled}}}", q(dn))
             }
-            WriteOp::DeleteAccount { dn } => format!("{{\"dn\":\"{}\"}}", q(dn)),
+            WriteOp::DeleteAccount { dn } | WriteOp::ResetPassword { dn } => {
+                format!("{{\"dn\":\"{}\"}}", q(dn))
+            }
             // Degerler yazilmaz: hassas kaynak (kimlik no) denetim kaydina girmez (docs/07)
             WriteOp::SetAttributes { dn, changes } => format!(
                 "{{\"dn\":\"{}\",\"attributes\":[{}]}}",

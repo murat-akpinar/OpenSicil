@@ -56,4 +56,5 @@
 - Ayrılış, geri alma, kayıt iptali, tarihli askı ve hesap silme (ADR-030/048/053/059/084)
 - Yönetici ayrılışında astlara iş ve etkin yönetici notu (ADR-041, F-38)
 - Süreli ek rol tarih dolunca zamanlayıcıyla kalkar (ADR-020, F-37)
+- Ayrılışta gecikmeli parola sıfırlama, zamanlayıcı penceresi (ADR-033)
 
