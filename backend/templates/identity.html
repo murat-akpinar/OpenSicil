@@ -134,7 +134,7 @@
   {% endif %}
 </div>
 <table class="w-full text-sm mb-6">
-  <thead><tr class="text-left" style="color:#a6adc8;"><th>Hedef</th><th>Hesap</th><th>Köken / mod</th><th>Uygulanan</th><th>Fark</th></tr></thead>
+  <thead><tr class="text-left" style="color:#a6adc8;"><th>Hedef</th><th>Hesap</th><th>Köken / mod</th><th>Uygulanan</th><th>Fark</th><th></th></tr></thead>
   <tbody>
   {% for a in page.accounts %}
     <tr style="border-top:1px solid #313244;">
@@ -143,6 +143,17 @@
       <td>{{ a.origin }} {{ a.mode }}</td>
       <td>{{ a.applied_state }}</td>
       <td>{{ a.diff }}</td>
+      <td>
+        {# ADR-018/087: gozlem modunda fark yukaridadir; onay yonetime alir #}
+        {% if a.observed %}
+          {% if a.manage_requested %}<span style="color:#f9e2af;">yönetime alma istendi</span>
+          {% else if can_edit_names %}
+          <form method="post" action="/identities/{{ page.person.id }}/accounts/{{ a.target_id }}/manage">
+            <button class="text-sm underline" type="submit" title="Bağlantı yönetilen moda geçer, motor yukarıdaki farkı uygular (ADR-018)">Yönetime al</button>
+          </form>
+          {% endif %}
+        {% endif %}
+      </td>
     </tr>
   {% endfor %}
   </tbody>

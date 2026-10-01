@@ -26,6 +26,7 @@ pub const IDENTITY_DEPARTURE_REVERTED: &str = "identity.departure_reverted";
 pub const IDENTITY_CANCELLED: &str = "identity.cancelled";
 pub const IDENTITY_SUSPENDED: &str = "identity.suspended";
 pub const IDENTITY_SUSPENSION_LIFTED: &str = "identity.suspension_lifted";
+pub const ACCOUNT_MANAGE_REQUESTED: &str = "account.manage_requested";
 pub const FIRST_PASSWORD_REQUESTED: &str = "first_password.requested";
 pub const FIRST_PASSWORD_SHOWN: &str = "first_password.shown";
 

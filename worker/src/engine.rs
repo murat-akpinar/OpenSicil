@@ -24,6 +24,7 @@ use crate::queue::ClaimedJob;
 use crate::username;
 use crate::writes::{self, Applied, Mode, OperationClass, WriteFailure, WriteOp, WriteRequest};
 
+#[derive(Clone)]
 pub struct EngineEnv<'a> {
     pub time_zone: &'a str,
     pub mode: Mode,
@@ -76,6 +77,9 @@ impl From<WriteFailure> for JobError {
         }
     }
 }
+
+// Kuru calistirma sonucunun oneki; gozlem farki ayni metni kendi onekiyle sunar.
+const DRY_RUN_PREFIX: &str = "kuru çalıştırma, uygulanacaktı: ";
 
 pub fn state_name(state: LifecycleState) -> &'static str {
     match state {
@@ -135,6 +139,7 @@ pub async fn run_job(
     outcome
 }
 
+#[derive(Clone, Copy)]
 struct AdJob<'a> {
     pool: &'a PgPool,
     job: &'a ClaimedJob,
@@ -154,7 +159,8 @@ async fn reconcile_ad(c: &AdJob<'_>, ldap: &mut Ldap) -> Result<String, JobError
     ) {
         return verify_cancellation(c, ldap, link).await;
     }
-    match (&c.input.link_row, c.desired.account) {
+    let link_row = resolve_link(c).await?;
+    match (&link_row, c.desired.account) {
         // ADR-018: ipucu doluysa hesap acilmaz, sahiplenilir
         (None, AccountPresence::Present { enabled }) => {
             match c.input.person.existing_ad_account_hint.as_deref() {
@@ -163,10 +169,8 @@ async fn reconcile_ad(c: &AdJob<'_>, ldap: &mut Ldap) -> Result<String, JobError
             }
         }
         (None, presence) => Ok(format!("hesap yok ve açılmayacak: {presence:?}")),
-        // ADR-018/086: gozlem modunda hicbir sey uygulanmaz (fark ve yonetime alma 3e-2)
-        (Some(link), _) if link.observed => {
-            Ok("gözlem modunda: hiçbir şey uygulanmadı (ADR-018)".to_string())
-        }
+        // ADR-018: gozlem modunda motor farki hesaplar, hicbir sey uygulamaz
+        (Some(link), _) if link.observed => observe(c, ldap, link).await,
         (Some(link), AccountPresence::Present { enabled }) => {
             let result = reconcile_existing(c, ldap, link, enabled).await?;
             // ADR-040: ayar yalnizca hesap yokken okunur; bagli hesap yonetilmeye devam
@@ -186,6 +190,25 @@ async fn reconcile_ad(c: &AdJob<'_>, ldap: &mut Ldap) -> Result<String, JobError
             Ok("'hesap açılsın = hayır' yalnızca hesap yokken okunur (ADR-040)".to_string())
         }
     }
+}
+
+// ADR-087: yonetime alma istendiyse gozlem bayragi bu isin basinda duser ve fark
+// ayni iste uygulanir; kuru calistirmada istek bekler (ADR-054).
+async fn resolve_link(c: &AdJob<'_>) -> Result<Option<LinkRow>, JobError> {
+    let Some(link) = &c.input.link_row else {
+        return Ok(None);
+    };
+    if !link.manage_requested || c.env.mode.dry_run {
+        return Ok(Some(link.clone()));
+    }
+    let taken = adoption::take_over(c.pool, c.job.identity_id, c.job.target_system_id)
+        .await
+        .map_err(JobError::Failed)?;
+    Ok(Some(LinkRow {
+        observed: link.observed && !taken,
+        manage_requested: !taken,
+        ..link.clone()
+    }))
 }
 
 async fn apply(
@@ -514,12 +537,35 @@ async fn adopt(c: &AdJob<'_>, ldap: &mut Ldap, hint: &str) -> Result<String, Job
     )
     .await
     .map_err(JobError::Failed)?;
+    adopted_result(c, ldap, &cand, mismatch).await
+}
+
+// Fark ayni iste hesaplanir: zamanlayici gozlem baglantisina is acmaz, yoksa operator
+// yonetime almaya karar verecegi farki hic gormezdi (ADR-018/087).
+async fn adopted_result(
+    c: &AdJob<'_>,
+    ldap: &mut Ldap,
+    cand: &adoption::Candidate,
+    mismatch: bool,
+) -> Result<String, JobError> {
     let warning = if mismatch {
         "; uyarı: hedefteki ad-soyad kimlikle uyuşmuyor (ADR-042)"
     } else {
         ""
     };
-    Ok(format!("sahiplenildi (gözlem modu): {}{warning}", cand.dn))
+    let link = LinkRow {
+        external_id: cand.guid.clone(),
+        applied_state: None,
+        password_reset_at_departure: false,
+        first_password_pwd_last_set: None,
+        observed: true,
+        manage_requested: false,
+    };
+    let diff = observe(c, ldap, &link).await?;
+    Ok(format!(
+        "sahiplenildi (gözlem modu): {}{warning}; {diff}",
+        cand.dn
+    ))
 }
 
 // ADR-018 kosullari 2–5 sirayla; ilk ihlalin nedeni doner.
@@ -552,6 +598,33 @@ async fn adoption_violation(
     );
     Ok((!employee_ok).then(|| "sicil no hedefteki değerle uyuşmuyor".to_string()))
 }
+
+// ADR-018: gozlem modunda motor "yonetime alinirsa ne degisir" farkini hesaplar ve
+// is sonucuna yazar (kisi sayfasi gosterir); hedefe ve denetim kaydina dokunmaz —
+// yazma noktasi kuru calistirma gibi gecer, sayaclar degismez (ADR-054 ile ayni yol).
+async fn observe(c: &AdJob<'_>, ldap: &mut Ldap, link: &LinkRow) -> Result<String, JobError> {
+    let pending = if link.manage_requested {
+        " (yönetime alma istendi: kuru çalıştırma kapanınca uygulanır, ADR-054)"
+    } else {
+        ""
+    };
+    let AccountPresence::Present { enabled } = c.desired.account else {
+        return Ok(format!(
+            "gözlem modunda, uygulanmadı: hesabın kalmaması gereken durum (silme/saklama) \
+             yönetime alınmadan uygulanmaz{pending}"
+        ));
+    };
+    let env = EngineEnv {
+        mode: Mode { dry_run: true },
+        ..c.env.clone()
+    };
+    let observed = AdJob { env: &env, ..*c };
+    let diff = reconcile_existing(&observed, ldap, link, enabled).await?;
+    let diff = diff.strip_prefix(DRY_RUN_PREFIX).unwrap_or(&diff);
+    Ok(format!(
+        "gözlem modunda, yönetime alınırsa: {diff}{pending}"
+    ))
+}
 // --- END FEATURE: adoption ---
 
 async fn insert_link(c: &AdJob<'_>, guid: &str) -> Result<LinkRow, JobError> {
@@ -571,6 +644,7 @@ async fn insert_link(c: &AdJob<'_>, guid: &str) -> Result<LinkRow, JobError> {
         password_reset_at_departure: false,
         first_password_pwd_last_set: None,
         observed: false,
+        manage_requested: false,
     })
 }
 
@@ -636,7 +710,7 @@ async fn reconcile_existing(
     let expires = format!("{expires}{reset}{first}");
     if applied == Applied::DryRun || c.env.mode.dry_run {
         return Ok(format!(
-            "kuru çalıştırma, uygulanacaktı: {note}{groups}{attrs}{expires} ({dn})"
+            "{DRY_RUN_PREFIX}{note}{groups}{attrs}{expires} ({dn})"
         ));
     }
     if transition {
@@ -717,7 +791,13 @@ async fn issue_first_password(
         change_required: c.env.first_login_change_required,
     };
     if apply(c, ldap, op, OperationClass::FirstPassword).await? == Applied::DryRun {
-        return reject(first_password::REJECT_DRY_RUN).await;
+        // Gozlem modu yazma noktasini kuru gecer; red nedeni operatorun gordugu sebeptir
+        return reject(if link.observed {
+            first_password::REJECT_OBSERVED
+        } else {
+            first_password::REJECT_DRY_RUN
+        })
+        .await;
     }
     let stamp = match c.env.first_login_change_required {
         true => None,
@@ -1067,8 +1147,11 @@ async fn move_if_needed(
         new_rdn: new_rdn.clone(),
         new_parent: target_ou.clone(),
     };
-    apply(c, ldap, op, OperationClass::Attribute).await?;
-    Ok((format!("{new_rdn},{target_ou}"), true))
+    // Kuru calistirma ve gozlem: hesap tasinmadi, sonraki okumalar eski DN'de olmali
+    Ok(match apply(c, ldap, op, OperationClass::Attribute).await? {
+        Applied::DryRun => (account.dn.clone(), true),
+        Applied::Applied => (format!("{new_rdn},{target_ou}"), true),
+    })
 }
 
 fn passive_ou() -> Option<String> {
@@ -1293,6 +1376,8 @@ mod tests {
             "{adopted}"
         );
         assert!(adopted.contains("ad-soyad kimlikle uyuşmuyor"), "{adopted}");
+        // fark sahiplenme isinde hesaplanir: operator yonetime almadan once gorur
+        assert!(adopted.contains("yönetime alınırsa"), "{adopted}");
         let (origin, mode, mismatch, external_id): (String, String, bool, String) = sqlx::query_as(
             "SELECT origin, mode, name_mismatch, external_id FROM account_links WHERE identity_id = $1",
         )
@@ -1349,12 +1434,135 @@ mod tests {
         let r = intervention(run_job(&pool, &other, &env(true, false)).await);
         assert!(r.contains("kimliğine bağlı"), "{r}");
 
+        // --- fark gorunumu ve yonetime alma (3e-2, ADR-018/087) ---
+        // Kurumun kendi actigi, OpenSicil'in bilmedigi bir hesap sahiplenilir:
+        // gozlem isi farki yazar ama hedefe dokunmaz; onay gelince ayni fark uygulanir.
+        let own_dn = format!("CN=Devralinacak Hesap,OU=Personel,{base}");
+        let _ = ldap.delete(&own_dn).await; // onceki yarim kalan kosu
+        let attrs: Vec<(Vec<u8>, std::collections::HashSet<Vec<u8>>)> = vec![
+            (
+                b"objectClass".to_vec(),
+                std::collections::HashSet::from([b"user".to_vec()]),
+            ),
+            (
+                b"sAMAccountName".to_vec(),
+                std::collections::HashSet::from([b"devralinacak".to_vec()]),
+            ),
+            (
+                b"givenName".to_vec(),
+                std::collections::HashSet::from(["Ali".as_bytes().to_vec()]),
+            ),
+            (
+                b"sn".to_vec(),
+                std::collections::HashSet::from(["Kaya".as_bytes().to_vec()]),
+            ),
+            (
+                b"userAccountControl".to_vec(),
+                std::collections::HashSet::from([b"512".to_vec()]),
+            ),
+            (
+                b"unicodePwd".to_vec(),
+                // kimsenin bilmesi gerekmeyen parola: sahiplenme bu hesapla bind etmez
+                std::collections::HashSet::from([ad_account::unicode_pwd(
+                    &ad_account::random_password(),
+                )]),
+            ),
+        ];
+        ldap.add(&own_dn, attrs)
+            .await
+            .unwrap()
+            .success()
+            .expect("lab hesabı açılamadı");
+        set_hint("devralinacak", seed.other_identity).await;
+        let adopted = run_job(&pool, &other, &env(true, false)).await.unwrap();
+        assert!(
+            adopted.starts_with("sahiplenildi (gözlem modu)"),
+            "{adopted}"
+        );
+
+        let diff = run_job(&pool, &other, &env(true, false)).await.unwrap();
+        assert!(
+            diff.starts_with("gözlem modunda, yönetime alınırsa:"),
+            "{diff}"
+        );
+        assert!(diff.contains("1 grup eklendi"), "{diff}");
+        assert!(diff.contains("OU taşındı"), "{diff}");
+        let observed_intents: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM audit_log WHERE identity_id = $1 AND operation_class IS NOT NULL",
+        )
+        .bind(seed.other_identity)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(observed_intents, 0, "gözlem farkı hedefe yazmaz");
+        let still_there = ad_account::read_attributes(&mut ldap, &own_dn, &["memberOf"])
+            .await
+            .unwrap();
+        assert!(
+            !still_there.contains_key("memberOf"),
+            "gözlemde gruba eklenmez"
+        );
+
+        // operatorun onayi (backend yalnizca bu kolonu yazar, ADR-087)
+        sqlx::query("UPDATE account_links SET manage_requested_at = now() WHERE identity_id = $1")
+            .bind(seed.other_identity)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let applied = run_job(&pool, &other, &env(true, false)).await.unwrap();
+        assert!(applied.contains("applied_state active"), "{applied}");
+        let (mode, state): (String, Option<String>) =
+            sqlx::query_as("SELECT mode, applied_state FROM account_links WHERE identity_id = $1")
+                .bind(seed.other_identity)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            (mode.as_str(), state.as_deref()),
+            ("managed", Some("active"))
+        );
+        let managed_events: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM audit_log WHERE event_type = $1")
+                .bind(adoption::MANAGED_EVENT)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(managed_events, 1);
+        let moved_dn =
+            ad_account::dn_by_guid(&mut ldap, &external_id_of(&pool, seed.other_identity).await)
+                .await
+                .unwrap()
+                .expect("hesap hedefte");
+        assert!(
+            moved_dn.contains("OU=SistemUzmanlari"),
+            "OU taşınmış olmalı: {moved_dn}"
+        );
+        let after =
+            ad_account::read_attributes(&mut ldap, &moved_dn, &["memberOf", "sAMAccountName"])
+                .await
+                .unwrap();
+        assert!(
+            after["memberOf"].iter().any(|g| g.contains("GG-VPN")),
+            "{after:?}"
+        );
+        // ADR-034: yonetime alma mevcut hesabin kullanici adini degistirmez
+        assert_eq!(after["sAMAccountName"], vec!["devralinacak".to_string()]);
+        ldap.delete(&moved_dn).await.unwrap().success().unwrap();
+
         set_attr(&mut ldap, &existing.dn, "employeeID", None)
             .await
             .unwrap();
         ldap.unbind().await.unwrap();
         drop(pool);
         test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
+    async fn external_id_of(pool: &sqlx::PgPool, identity: i64) -> String {
+        sqlx::query_scalar("SELECT external_id FROM account_links WHERE identity_id = $1")
+            .bind(identity)
+            .fetch_one(pool)
+            .await
+            .unwrap()
     }
 
     // ADR-019/046/085: kuru modda red; acik modda pwdLastSet 0; kapali modda damga

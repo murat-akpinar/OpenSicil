@@ -61,6 +61,8 @@ pub struct LinkRow {
     pub first_password_pwd_last_set: Option<String>,
     /// ADR-018: gozlem modu — motor fark hesaplar ama uygulamaz
     pub observed: bool,
+    /// ADR-087: operator yonetime almayi onayladi; worker modu cevirir
+    pub manage_requested: bool,
 }
 
 const MAX_DEPARTMENT_DEPTH: i32 = 8;
@@ -437,6 +439,7 @@ type LinkQueryRow = (
     bool,
     Option<String>,
     String,
+    bool,
 );
 
 async fn load_link(
@@ -446,7 +449,8 @@ async fn load_link(
 ) -> Result<(Option<AccountLink>, Option<LinkRow>), String> {
     let row: Option<LinkQueryRow> = sqlx::query_as(
         "SELECT origin, verified_unused, deletion_approved, external_id, applied_state, \
-         password_reset_at_departure, first_password_pwd_last_set, mode \
+         password_reset_at_departure, first_password_pwd_last_set, mode, \
+         manage_requested_at IS NOT NULL \
          FROM account_links WHERE identity_id = $1 AND target_system_id = $2",
     )
     .bind(identity_id)
@@ -463,6 +467,7 @@ async fn load_link(
         reset,
         pwd,
         mode,
+        manage_requested,
     )) = row
     else {
         return Ok((None, None));
@@ -473,6 +478,7 @@ async fn load_link(
         password_reset_at_departure: reset,
         first_password_pwd_last_set: pwd,
         observed: mode == "observed",
+        manage_requested,
     };
     Ok((
         Some(AccountLink {

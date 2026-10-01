@@ -73,7 +73,8 @@ pub async fn run() -> ExitCode {
 // - catalog_items: yalnizca worker yazar, silmez (kayip isaretler); target_systems
 //   satirlari sabit, varsayilanlarini backend gunceller; yetki ogesi ve tek
 //   degerli ayar tablolari backend'in (ADR-015, docs/03)
-// - account_links: yalnizca worker (ADR-015); jobs: backend ve worker'in
+// - account_links: yalnizca worker (ADR-015); backend tek bir kolona yazar:
+//   yonetime alma istegi (ADR-018/087, modu yine worker cevirir); jobs: backend ve worker'in
 //   zamanlayicisi (ADR-028, ADR-079) acar, backend "tekrar dene" ister,
 //   durum/kira/sonuc yalnizca worker (ADR-052, ADR-062)
 // - used_names: worker yakar (silmede), backend serbest birakir (ADR-035)
@@ -109,6 +110,7 @@ GRANT SELECT ON role_entitlements, department_entitlements, role_target_settings
 department_target_settings TO {worker};
 GRANT SELECT ON account_links, jobs TO {backend}, {worker};
 GRANT INSERT, UPDATE, DELETE ON account_links TO {worker};
+GRANT UPDATE (manage_requested_at) ON account_links TO {backend};
 GRANT INSERT (identity_id, target_system_id, priority), UPDATE (priority, retry_requested) \
 ON jobs TO {backend};
 GRANT INSERT (identity_id, target_system_id, priority), UPDATE (status, attempts, \
@@ -491,6 +493,21 @@ mod tests {
             "backend uygulanan durumu değiştirememeli",
         )
         .await;
+        // ADR-087: backend yalnizca yonetime alma istegini yazar, modu cevirmek worker'in
+        assert_rejected(
+            backend_pool,
+            "UPDATE account_links SET mode = 'managed' WHERE identity_id = $1",
+            &[identity_id],
+            "backend gözlem modunu kendisi çevirememeli",
+        )
+        .await;
+        bind_all(
+            "UPDATE account_links SET manage_requested_at = now() WHERE identity_id = $1",
+            &[identity_id],
+        )
+        .execute(backend_pool)
+        .await
+        .expect("backend yönetime alma isteğini yazabilmeli");
     }
 
     struct Seed {

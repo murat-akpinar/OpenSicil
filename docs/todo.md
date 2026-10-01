@@ -147,9 +147,10 @@ Kurallar:
 ### 3e. Tekil sahiplenme ve gözlem modu
 - [x] Formdaki mevcut hesap ipucuyla gözlem modunda bağlama ([ADR-018](decisions/018-ice-aktarma-ve-sahiplenme.md))
   - Not (2026-10-01): kayıt formundaki AD ipucu (`existing_ad_account_hint`, yalnızca `OWNERSHIP_MODE_ENABLED=true` iken görünür) istektir; worker ipuçlu kimlik için hesap açmaz, `engine::adopt` kurallardan geçirir — her ret müdahale (ayar kapalı, kuru mod, ipucu yok, kapsam dışı, başka kimliğe bağlı, `adminCount`, iç içe yasaklı grup, sicil uyuşmazlığı) — kabulde `adopted`/`observed` bağlantı, sAM/UPN/mail kimliğe (boşsa), ad uyuşmazlığı `name_mismatch` uyarısı (ADR-042), `ad.account.adopted` denetimi. Gözlem bağlantısında motor hiçbir şey uygulamaz. Lab testi `mevcut.personel` ile dokuz durumu sınar (ADR-086). Zimbra ipucu formda yok (Zimbra ertelendi)
-- [ ] Fark görünümü ve tek kimlik için yönetime alma ([ADR-048](decisions/048-kayit-iptali-hedefte-dogrulanir.md))
+- [x] Fark görünümü ve tek kimlik için yönetime alma ([ADR-048](decisions/048-kayit-iptali-hedefte-dogrulanir.md))
   - Kabul: motor gerçek bir lab hesabına karşı sınandı
   - Not: CSV ve toplu yönetime alma Faz 5'te (Mevcut kurum)
+  - Not (2026-10-01): ADR-087 — fark motorun kuru yolundan hesaplanır (ayrı fark fonksiyonu yok, ADR-038), iş sonucuna yazılır ve kişi sayfasındaki hesap satırında görünür; ilk fark sahiplenme işinin kendi içinde (zamanlayıcı gözlem bağlantısına iş açmaz, yoksa operatör farkı hiç görmezdi); yönetime alma isteği `account_links.manage_requested_at` (0013, backend'in bu tabloda yazabildiği tek kolon), modu worker işin başında çevirir ve farkı aynı işte uygular (`ad.account.managed`); kuru çalıştırmada istek bekler; yetki hr/admin; ayrılış (planlı/acil) gözlemdeki bağlantıya isteği de yazar (ADR-018, "ayrılış kaydedildi ama hiçbir şey olmadı" olmasın). Lab testi gerçek Samba hesabında: sahiplen → fark (hedefe yazma yok) → yönetime al → `OU=SistemUzmanlari`, `GG-VPN`, `applied_state active`. Eşik/sayaç freni 3f'te
 - [ ] Faz kapanışı: güvenlik ve test
   - (1a'daki kapanış şablonunun aynısı)
 

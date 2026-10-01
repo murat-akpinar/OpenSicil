@@ -500,12 +500,17 @@ pub async fn request_names(
 }
 
 pub struct Account {
+    pub target_id: i64,
     pub target: String,
     pub external_id: String,
     pub origin: String,
     pub mode: String,
     pub applied_state: String,
     pub diff: String,
+    /// ADR-018: gozlem modu — fark gosterilir, "Yonetime al" dugmesi cikar
+    pub observed: bool,
+    /// ADR-087: istek yazildi, worker modu cevirecek
+    pub manage_requested: bool,
 }
 
 pub struct Job {
@@ -1050,21 +1055,29 @@ fn masked(aead_key: &[u8; crate::crypto::KEY_LEN], enc: &[u8]) -> String {
     }
 }
 
-// Hedefteki fark (3a kapsami, ADR-078): turetilen durum ↔ applied_state.
+// Hedefteki fark (3a kapsami, ADR-078): turetilen durum ↔ applied_state. Gozlem
+// modunda farki motor hesaplar (ADR-018/087); son is sonucu oldugu gibi gosterilir.
 async fn load_accounts(
     pool: &PgPool,
     id: i64,
     state: LifecycleState,
 ) -> Result<Vec<Account>, sqlx::Error> {
     type Row = (
+        i64,
         String,
         Option<String>,
         Option<String>,
         Option<String>,
         Option<String>,
+        bool,
+        Option<String>,
     );
     let rows: Vec<Row> = sqlx::query_as(
-        "SELECT t.name, l.external_id, l.origin, l.mode, l.applied_state FROM target_systems t \
+        "SELECT t.id, t.name, l.external_id, l.origin, l.mode, l.applied_state, \
+         l.manage_requested_at IS NOT NULL, \
+         (SELECT j.result FROM jobs j WHERE j.identity_id = $1 AND j.target_system_id = t.id \
+         AND j.result IS NOT NULL ORDER BY j.finished_at DESC NULLS LAST, j.id DESC LIMIT 1) \
+         FROM target_systems t \
          LEFT JOIN account_links l ON l.target_system_id = t.id AND l.identity_id = $1 \
          ORDER BY t.id",
     )
@@ -1073,19 +1086,67 @@ async fn load_accounts(
     .await?;
     Ok(rows
         .into_iter()
-        .map(|(target, external_id, origin, mode, applied)| Account {
-            target,
-            diff: diff_text(state, external_id.is_some(), applied.as_deref()),
-            external_id: external_id.unwrap_or_default(),
-            origin: origin.as_deref().map(link_label).unwrap_or_default(),
-            mode: mode.as_deref().map(link_label).unwrap_or_default(),
-            applied_state: applied
-                .as_deref()
-                .map(label_of_key)
-                .unwrap_or("")
-                .to_string(),
-        })
+        .map(
+            |(target_id, target, external_id, origin, mode, applied, requested, result)| {
+                let observed = mode.as_deref() == Some(OBSERVED_MODE);
+                Account {
+                    target_id,
+                    target,
+                    diff: match observed {
+                        true => result.unwrap_or_else(|| OBSERVED_NO_DIFF.to_string()),
+                        false => diff_text(state, external_id.is_some(), applied.as_deref()),
+                    },
+                    external_id: external_id.unwrap_or_default(),
+                    origin: origin.as_deref().map(link_label).unwrap_or_default(),
+                    mode: mode.as_deref().map(link_label).unwrap_or_default(),
+                    applied_state: applied
+                        .as_deref()
+                        .map(label_of_key)
+                        .unwrap_or("")
+                        .to_string(),
+                    observed,
+                    manage_requested: requested,
+                }
+            },
+        )
         .collect())
+}
+
+const OBSERVED_MODE: &str = "observed";
+const OBSERVED_NO_DIFF: &str = "fark henüz hesaplanmadı: iş bekliyor";
+
+// ADR-018/087: operator farki gorup onaylar; backend yalnizca istegi yazar, modu
+// worker cevirir. Yonetilen ya da silinmis baglantida islem yok (false).
+pub async fn request_management(
+    pool: &PgPool,
+    id: i64,
+    target_system_id: i64,
+) -> Result<bool, sqlx::Error> {
+    let done = sqlx::query(
+        "UPDATE account_links SET manage_requested_at = now() \
+         WHERE identity_id = $1 AND target_system_id = $2 AND mode = $3 \
+         AND deleted_by_us_at IS NULL",
+    )
+    .bind(id)
+    .bind(target_system_id)
+    .bind(OBSERVED_MODE)
+    .execute(pool)
+    .await?;
+    Ok(done.rows_affected() == 1)
+}
+
+// ADR-018: gozlem modundaki kimlige ayrilis kaydedilirse ayni islem yonetime almayi
+// da icerir; yoksa "ayrilis kaydedildi ama hicbir sey olmadi" olurdu.
+pub async fn request_management_observed(pool: &PgPool, id: i64) -> Result<u64, sqlx::Error> {
+    let done = sqlx::query(
+        "UPDATE account_links SET manage_requested_at = now() \
+         WHERE identity_id = $1 AND mode = $2 AND deleted_by_us_at IS NULL",
+    )
+    .bind(id)
+    .bind(OBSERVED_MODE)
+    .execute(pool)
+    .await?;
+    Ok(done.rows_affected())
 }
 
 // account_links koken/mod anahtarlarinin ekran karsiligi (docs/03 hesap baglantisi).

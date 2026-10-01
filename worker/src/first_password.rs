@@ -8,6 +8,8 @@ use crate::model::LinkRow;
 
 pub const REJECT_USED: &str = "hesap kullanılmış; parolayı AD'nin kendi süreciyle sıfırlayın";
 pub const REJECT_DRY_RUN: &str = "kuru çalıştırma açık, parola yazılmadı (ADR-054)";
+pub const REJECT_OBSERVED: &str =
+    "hesap gözlem modunda, parola yazılmadı: önce yönetime alın (ADR-018)";
 
 pub async fn pending(pool: &PgPool, identity_id: i64, target: i64) -> Result<Option<i64>, String> {
     sqlx::query_scalar(
@@ -81,6 +83,7 @@ mod tests {
             password_reset_at_departure: reset,
             first_password_pwd_last_set: stored.map(str::to_string),
             observed: false,
+            manage_requested: false,
         }
     }
 

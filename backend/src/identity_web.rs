@@ -78,7 +78,44 @@ pub fn routes() -> Router<AppState> {
         .route("/identities/{id}/cancel", post(cancel))
         .route("/identities/{id}/suspension", post(suspend))
         .route("/identities/{id}/suspension/lift", post(lift))
+        .route("/identities/{id}/accounts/{target_id}/manage", post(manage))
 }
+
+// --- START FEATURE: adoption ---
+// ADR-018/087 yonetime alma: operator gozlem farkini gorup onaylar, backend istegi
+// yazar ve is acar; modu worker cevirir, farki o is uygular.
+async fn manage(
+    OperatorSession(op): OperatorSession,
+    State(state): State<AppState>,
+    Path((id, target_id)): Path<(i64, i64)>,
+) -> Response {
+    if !allowed(&op, REGISTER_AUTHORITIES) {
+        return forbidden();
+    }
+    match identity::request_management(&state.pool, id, target_id).await {
+        Ok(true) => {
+            let detail = serde_json::json!({ "target_system_id": target_id });
+            audit_operator(
+                &state,
+                &op,
+                crate::audit::ACCOUNT_MANAGE_REQUESTED,
+                Some(id),
+                detail,
+            )
+            .await;
+            if let Err(e) =
+                crate::jobs::enqueue(&state.pool, id, target_id, crate::jobs::Priority::Single)
+                    .await
+            {
+                return internal("yönetime alma işi açılamadı", e);
+            }
+            Redirect::to(&format!("/identities/{id}")).into_response()
+        }
+        Ok(false) => bad("Yönetime alınacak gözlem modunda hesap yok (ADR-018)."),
+        Err(e) => internal("yönetime alma isteği yazılamadı", e),
+    }
+}
+// --- END FEATURE: adoption ---
 
 // --- Yasam dongusu (docs/04 Leaver, aski, iptal; ADR-084) ---
 
@@ -116,6 +153,21 @@ async fn finish_lifecycle(
     priority: crate::jobs::Priority,
 ) -> Response {
     audit_operator(state, op, event, Some(id), detail).await;
+    // ADR-018: ayrilis gozlem modundaki kimlikte yonetime almayi da icerir; yoksa
+    // "ayrilis kaydedildi ama hicbir sey olmadi" durumu olusur.
+    if event == crate::audit::IDENTITY_DEPARTURE_SET
+        || event == crate::audit::IDENTITY_EMERGENCY_DEPARTURE
+    {
+        match identity::request_management_observed(&state.pool, id).await {
+            Ok(0) => {}
+            Ok(_) => {
+                let detail = serde_json::json!({ "reason": "departure" });
+                let event = crate::audit::ACCOUNT_MANAGE_REQUESTED;
+                audit_operator(state, op, event, Some(id), detail).await;
+            }
+            Err(e) => eprintln!("web: yönetime alma istenemedi (kimlik {id}): {e}"),
+        }
+    }
     if let Err(e) = identity::enqueue_all_targets(&state.pool, id, priority).await {
         eprintln!("web: iş açılamadı (kimlik {id}): {e}");
     }
@@ -1212,6 +1264,156 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(departures, 1);
+
+        drop(app);
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
+    // ADR-018/087: gozlem baglantisinda motorun yazdigi fark ekranda gorunur, "Yonetime al"
+    // yalnizca yetkilide ve yalnizca istegi yazar; ayrilis yonetime almayi da icerir.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn observed_account_shows_diff_and_is_taken_under_management() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        let [id, other] = crate::test_support::seed_two_identities(&pool).await;
+        let app = crate::web::routes()
+            .with_state(crate::web::test_state(pool.clone(), "https://localhost"));
+        let hr = operator_cookie(&pool, &["hr"]).await;
+        let auditor = operator_cookie(&pool, &["auditor"]).await;
+        let ad: i64 = sqlx::query_scalar("SELECT id FROM target_systems WHERE kind = 'ad'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let observe = |identity: i64| {
+            sqlx::query(
+                "INSERT INTO account_links (identity_id, target_system_id, external_id, origin, mode) \
+                 VALUES ($1, $2, $3, 'adopted', 'observed')",
+            )
+            .bind(identity)
+            .bind(ad)
+            .bind(format!("guid-{identity}"))
+            .execute(&pool)
+        };
+        observe(id).await.unwrap();
+        observe(other).await.unwrap();
+        // motorun gozlem isinde yazdigi fark
+        sqlx::query(
+            "INSERT INTO jobs (identity_id, target_system_id, priority, status, result, finished_at) \
+             VALUES ($1, $2, 1, 'succeeded', 'gözlem modunda, yönetime alınırsa: 2 grup eklendi, OU taşındı', now())",
+        )
+        .bind(id)
+        .bind(ad)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Fark her operatorde gorunur; dugme yalnizca yetkilide.
+        let page = format!("/identities/{id}");
+        let body = body_string(
+            app.clone()
+                .oneshot(request("GET", &page, "", &auditor))
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert!(body.contains("yönetime alınırsa: 2 grup eklendi"), "{body}");
+        assert!(!body.contains("Yönetime al"));
+        let body = body_string(
+            app.clone()
+                .oneshot(request("GET", &page, "", &hr))
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert!(body.contains("Yönetime al"), "{body}");
+
+        let manage = format!("/identities/{id}/accounts/{ad}/manage");
+        let r = app
+            .clone()
+            .oneshot(request("POST", &manage, "", &auditor))
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::FORBIDDEN);
+        let r = app
+            .clone()
+            .oneshot(request("POST", &manage, "", &hr))
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::SEE_OTHER);
+        let requested: Vec<(i64, bool, String)> = sqlx::query_as(
+            "SELECT identity_id, manage_requested_at IS NOT NULL, mode FROM account_links \
+             ORDER BY identity_id",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            requested,
+            vec![
+                (id, true, "observed".to_string()),
+                (other, false, "observed".to_string())
+            ],
+            "yalnizca istek yazilir, modu worker cevirir"
+        );
+        let open: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM jobs WHERE identity_id = $1 AND status <> 'succeeded'",
+        )
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(open, 1, "istek bir iş açar");
+        let body = body_string(
+            app.clone()
+                .oneshot(request("GET", &page, "", &hr))
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert!(body.contains("yönetime alma istendi"), "{body}");
+
+        // worker modu cevirdikten sonra ikinci istek anlamsiz: 400
+        sqlx::query("UPDATE account_links SET mode = 'managed' WHERE identity_id = $1")
+            .bind(id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let r = app
+            .clone()
+            .oneshot(request("POST", &manage, "", &hr))
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::BAD_REQUEST);
+
+        // ADR-018: ayrilis gozlem modundaki kimlikte yonetime almayi da icerir
+        let r = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                &format!("/identities/{other}/departure"),
+                "end_date=2030-06-30",
+                &hr,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::SEE_OTHER);
+        let requested: bool = sqlx::query_scalar(
+            "SELECT manage_requested_at IS NOT NULL FROM account_links WHERE identity_id = $1",
+        )
+        .bind(other)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(requested, "ayrılış kaydedildi ama hiçbir şey olmadı durumu");
+        let events: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM audit_log WHERE event_type = $1 AND actor_username = 'ik.operatoru'",
+        )
+        .bind(crate::audit::ACCOUNT_MANAGE_REQUESTED)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(events, 2, "düğme + ayrılış");
 
         drop(app);
         drop(pool);

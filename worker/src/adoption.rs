@@ -11,6 +11,7 @@ use crate::username::normalize_component;
 use crate::writes::WriteError;
 
 pub const ADOPTED_EVENT: &str = "ad.account.adopted";
+pub const MANAGED_EVENT: &str = "ad.account.managed";
 
 #[derive(Debug)]
 pub struct Candidate {
@@ -146,6 +147,38 @@ pub async fn link_observed(
     .map_err(|e| format!("denetim satırı yazılamadı: {e}"))?;
     tx.commit().await.map_err(|e| e.to_string())
 }
+
+// ADR-018/087 yonetime alma: operator farki gorup onaylayinca backend yalnizca
+// istek kolonunu yazar, modu worker cevirir (docs/03). Istek tuketilir: ikinci
+// is yeniden cevirmeye calismaz. Doner: mod bu cagriyla yonetilene gecti mi.
+pub async fn take_over(pool: &PgPool, identity_id: i64, target: i64) -> Result<bool, String> {
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    let done = sqlx::query(
+        "UPDATE account_links SET mode = 'managed', manage_requested_at = NULL \
+         WHERE identity_id = $1 AND target_system_id = $2 AND mode = 'observed' \
+         AND manage_requested_at IS NOT NULL",
+    )
+    .bind(identity_id)
+    .bind(target)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| format!("yönetime alma yazılamadı: {e}"))?;
+    if done.rows_affected() == 0 {
+        return Ok(false);
+    }
+    sqlx::query(
+        "INSERT INTO audit_log (event_type, identity_id, target_system_id, detail) \
+         VALUES ($1, $2, $3, '{}'::jsonb)",
+    )
+    .bind(MANAGED_EVENT)
+    .bind(identity_id)
+    .bind(target)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| format!("denetim satırı yazılamadı: {e}"))?;
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(true)
+}
 // --- END FEATURE: adoption ---
 
 #[cfg(test)]
@@ -159,6 +192,51 @@ mod tests {
         assert!(employee_number_matches(None, Some("123")));
         assert!(employee_number_matches(Some(""), Some("123")));
         assert!(employee_number_matches(Some("123"), None));
+    }
+
+    // ADR-087: istek tuketilir, mod bir kez cevrilir, denetim satiri yazilir.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn take_over_flips_mode_once_and_audits() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        let seed = crate::test_support::seed_example_model(&pool).await;
+        sqlx::query(
+            "INSERT INTO account_links (identity_id, target_system_id, external_id, origin, mode) \
+             VALUES ($1, $2, 'guid-1', 'adopted', 'observed')",
+        )
+        .bind(seed.identity)
+        .bind(seed.ad)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // istek yoksa cevrilmez
+        assert!(!take_over(&pool, seed.identity, seed.ad).await.unwrap());
+        sqlx::query("UPDATE account_links SET manage_requested_at = now()")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(take_over(&pool, seed.identity, seed.ad).await.unwrap());
+        let (mode, consumed): (String, bool) =
+            sqlx::query_as("SELECT mode, manage_requested_at IS NULL FROM account_links")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!((mode.as_str(), consumed), ("managed", true));
+        assert!(
+            !take_over(&pool, seed.identity, seed.ad).await.unwrap(),
+            "istek tüketildi: ikinci çağrı mod çevirmez"
+        );
+        let events: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM audit_log WHERE event_type = $1")
+                .bind(MANAGED_EVENT)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(events, 1);
+
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
     }
 
     #[test]
