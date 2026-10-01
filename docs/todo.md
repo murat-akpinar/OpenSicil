@@ -125,7 +125,8 @@ Kurallar:
   - Not: zamanlayıcı tiki bitişi geçmiş atamayı siler, `identity.role_expired` ("süresi doldu") yazar ve her hedefe iş açar; gruplar o işte üyelik farkıyla düşer (ADR-050 yıkıcı sınıf)
 - [x] Ayrılışta gecikmeli parola sıfırlama ([ADR-033](decisions/033-ayrilista-parola-gecikmesi.md))
   - Not: zamanlayıcı pencere dolunca (hedefin `password_reset_delay_days`; acilde hemen) iş açar, worker parolayı rastgeleleştirip `pwdLastSet = 0` yazar ve bağlantıda `password_reset_at_departure` işaretler (bir kez; öznitelik sınıfı, yıkıcı sayaca girmez); doğrulanmış iptalde yapılmaz
-- [ ] Yaklaşan bitişler listesi (F-36)
+- [x] Yaklaşan bitişler listesi (F-36)
+  - Not: `/upcoming?days=N` (varsayılan 30, en çok 365; ayrı kurulum ayarı açılmadı — ekran başına değer yeter): bitişler, ek rol bitişleri, askı başlangıçları ve dönüş günleri tek sorguda, kurulum saat diliminde
 - [ ] Faz kapanışı: güvenlik ve test
   - (1a'daki kapanış şablonunun aynısı)
 

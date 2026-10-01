@@ -144,6 +144,7 @@ pub fn routes() -> Router<AppState> {
         .merge(crate::org_web::routes())
         .merge(crate::used_names::routes())
         .merge(crate::mapping_web::routes())
+        .merge(crate::upcoming::routes())
 }
 
 // Ayarlar okunamazsa (DB gecici erisilemez) giris sayfasi yine de gosterilir:

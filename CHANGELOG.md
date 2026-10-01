@@ -57,4 +57,5 @@
 - Yönetici ayrılışında astlara iş ve etkin yönetici notu (ADR-041, F-38)
 - Süreli ek rol tarih dolunca zamanlayıcıyla kalkar (ADR-020, F-37)
 - Ayrılışta gecikmeli parola sıfırlama, zamanlayıcı penceresi (ADR-033)
+- Yaklaşan bitişler listesi (F-36)
 

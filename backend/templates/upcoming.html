@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Yaklaşan bitişler — OpenSicil{% endblock %}
+{% block width %}max-w-3xl{% endblock %}
+{% block content %}
+<div class="flex justify-between items-center mb-6">
+  <h1 class="text-xl font-semibold">Yaklaşan bitişler — {{ days }} gün</h1>
+  <a class="text-sm underline" href="/login">Ana sayfa</a>
+</div>
+<form method="get" action="/upcoming" class="flex gap-2 items-end mb-4 text-sm">
+  <label>Gün <input class="rounded px-2 py-1 text-black w-24" type="number" min="1" max="365" name="days" value="{{ days }}"></label>
+  <button class="rounded px-3 py-1" style="background:#89b4fa; color:#1e1e2e;" type="submit">Göster</button>
+</form>
+{% if rows.is_empty() %}
+<p style="color:#a6adc8;">Bu pencerede bitiş, ek rol bitişi, askı başlangıcı ya da dönüş yok.</p>
+{% else %}
+<table class="w-full text-sm">
+  <thead><tr class="text-left" style="color:#a6adc8;"><th>Gün</th><th>Olay</th><th>Kişi</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr style="border-top:1px solid #313244;">
+      <td class="py-1">{{ r.day }}</td>
+      <td>{{ r.kind }}</td>
+      <td><a class="underline" href="/identities/{{ r.identity_id }}">{{ r.name }}</a></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}
