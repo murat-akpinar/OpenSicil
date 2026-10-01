@@ -134,7 +134,8 @@ Kurallar:
 ### 3d. İlk parola
 - [x] AEAD ile şifreli teslim ([ADR-036](decisions/036-ilk-parola-aead.md)), yardım masası yetkisi, ilk girişte değiştirme ayarı (F-11, [ADR-019](decisions/019-ilk-parola-teslimi.md))
   - Not (2026-10-01): `first_passwords` tablosu (0012) + bağlantıda `first_password_pwd_last_set`; operatör ister → tek kimlik işi → worker iş sonunda parolayı yazar ve sürüm baytlı AEAD ile bırakır → durum sayfası bir kez gösterir ve boşaltır (Postgres 18 `RETURNING old`); 10 dk gösterilmeyen ya da cevapsız istek zamanlayıcıda kapanır. `helpdesk` yalnızca ilk parola ister, "tekrar dene" hr/admin'e daraltıldı. `FIRST_LOGIN_CHANGE_REQUIRED` (worker, boş = açık). Kullanılmamış hesap kuralı (ADR-046) bu kutuda uygulandı; lab testi kuru red / açık mod `pwdLastSet 0` / kapalı mod damga + gerçek bind / kullanılmış hesap reddi (ADR-085)
-- [ ] Kullanılmamış hesap kontrolü ([ADR-046](decisions/046-kullanilmamis-hesap-lastlogontimestamp.md))
+- [x] Kullanılmamış hesap kontrolü ([ADR-046](decisions/046-kullanilmamis-hesap-lastlogontimestamp.md))
+  - Not (2026-10-01): kural `worker/src/first_password.rs::account_unused` — (`lastLogonTimestamp` boş **veya** bağlantıda "ayrılışta sıfırlandı") **ve** (`pwdLastSet = 0` **veya** worker'ın son yazdığı damgaya eşit). Verilince işaret temizlenir, damga yazılır. Birim testi altı durumu, DB testi işaret/damga yazımını, lab testi gerçek reddi sınar; docs/07 ADR-046 maddesi işaretlendi. Samba `lastLogonTimestamp`'ı simple bind'da yazıyor mu lab'da ölçülmedi (3d kapanışında)
 - [ ] "Kaydet ve ilk parolayı ver" tek adım, teslim ekranı, okunabilir parola biçimi ([ADR-056](decisions/056-ise-baslama-gunu-akisi.md))
   - Kabul: N-13 ölçümü ≤ 60 sn (kayıttan parolanın ekranda görünmesine)
   - Not: ürünün hedef sahnesi ilk kez burada uçtan uca gösterilir

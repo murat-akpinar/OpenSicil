@@ -102,4 +102,83 @@ mod tests {
         // ayrilista sifirlanmis ama o zamandan beri parola degismis
         assert!(!account_unused(Some("133"), Some("777"), &link(true, None)));
     }
+
+    // ADR-046/085: verilince ayrilis sifirlama isareti temizlenir, damga baglantiya yazilir,
+    // istek bekleyenden cikar; red nedeni istege yazilir.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn issue_clears_departure_flag_and_reject_records_reason() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        let seed = crate::test_support::seed_example_model(&pool).await;
+        sqlx::query(
+            "INSERT INTO account_links (identity_id, target_system_id, external_id, origin, mode, \
+             applied_state, password_reset_at_departure) \
+             VALUES ($1, $2, 'guid-1', 'provisioned', 'managed', 'active', TRUE)",
+        )
+        .bind(seed.identity)
+        .bind(seed.ad)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let request = || {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_scalar::<_, i64>(
+                    "INSERT INTO first_passwords (identity_id, target_system_id, requested_by) \
+                     VALUES ($1, $2, 'ik') RETURNING id",
+                )
+                .bind(seed.identity)
+                .bind(seed.ad)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+            }
+        };
+        assert_eq!(pending(&pool, seed.identity, seed.ad).await.unwrap(), None);
+        let first = request().await;
+        assert_eq!(
+            pending(&pool, seed.identity, seed.ad).await.unwrap(),
+            Some(first)
+        );
+        let key = [5u8; crate::crypto::KEY_LEN];
+        issue(&pool, &key, first, "Kf7m-Rq2x-Wn8d-Tz4p", Some("555"))
+            .await
+            .unwrap();
+        let (enc, issued): (Vec<u8>, bool) = sqlx::query_as(
+            "SELECT password_enc, issued_at IS NOT NULL FROM first_passwords WHERE id = $1",
+        )
+        .bind(first)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(issued);
+        assert_eq!(
+            crate::crypto::decrypt_versioned(&key, &enc).unwrap(),
+            b"Kf7m-Rq2x-Wn8d-Tz4p"
+        );
+        let (flag, stamp): (bool, Option<String>) = sqlx::query_as(
+            "SELECT password_reset_at_departure, first_password_pwd_last_set \
+             FROM account_links WHERE identity_id = $1",
+        )
+        .bind(seed.identity)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!((flag, stamp.as_deref()), (false, Some("555")));
+        assert_eq!(pending(&pool, seed.identity, seed.ad).await.unwrap(), None);
+
+        let second = request().await;
+        reject(&pool, second, REJECT_USED).await.unwrap();
+        let error: Option<String> =
+            sqlx::query_scalar("SELECT error FROM first_passwords WHERE id = $1")
+                .bind(second)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(error.as_deref(), Some(REJECT_USED));
+        assert_eq!(pending(&pool, seed.identity, seed.ad).await.unwrap(), None);
+
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
 }
