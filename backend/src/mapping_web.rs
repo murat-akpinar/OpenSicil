@@ -11,6 +11,7 @@ use axum::routing::{get, post};
 use axum::Router;
 use sqlx::PgPool;
 
+use crate::i18n::Lang;
 use crate::identity_web::{allowed, audit_operator, forbidden, internal, OperatorSession};
 use crate::mapping_rules;
 use crate::operator_session::Operator;
@@ -22,6 +23,7 @@ const SENSITIVE_AUTHORITIES: &[&str] = &["admin"];
 pub struct MappingRow {
     pub id: i64,
     pub attribute: String,
+    /// Kaynak ve donusumun i18n etiket anahtarlari (mapping_rules, ADR-089)
     pub source: &'static str,
     pub source_text: String,
     pub transform: &'static str,
@@ -43,9 +45,9 @@ pub async fn list(pool: &PgPool, target: i64) -> Result<Vec<MappingRow>, sqlx::E
             |(id, attribute, source_kind, text, transform, write_if_empty)| MappingRow {
                 id,
                 attribute,
-                source: mapping_rules::source_label(&source_kind),
+                source: mapping_rules::source_label_key(&source_kind),
                 source_text: text.unwrap_or_default(),
-                transform: mapping_rules::transform_label(&transform),
+                transform: mapping_rules::transform_label_key(&transform),
                 write_if_empty,
                 sensitive: mapping_rules::source_is_sensitive(&source_kind) == Some(true),
             },
@@ -63,26 +65,24 @@ pub struct NewMapping {
 }
 
 // Ekran dogrulamasi worker'in kopyasidir (ADR-029); worker yine de reddeder.
-pub fn validate(target_kind: &str, m: &NewMapping, is_admin: bool) -> Result<(), String> {
+// Doner: i18n anahtari (ADR-089); ceviri web katmaninda.
+pub fn validate(target_kind: &str, m: &NewMapping, is_admin: bool) -> Result<(), &'static str> {
     if !mapping_rules::attribute_allowed(target_kind, &m.attribute) {
-        return Err("Hedef öznitelik izinli listede değil (ADR-029)".to_string());
+        return Err("err.attribute_not_allowed");
     }
     let sensitive = match mapping_rules::source_is_sensitive(&m.source_kind) {
         Some(s) => s,
-        None => return Err("Kaynak seçilmeli".to_string()),
+        None => return Err("err.source_required"),
     };
     if sensitive && !(is_admin && m.sensitive_ack) {
-        return Err(
-            "Hassas kaynak (kimlik no, cep) yalnızca Sistem yöneticisi ve açık onayla eşlenir (ADR-012)"
-                .to_string(),
-        );
+        return Err("err.sensitive_not_allowed");
     }
     if !mapping_rules::transform_known(&m.transform) {
-        return Err("Dönüşüm seçilmeli".to_string());
+        return Err("err.transform_required");
     }
     let needs_text = matches!(m.source_kind.as_str(), "constant" | "template");
     if needs_text && m.source_text.as_deref().unwrap_or("").trim().is_empty() {
-        return Err("Sabit metin ya da şablon boş olamaz".to_string());
+        return Err("err.constant_text_required");
     }
     Ok(())
 }
@@ -138,6 +138,7 @@ pub fn routes() -> Router<AppState> {
 #[derive(Template)]
 #[template(path = "mappings.html")]
 struct MappingsTemplate {
+    lang: Lang,
     target_id: i64,
     target_name: String,
     rows: Vec<MappingRow>,
@@ -159,11 +160,14 @@ async fn target_of(pool: &PgPool, id: i64) -> Result<Option<(String, String)>, s
 async fn render_page(state: &AppState, op: &Operator, id: i64, error: String) -> Response {
     let (kind, name) = match target_of(&state.pool, id).await {
         Ok(Some(t)) => t,
-        Ok(None) => return (StatusCode::NOT_FOUND, "Hedef sistem bulunamadı.").into_response(),
+        Ok(None) => {
+            return (StatusCode::NOT_FOUND, op.lang.t("err.target_not_found")).into_response()
+        }
         Err(e) => return internal("hedef sistem okunamadı", e),
     };
     match list(&state.pool, id).await {
         Ok(rows) => render(&MappingsTemplate {
+            lang: op.lang,
             target_id: id,
             target_name: name,
             rows,
@@ -200,11 +204,13 @@ async fn create(
     Form(form): Form<Vec<(String, String)>>,
 ) -> Response {
     if !allowed(&op, WRITE_AUTHORITIES) {
-        return forbidden();
+        return forbidden(op.lang);
     }
     let kind = match target_of(&state.pool, id).await {
         Ok(Some((kind, _))) => kind,
-        Ok(None) => return (StatusCode::NOT_FOUND, "Hedef sistem bulunamadı.").into_response(),
+        Ok(None) => {
+            return (StatusCode::NOT_FOUND, op.lang.t("err.target_not_found")).into_response()
+        }
         Err(e) => return internal("hedef sistem okunamadı", e),
     };
     let text = field(&form, "source_text").trim();
@@ -217,7 +223,7 @@ async fn create(
         sensitive_ack: field(&form, "sensitive_ack") == "1",
     };
     if let Err(msg) = validate(&kind, &new, allowed(&op, SENSITIVE_AUTHORITIES)) {
-        return render_page(&state, &op, id, msg).await;
+        return render_page(&state, &op, id, msg.to_string()).await;
     }
     match add(&state.pool, id, &new).await {
         Ok(mapping_id) => {
@@ -235,7 +241,8 @@ async fn create(
             if e.as_database_error()
                 .is_some_and(|d| d.is_unique_violation()) =>
         {
-            render_page(&state, &op, id, "Bu öznitelik zaten eşlenmiş".to_string()).await
+            let msg = op.lang.t("err.attribute_already_mapped").to_string();
+            render_page(&state, &op, id, msg).await
         }
         Err(e) => internal("eşleme satırı yazılamadı", e),
     }
@@ -255,7 +262,7 @@ async fn remove(
     Path((id, mapping_id)): Path<(i64, i64)>,
 ) -> Response {
     if !allowed(&op, WRITE_AUTHORITIES) {
-        return forbidden();
+        return forbidden(op.lang);
     }
     match delete(&state.pool, id, mapping_id).await {
         Ok(true) => {
@@ -296,31 +303,33 @@ mod tests {
             false
         )
         .is_ok());
-        assert!(validate(
-            "ad",
-            &new("userAccountControl", "constant", Some("512"), false),
-            true
-        )
-        .unwrap_err()
-        .contains("izinli listede"));
         assert!(
-            validate("ad", &new("mobile", "mobile_phone", None, false), true)
-                .unwrap_err()
-                .contains("Hassas")
+            validate(
+                "ad",
+                &new("userAccountControl", "constant", Some("512"), false),
+                true
+            )
+            .unwrap_err()
+                == "err.attribute_not_allowed"
         );
         assert!(
-            validate("ad", &new("mobile", "mobile_phone", None, true), false)
-                .unwrap_err()
-                .contains("Hassas")
+            validate("ad", &new("mobile", "mobile_phone", None, false), true).unwrap_err()
+                == "err.sensitive_not_allowed"
+        );
+        assert!(
+            validate("ad", &new("mobile", "mobile_phone", None, true), false).unwrap_err()
+                == "err.sensitive_not_allowed"
         );
         assert!(validate("ad", &new("mobile", "mobile_phone", None, true), true).is_ok());
-        assert!(validate(
-            "ad",
-            &new("description", "template", Some(" "), false),
-            false
-        )
-        .unwrap_err()
-        .contains("boş"));
+        assert!(
+            validate(
+                "ad",
+                &new("description", "template", Some(" "), false),
+                false
+            )
+            .unwrap_err()
+                == "err.constant_text_required"
+        );
         assert!(validate(
             "zimbra",
             &new("employeeID", "employee_number", None, false),
@@ -354,6 +363,7 @@ mod tests {
                     username: "rol.yoneticisi".to_string(),
                     email: "r@example.org".to_string(),
                     authorities: authorities.iter().map(|a| a.to_string()).collect(),
+                    lang: crate::i18n::DEFAULT,
                 };
                 let token = crate::operator_session::create_session(&pool, &operator)
                     .await

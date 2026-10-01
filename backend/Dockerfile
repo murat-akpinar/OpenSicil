@@ -17,6 +17,8 @@ COPY templates ./templates
 # Statik varliklar da derleme aninda binary'ye gomulur (ADR-088: include_bytes!);
 # app.css kaynaktan uretilip commit'lenir (sh scripts/build-css.sh).
 COPY static ./static
+# Arayuz metinleri include_str! ile gomulur (ADR-089)
+COPY i18n ./i18n
 
 RUN cargo build --release --locked
 

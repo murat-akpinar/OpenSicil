@@ -11,6 +11,7 @@ mod db;
 mod desired_state;
 mod first_password;
 mod health;
+mod i18n;
 mod identity;
 mod identity_web;
 mod jobs;

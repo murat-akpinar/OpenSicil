@@ -1,28 +1,28 @@
 {% extends "base.html" %}
-{% block title %}Kullanılmış adlar — OpenSicil{% endblock %}
+{% block title %}{{ lang.t("nav.used_names") }} — OpenSicil{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1 class="h1">Kullanılmış adlar</h1>
+  <h1 class="h1">{{ lang.t("nav.used_names") }}</h1>
 </div>
-<p class="mb-4 text-sm muted">Silinen kimliklerin adları bir daha üretilmez (ADR-035). Sistem yöneticisi gerekçeyle serbest bırakır; gerekçe denetim kaydına yazılır.</p>
+<p class="mb-4 text-sm muted">{{ lang.t("used.intro") }}</p>
 {% if !error.is_empty() %}<p class="alert alert-err">{{ error }}</p>{% endif %}
 {% if names.is_empty() %}
-<p class="muted">Kayıt yok.</p>
+<p class="muted">{{ lang.t("used.empty") }}</p>
 {% else %}
 <table class="tbl">
-  <thead><tr><th>Ad</th><th>Tür</th><th>Eski kimlik</th><th>Yakıldı</th><th>Serbest</th></tr></thead>
+  <thead><tr><th>{{ lang.t("field.name") }}</th><th>{{ lang.t("field.kind") }}</th><th>{{ lang.t("used.former_identity") }}</th><th>{{ lang.t("used.burned") }}</th><th>{{ lang.t("used.released") }}</th></tr></thead>
   <tbody>
   {% for n in names %}
     <tr>
       <td>{{ n.name }}</td>
-      <td>{{ n.kind }}</td>
+      <td>{{ lang.key("usedkind", n.kind) }}</td>
       <td>{{ n.former_identity_id }}</td>
       <td>{{ n.burned_at }}</td>
       <td>
         {% if !n.released.is_empty() %}{{ n.released }}{% else if can_release %}
         <form method="post" action="/used-names/{{ n.id }}/release" class="flex gap-2">
-          <input class="input" type="text" name="reason" placeholder="gerekçe" required>
-          <button class="btn btn-sm" type="submit">Serbest bırak</button>
+          <input class="input" type="text" name="reason" placeholder="{{ lang.t("used.reason") }}" required>
+          <button class="btn btn-sm" type="submit">{{ lang.t("used.release") }}</button>
         </form>
         {% endif %}
       </td>

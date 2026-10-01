@@ -25,10 +25,11 @@ pub struct NationalId {
 // Girdi normalize edilir (bosluk atilir, buyuk harf); TR icin 11 hane, ilk hane
 // 0 degil, 10. ve 11. haneler kontrol hanesi; digerleri en fazla 32 karakter
 // A-Z 0-9 '-' ve kontrol hanesi dogrulanmaz (ADR-010).
-pub fn parse(country: &str, raw: &str) -> Result<NationalId, String> {
+// Hata metni degil i18n anahtari doner (ADR-089): ceviri web katmaninda.
+pub fn parse(country: &str, raw: &str) -> Result<NationalId, &'static str> {
     let country = country.trim().to_ascii_uppercase();
     if country.len() != 2 || !country.bytes().all(|b| b.is_ascii_uppercase()) {
-        return Err("ülke kodu iki harf olmalı".to_string());
+        return Err("err.country_code");
     }
     let value: String = raw
         .chars()
@@ -42,35 +43,34 @@ pub fn parse(country: &str, raw: &str) -> Result<NationalId, String> {
     Ok(NationalId { country, value })
 }
 
-fn validate_tr(value: &str) -> Result<(), String> {
+fn validate_tr(value: &str) -> Result<(), &'static str> {
     let digits: Vec<u32> = value.chars().filter_map(|c| c.to_digit(10)).collect();
     if digits.len() != TR_LENGTH || value.len() != TR_LENGTH {
-        return Err("T.C. Kimlik No 11 haneli olmalı".to_string());
+        return Err("err.tr_id_length");
     }
     if digits[0] == 0 {
-        return Err("T.C. Kimlik No 0 ile başlayamaz".to_string());
+        return Err("err.tr_id_leading_zero");
     }
     let odd_sum: u32 = [0, 2, 4, 6, 8].iter().map(|&i| digits[i]).sum();
     let even_sum: u32 = [1, 3, 5, 7].iter().map(|&i| digits[i]).sum();
     let tenth = (odd_sum * 7 + 10 * 10 - even_sum) % 10;
     let eleventh = (digits[..10].iter().sum::<u32>()) % 10;
     if digits[9] != tenth || digits[10] != eleventh {
-        return Err("T.C. Kimlik No kontrol hanesi tutmuyor".to_string());
+        return Err("err.tr_id_checksum");
     }
     Ok(())
 }
 
-fn validate_generic(value: &str) -> Result<(), String> {
+fn validate_generic(value: &str) -> Result<(), &'static str> {
     if value.is_empty() || value.len() > OTHER_MAX_LENGTH {
-        return Err(format!(
-            "kimlik numarası 1–{OTHER_MAX_LENGTH} karakter olmalı"
-        ));
+        // err.id_length metni OTHER_MAX_LENGTH degerini icerir
+        return Err("err.id_length");
     }
     if !value
         .bytes()
         .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'-')
     {
-        return Err("kimlik numarası yalnızca A-Z, 0-9 ve - içerebilir".to_string());
+        return Err("err.id_charset");
     }
     Ok(())
 }

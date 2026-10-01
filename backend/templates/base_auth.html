@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="tr">
+<html lang="{{ lang.code() }}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -13,7 +13,7 @@
     <div class="w-full max-w-md">
       <div class="mb-6 flex items-center justify-between">
         <span class="brand"><span class="brand-mark">OS</span>OpenSicil</span>
-        <button class="btn btn-ghost btn-sm" id="theme-toggle" type="button" aria-label="Temayı değiştir">☾</button>
+        <button class="btn btn-ghost btn-sm" id="theme-toggle" type="button" aria-label="{{ lang.t("shell.theme") }}">☾</button>
       </div>
       <div class="card">
         {% block content %}{% endblock %}

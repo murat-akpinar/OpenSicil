@@ -12,6 +12,8 @@ use crate::cookie::{
     clear_cookie_header, get_cookie, set_cookie_header, OPERATOR_SESSION_COOKIE_NAME,
     SESSION_COOKIE_NAME,
 };
+use crate::i18n::Lang;
+use crate::identity_web::OperatorSession;
 use crate::session::SESSION_LIFETIME_HOURS;
 
 const MIN_PASSWORD_LENGTH: usize = 12;
@@ -34,6 +36,7 @@ pub struct AppState {
 #[derive(Template)]
 #[template(path = "login.html")]
 struct LoginTemplate {
+    lang: Lang,
     error: String,
     oidc_configured: bool,
     oidc_admin_verified: bool,
@@ -43,6 +46,7 @@ struct LoginTemplate {
 #[derive(Template)]
 #[template(path = "operator_home.html")]
 struct OperatorHomeTemplate {
+    lang: Lang,
     username: String,
     authorities: Vec<String>,
     identities: Vec<crate::identity::Listed>,
@@ -50,11 +54,13 @@ struct OperatorHomeTemplate {
 
 async fn render_operator_home(
     state: &AppState,
+    lang: Lang,
     username: String,
     authorities: Vec<String>,
 ) -> Response {
     match crate::identity::recent(&state.pool, &state.time_zone).await {
         Ok(identities) => render(&OperatorHomeTemplate {
+            lang,
             username,
             authorities,
             identities,
@@ -70,12 +76,14 @@ async fn render_operator_home(
 #[derive(Template)]
 #[template(path = "change_password.html")]
 struct ChangePasswordTemplate {
+    lang: Lang,
     error: String,
 }
 
 #[derive(Template)]
 #[template(path = "config.html")]
 struct ConfigTemplate {
+    lang: Lang,
     ad_host: String,
     ad_bind_dn: String,
     ad_service_password_set: bool,
@@ -136,6 +144,8 @@ pub fn routes() -> Router<AppState> {
             get(change_password_form).post(change_password_submit),
         )
         .route("/config", get(config_form).post(config_submit))
+        // Dil secicisi (ADR-089): tercih operator oturumunda saklanir
+        .route("/lang", post(set_lang))
         // --- START FEATURE: oidc-login ---
         .route("/oidc/login", get(oidc_login))
         .route("/oidc/callback", get(oidc_callback))
@@ -151,7 +161,7 @@ pub fn routes() -> Router<AppState> {
 // Ayarlar okunamazsa (DB gecici erisilemez) giris sayfasi yine de gosterilir:
 // OIDC baglantisi gizlenir, bootstrap formu gorunur kalir (tek giris kapisi
 // bir DB hiccup'inda tumden kapanmaz); asil dogrulama zaten girisi deneyince olur.
-async fn render_login(pool: &PgPool, error: String) -> Response {
+async fn render_login(pool: &PgPool, lang: Lang, error: String) -> Response {
     let settings = match crate::settings::load(pool).await {
         Ok(s) => Some(s),
         Err(e) => {
@@ -160,6 +170,7 @@ async fn render_login(pool: &PgPool, error: String) -> Response {
         }
     };
     render(&LoginTemplate {
+        lang,
         error,
         oidc_configured: settings.as_ref().is_some_and(crate::oidc::is_configured),
         oidc_admin_verified: settings.as_ref().is_some_and(|s| s.oidc_admin_verified),
@@ -173,10 +184,16 @@ async fn login_form(State(state): State<AppState>, headers: HeaderMap) -> Respon
         if let Ok(Some(operator)) =
             crate::operator_session::validate_session(&state.pool, &token).await
         {
-            return render_operator_home(&state, operator.username, operator.authorities).await;
+            return render_operator_home(
+                &state,
+                operator.lang,
+                operator.username,
+                operator.authorities,
+            )
+            .await;
         }
     }
-    render_login(&state.pool, String::new()).await
+    render_login(&state.pool, Lang::from_headers(&headers), String::new()).await
 }
 
 #[derive(Deserialize)]
@@ -185,12 +202,17 @@ struct LoginForm {
     password: String,
 }
 
-async fn login_submit(State(state): State<AppState>, Form(form): Form<LoginForm>) -> Response {
+async fn login_submit(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Form(form): Form<LoginForm>,
+) -> Response {
+    let lang = Lang::from_headers(&headers);
     match crate::bootstrap_account::verify_login(&state.pool, &form.username, &form.password).await
     {
         Ok(true) => {}
         Ok(false) => {
-            return render_login(&state.pool, "Kullanıcı adı ya da parola yanlış".to_string())
+            return render_login(&state.pool, lang, lang.t("err.bad_credentials").to_string())
                 .await;
         }
         Err(e) => {
@@ -250,6 +272,7 @@ struct OidcCallbackQuery {
 
 async fn oidc_callback(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(query): Query<OidcCallbackQuery>,
 ) -> Response {
     let (Some(code), Some(oidc_state)) = (query.code, query.state) else {
@@ -270,7 +293,9 @@ async fn oidc_callback(
     )
     .await
     {
-        Ok(result) => establish_operator_session(&state, result).await,
+        Ok(result) => {
+            establish_operator_session(&state, Lang::from_headers(&headers), result).await
+        }
         Err(e) => {
             eprintln!("web: oidc girişi başarısız: {e}");
             Redirect::to("/login").into_response()
@@ -282,6 +307,7 @@ async fn oidc_callback(
 // (ADR-068 madde 3), operator oturumu kurulur, cerez set edilir.
 async fn establish_operator_session(
     state: &AppState,
+    lang: Lang,
     result: crate::oidc::LoginResult,
 ) -> Response {
     if result
@@ -299,6 +325,7 @@ async fn establish_operator_session(
         username: result.username.clone(),
         email: result.email,
         authorities: result.authorities.clone(),
+        lang,
     };
     // ADR-059 madde 1: ayrilmis/askidaki operator oturum acamaz
     match crate::operator_guard::check_operator(&state.pool, &state.time_zone, &operator.username)
@@ -321,7 +348,7 @@ async fn establish_operator_session(
         }
     };
     audit_operator_login(state, &operator).await;
-    operator_home_with_cookie(state, &token, result.username, result.authorities).await
+    operator_home_with_cookie(state, &token, lang, result.username, result.authorities).await
 }
 
 async fn audit_operator_login(state: &AppState, operator: &crate::operator_session::Operator) {
@@ -346,6 +373,7 @@ async fn audit_operator_login(state: &AppState, operator: &crate::operator_sessi
 async fn operator_home_with_cookie(
     state: &AppState,
     token: &str,
+    lang: Lang,
     username: String,
     authorities: Vec<String>,
 ) -> Response {
@@ -360,14 +388,15 @@ async fn operator_home_with_cookie(
     );
     (
         headers,
-        render_operator_home(state, username, authorities).await,
+        render_operator_home(state, lang, username, authorities).await,
     )
         .into_response()
 }
 // --- END FEATURE: oidc-login ---
 
-async fn change_password_form(_session: BootstrapSession) -> Response {
+async fn change_password_form(_session: BootstrapSession, headers: HeaderMap) -> Response {
     render(&ChangePasswordTemplate {
+        lang: Lang::from_headers(&headers),
         error: String::new(),
     })
 }
@@ -381,16 +410,20 @@ struct ChangePasswordForm {
 async fn change_password_submit(
     _session: BootstrapSession,
     State(state): State<AppState>,
+    headers: HeaderMap,
     Form(form): Form<ChangePasswordForm>,
 ) -> Response {
+    let lang = Lang::from_headers(&headers);
     if form.new_password != form.confirm_password {
         return render(&ChangePasswordTemplate {
-            error: "Parolalar eşleşmiyor".to_string(),
+            lang,
+            error: lang.t("err.password_mismatch").to_string(),
         });
     }
     if form.new_password.chars().count() < MIN_PASSWORD_LENGTH {
         return render(&ChangePasswordTemplate {
-            error: format!("Parola en az {MIN_PASSWORD_LENGTH} karakter olmalı"),
+            lang,
+            error: lang.t1("err.password_too_short", MIN_PASSWORD_LENGTH),
         });
     }
     if let Err(e) = crate::bootstrap_account::set_password(&state.pool, &form.new_password).await {
@@ -418,7 +451,11 @@ async fn audit_bootstrap(pool: &PgPool, event_type: &str, detail: serde_json::Va
     }
 }
 
-async fn config_form(_session: BootstrapSession, State(state): State<AppState>) -> Response {
+async fn config_form(
+    _session: BootstrapSession,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Response {
     match crate::bootstrap_account::must_change_password(&state.pool).await {
         Ok(true) => return Redirect::to("/change-password").into_response(),
         Ok(false) => {}
@@ -430,6 +467,7 @@ async fn config_form(_session: BootstrapSession, State(state): State<AppState>) 
 
     match crate::settings::load(&state.pool).await {
         Ok(s) => render(&ConfigTemplate {
+            lang: Lang::from_headers(&headers),
             ad_host: s.ad_host,
             ad_bind_dn: s.ad_bind_dn,
             ad_service_password_set: s.ad_service_password_set,
@@ -502,6 +540,49 @@ async fn config_submit(
 
 // --- END FEATURE: bootstrap-admin ---
 
+// --- START FEATURE: ui-i18n ---
+#[derive(Deserialize)]
+struct LangForm {
+    lang: String,
+}
+
+// Secici tercihi oturum satirina yazar ve gelinen sayfaya geri doner (ADR-089).
+async fn set_lang(
+    OperatorSession(_op): OperatorSession,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Form(form): Form<LangForm>,
+) -> Response {
+    let Some(token) = get_cookie(&headers, OPERATOR_SESSION_COOKIE_NAME) else {
+        return Redirect::to("/login").into_response();
+    };
+    if let Err(e) =
+        crate::operator_session::set_lang(&state.pool, &token, Lang::from_code(&form.lang)).await
+    {
+        eprintln!("web: dil tercihi yazılamadı: {e}");
+    }
+    let back = headers
+        .get(header::REFERER)
+        .and_then(|v| v.to_str().ok())
+        .and_then(local_path)
+        .unwrap_or("/");
+    Redirect::to(back).into_response()
+}
+
+// Referer yalnizca kendi sayfamiza donmek icin kullanilir: baska bir host'a ya da
+// protokole gidebilecek deger reddedilir (acik yonlendirme, .claude/rules/security.md).
+fn local_path(referer: &str) -> Option<&str> {
+    let path = match referer.find("://") {
+        Some(at) => {
+            let host = &referer[at + 3..];
+            host.find('/').map(|slash| &host[slash..])?
+        }
+        None => referer,
+    };
+    (path.starts_with('/') && !path.starts_with("//")).then_some(path)
+}
+// --- END FEATURE: ui-i18n ---
+
 fn cookie_header_value(value: &str) -> HeaderValue {
     HeaderValue::from_str(value).expect("cerez basligi gecersiz karakter icermez")
 }
@@ -547,6 +628,96 @@ mod tests {
         routes().with_state(test_state(pool, public_url))
     }
 
+    // --- START FEATURE: ui-i18n ---
+    // ADR-089 kabul kriteri: secici EN'e gecirince ekran Ingilizce, tercih oturumda kalir.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn language_switch_is_stored_in_the_session_and_changes_the_screen() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        let operator = crate::operator_session::Operator {
+            subject: "sub-dil".to_string(),
+            username: "dil.operatoru".to_string(),
+            email: "dil@example.org".to_string(),
+            authorities: vec!["hr".to_string()],
+            lang: Lang::Tr,
+        };
+        let token = crate::operator_session::create_session(&pool, &operator)
+            .await
+            .unwrap();
+        let cookie = format!("{OPERATOR_SESSION_COOKIE_NAME}={token}");
+        let home = |app: Router, cookie: String| async move {
+            let request = Request::builder()
+                .uri("/login")
+                .header("cookie", cookie)
+                .body(Body::empty())
+                .unwrap();
+            let response = app.oneshot(request).await.unwrap();
+            String::from_utf8(
+                axum::body::to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .unwrap()
+                    .to_vec(),
+            )
+            .unwrap()
+        };
+
+        let body = home(test_app(pool.clone()), cookie.clone()).await;
+        assert!(
+            body.contains("Kimlikler") && body.contains(">EN<"),
+            "{body}"
+        );
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/lang")
+            .header("cookie", cookie.clone())
+            .header("referer", "/upcoming?days=7")
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(Body::from("lang=en"))
+            .unwrap();
+        let response = test_app(pool.clone()).oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert_eq!(
+            response.headers().get("location").unwrap(),
+            "/upcoming?days=7",
+            "gelinen sayfaya döner"
+        );
+        let stored: String =
+            sqlx::query_scalar("SELECT lang FROM operator_sessions WHERE username = $1")
+                .bind(&operator.username)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(stored, "en", "tercih oturum satırında");
+
+        let body = home(test_app(pool.clone()), cookie).await;
+        assert!(
+            body.contains("Identities") && body.contains("Upcoming ends"),
+            "{body}"
+        );
+        assert!(!body.contains("Yaklaşan bitişler"), "{body}");
+        assert!(
+            body.contains("<html lang=\"en\">") && body.contains(">TR<"),
+            "{body}"
+        );
+
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
+    #[test]
+    fn referer_only_sends_the_operator_back_to_a_local_path() {
+        assert_eq!(local_path("/roles"), Some("/roles"));
+        assert_eq!(
+            local_path("https://opensicil.example/identities/3"),
+            Some("/identities/3")
+        );
+        assert_eq!(local_path("//evil.example/x"), None);
+        assert_eq!(local_path("https://evil.example"), None);
+        assert_eq!(local_path("javascript:alert(1)"), None);
+    }
+    // --- END FEATURE: ui-i18n ---
+
     // ADR-059 madde 1: oturum acilisinda da kontrol; ayrilmis operatore oturum acilmaz.
     #[tokio::test]
     #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
@@ -569,7 +740,7 @@ mod tests {
             email: "ayse@example.com".to_string(),
             authorities: vec!["hr".to_string()],
         };
-        let response = establish_operator_session(&state, result).await;
+        let response = establish_operator_session(&state, Lang::En, result).await;
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
 
         let sessions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM operator_sessions")

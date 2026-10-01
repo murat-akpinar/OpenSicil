@@ -2,26 +2,26 @@
 {% block title %}{{ role.def.name }} — OpenSicil{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1 class="h1">{{ role.def.name }} <span class="chip ml-2 text-sm">{{ role.kind_label }} rol</span></h1>
-  <a class="link text-sm" href="/roles">Roller</a>
+  <h1 class="h1">{{ role.def.name }} <span class="chip ml-2 text-sm">{{ lang.key("rolekind", role.kind) }} {{ lang.t("roles.role_word") }}</span></h1>
+  <a class="link text-sm" href="/roles">{{ lang.t("nav.roles") }}</a>
 </div>
 {% if !error.is_empty() %}<p class="alert alert-err">{{ error }}</p>{% endif %}
 <form method="post" action="/roles/{{ role.def.id }}" class="space-y-6">
   <div class="grid gap-4 sm:grid-cols-2">
     <div>
-      <label class="label" for="name">Ad</label>
+      <label class="label" for="name">{{ lang.t("field.name") }}</label>
       <input class="input" type="text" id="name" name="name" value="{{ role.def.name }}" required>
     </div>
     {% if show_settings %}
     <div>
-      <label class="label" for="title">Unvan</label>
+      <label class="label" for="title">{{ lang.t("field.title") }}</label>
       <input class="input" type="text" id="title" name="title" value="{{ role.title }}">
     </div>
     {% endif %}
   </div>
   {% include "definition_targets.html" %}
   {% if can_edit %}
-  <button class="btn btn-primary w-full" type="submit">Kaydet</button>
+  <button class="btn btn-primary w-full" type="submit">{{ lang.t("common.save") }}</button>
   {% endif %}
 </form>
 {% endblock %}

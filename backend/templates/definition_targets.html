@@ -2,9 +2,9 @@
 {% for t in targets %}
 <fieldset class="box space-y-2">
   <legend class="px-1">{{ t.target_name }}</legend>
-  <p class="text-sm muted">Üyelikler (katalogdan)</p>
+  <p class="text-sm muted">{{ lang.t("def.memberships") }}</p>
   {% if t.memberships.is_empty() %}
-  <p class="text-sm">Katalogda öğe yok; worker hedefi okuyunca dolar.</p>
+  <p class="text-sm">{{ lang.t("def.catalog_empty") }}</p>
   {% endif %}
   {% for m in t.memberships %}
   <label class="check"><input type="checkbox" name="entitlement" value="{{ m.id }}"{% if m.selected %} checked{% endif %}> {{ m.label }}</label>
@@ -12,26 +12,26 @@
   {% if show_settings %}
   <div class="mt-3 grid gap-3 sm:grid-cols-2">
     <div>
-      <label class="label" for="pa.{{ t.target_id }}">Hesap açılsın</label>
+      <label class="label" for="pa.{{ t.target_id }}">{{ lang.t("def.provision") }}</label>
       <select class="input" id="pa.{{ t.target_id }}" name="pa.{{ t.target_id }}">
-        <option value=""{% if t.provision == "" %} selected{% endif %}>Söylemiyor</option>
-        <option value="true"{% if t.provision == "true" %} selected{% endif %}>Evet</option>
-        <option value="false"{% if t.provision == "false" %} selected{% endif %}>Hayır</option>
+        <option value=""{% if t.provision == "" %} selected{% endif %}>{{ lang.t("def.unset") }}</option>
+        <option value="true"{% if t.provision == "true" %} selected{% endif %}>{{ lang.t("common.yes") }}</option>
+        <option value="false"{% if t.provision == "false" %} selected{% endif %}>{{ lang.t("common.no") }}</option>
       </select>
     </div>
     <div>
       <label class="label" for="ct.{{ t.target_id }}">OU / COS</label>
       <select class="input" id="ct.{{ t.target_id }}" name="ct.{{ t.target_id }}">
-        <option value="">Söylemiyor</option>
+        <option value="">{{ lang.t("def.unset") }}</option>
         {% for c in t.containers %}<option value="{{ c.id }}"{% if c.selected %} selected{% endif %}>{{ c.label }}</option>{% endfor %}
       </select>
     </div>
     <div>
-      <label class="label" for="ed.{{ t.target_id }}">E-posta alan adı</label>
+      <label class="label" for="ed.{{ t.target_id }}">{{ lang.t("def.email_domain") }}</label>
       <input class="input" type="text" id="ed.{{ t.target_id }}" name="ed.{{ t.target_id }}" value="{{ t.email_domain }}">
     </div>
     <div>
-      <label class="label" for="us.{{ t.target_id }}">UPN soneki</label>
+      <label class="label" for="us.{{ t.target_id }}">{{ lang.t("def.upn_suffix") }}</label>
       <input class="input" type="text" id="us.{{ t.target_id }}" name="us.{{ t.target_id }}" value="{{ t.upn_suffix }}">
     </div>
   </div>

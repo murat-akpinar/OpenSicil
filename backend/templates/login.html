@@ -1,26 +1,26 @@
 {% extends "base_auth.html" %}
-{% block title %}Giriş — OpenSicil{% endblock %}
+{% block title %}{{ lang.t("login.title") }} — OpenSicil{% endblock %}
 {% block content %}
-<h1 class="h1 mb-1">Yönetim girişi</h1>
-<p class="muted mb-5 text-sm">Kimlik yaşam döngüsü yönetimi</p>
+<h1 class="h1 mb-1">{{ lang.t("login.title") }}</h1>
+<p class="muted mb-5 text-sm">{{ lang.t("login.subtitle") }}</p>
 {% if !error.is_empty() %}
 <p class="alert alert-err">{{ error }}</p>
 {% endif %}
 {% if !oidc_admin_verified %}
 <form method="post" action="/login">
   <div class="field">
-    <label class="label" for="username">Kullanıcı adı</label>
+    <label class="label" for="username">{{ lang.t("login.username") }}</label>
     <input class="input" type="text" id="username" name="username" value="admin" required>
   </div>
   <div class="field">
-    <label class="label" for="password">Parola</label>
+    <label class="label" for="password">{{ lang.t("login.password") }}</label>
     <input class="input" type="password" id="password" name="password" required>
   </div>
-  <button class="btn btn-primary w-full" type="submit">Giriş</button>
-  <p class="hint">Yerel bootstrap hesabı yalnızca Yapılandırma sayfasına erişir.</p>
+  <button class="btn btn-primary w-full" type="submit">{{ lang.t("login.submit") }}</button>
+  <p class="hint">{{ lang.t("login.bootstrap_hint") }}</p>
 </form>
 {% endif %}
 {% if oidc_configured %}
-<a href="/oidc/login" class="btn btn-ok w-full{% if !oidc_admin_verified %} mt-4{% endif %}">OIDC ile giriş</a>
+<a href="/oidc/login" class="btn btn-ok w-full{% if !oidc_admin_verified %} mt-4{% endif %}">{{ lang.t("login.oidc") }}</a>
 {% endif %}
 {% endblock %}

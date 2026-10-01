@@ -3,32 +3,32 @@
 {% block content %}
 <div class="page-head">
   <div>
-    <h1 class="h1">Kimlikler</h1>
+    <h1 class="h1">{{ lang.t("nav.identities") }}</h1>
     <p class="muted text-sm">{{ username }} · {{ authorities.join(", ") }}</p>
   </div>
-  <a class="btn btn-primary" href="/identities/new">Yeni kimlik</a>
+  <a class="btn btn-primary" href="/identities/new">{{ lang.t("home.new_identity") }}</a>
 </div>
 {% if identities.is_empty() %}
 <div class="card text-center">
-  <p class="h2">Henüz kimlik yok</p>
-  <p class="muted mb-4 text-sm">İlk personeli kaydedin; hesap, grup ve e-posta rollerden türetilir.</p>
-  <a class="btn btn-primary" href="/identities/new">Yeni kimlik</a>
+  <p class="h2">{{ lang.t("home.empty_title") }}</p>
+  <p class="muted mb-4 text-sm">{{ lang.t("home.empty_hint") }}</p>
+  <a class="btn btn-primary" href="/identities/new">{{ lang.t("home.new_identity") }}</a>
 </div>
 {% else %}
 <div class="card p-0 overflow-x-auto">
   <table class="tbl">
-    <thead><tr><th>Ad Soyad</th><th>Sicil no</th><th>Durum</th></tr></thead>
+    <thead><tr><th>{{ lang.t("field.full_name") }}</th><th>{{ lang.t("field.employee_number") }}</th><th>{{ lang.t("field.state") }}</th></tr></thead>
     <tbody>
     {% for i in identities %}
       <tr>
         <td><a class="link" href="/identities/{{ i.id }}">{{ i.name }}</a></td>
         <td class="muted">{{ i.employee_number }}</td>
-        <td><span class="badge badge-{{ i.state_kind }}">{{ i.state }}</span></td>
+        <td><span class="badge badge-{{ i.state_kind }}">{{ lang.key("state", i.state) }}</span></td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
 </div>
-<p class="muted mt-3 text-xs">Son {{ identities.len() }} kimlik.</p>
+<p class="muted mt-3 text-xs">{{ lang.t1("home.count_note", identities.len()) }}</p>
 {% endif %}
 {% endblock %}

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="tr">
+<html lang="{{ lang.code() }}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -14,18 +14,24 @@
       <a class="brand" href="/"><span class="brand-mark">OS</span>OpenSicil</a>
       {% block nav %}
       <nav class="nav">
-        <a class="nav-link" href="/">Kimlikler</a>
-        <a class="nav-link" href="/upcoming">Yaklaşan bitişler</a>
-        <a class="nav-link" href="/roles">Roller</a>
-        <a class="nav-link" href="/departments">Departmanlar</a>
-        <a class="nav-link" href="/targets">Hedef sistemler</a>
-        <a class="nav-link" href="/used-names">Kullanılmış adlar</a>
+        <a class="nav-link" href="/">{{ lang.t("nav.identities") }}</a>
+        <a class="nav-link" href="/upcoming">{{ lang.t("nav.upcoming") }}</a>
+        <a class="nav-link" href="/roles">{{ lang.t("nav.roles") }}</a>
+        <a class="nav-link" href="/departments">{{ lang.t("nav.departments") }}</a>
+        <a class="nav-link" href="/targets">{{ lang.t("nav.targets") }}</a>
+        <a class="nav-link" href="/used-names">{{ lang.t("nav.used_names") }}</a>
       </nav>
       {% endblock %}
       <div class="ml-auto flex items-center gap-2">
-        <button class="btn btn-ghost btn-sm" id="theme-toggle" type="button" aria-label="Temayı değiştir">☾</button>
+        {% block lang_switch %}
+        {# ADR-089: tercih operator oturumunda saklanir; dugme obur dile gecer #}
+        <form method="post" action="/lang">
+          <button class="btn btn-ghost btn-sm" type="submit" name="lang" value="{{ lang.other_code() }}" aria-label="{{ lang.t("shell.language") }}">{{ lang.other_label() }}</button>
+        </form>
+        {% endblock %}
+        <button class="btn btn-ghost btn-sm" id="theme-toggle" type="button" aria-label="{{ lang.t("shell.theme") }}">☾</button>
         {% block topbar_end %}
-        <form method="post" action="/logout"><button class="btn btn-ghost btn-sm" type="submit">Çıkış</button></form>
+        <form method="post" action="/logout"><button class="btn btn-ghost btn-sm" type="submit">{{ lang.t("shell.logout") }}</button></form>
         {% endblock %}
       </div>
     </div>

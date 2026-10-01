@@ -12,6 +12,7 @@ use axum::Router;
 use sqlx::PgPool;
 
 use crate::audit::{FIRST_PASSWORD_REQUESTED, FIRST_PASSWORD_SHOWN};
+use crate::i18n::Lang;
 use crate::identity_web::{allowed, audit_operator, forbidden, internal, OperatorSession};
 use crate::web::{render, AppState};
 
@@ -88,7 +89,7 @@ async fn create(
     Path(id): Path<i64>,
 ) -> Response {
     if !allowed(&op, AUTHORITIES) {
-        return forbidden();
+        return forbidden(op.lang);
     }
     // v1: parola AD'nindir (ADR-009); Zimbra girişi AD parolasıyla
     let ad: Option<i64> =
@@ -100,7 +101,7 @@ async fn create(
             Err(e) => return internal("hedef sistem okunamadı", e),
         };
     let Some(ad) = ad else {
-        return (StatusCode::NOT_FOUND, "AD hedefi yok.").into_response();
+        return (StatusCode::NOT_FOUND, op.lang.t("err.ad_target_missing")).into_response();
     };
     let fp = match request(&state.pool, id, ad, &op.username).await {
         Ok(fp) => fp,
@@ -117,6 +118,7 @@ async fn create(
 #[derive(Template)]
 #[template(path = "first_password.html")]
 struct FirstPasswordTemplate {
+    lang: Lang,
     identity_id: i64,
     name: String,
     username: String,
@@ -134,19 +136,24 @@ async fn show(
     Path((id, fp)): Path<(i64, i64)>,
 ) -> Response {
     if !allowed(&op, AUTHORITIES) {
-        return forbidden();
+        return forbidden(op.lang);
     }
     let header = match person_header(&state.pool, id).await {
         Ok(Some(h)) => h,
-        Ok(None) => return (StatusCode::NOT_FOUND, "Kimlik bulunamadı.").into_response(),
+        Ok(None) => {
+            return (StatusCode::NOT_FOUND, op.lang.t("err.identity_not_found")).into_response()
+        }
         Err(e) => return internal("kimlik okunamadı", e),
     };
     let status = match take(&state.pool, &state.aead_key, fp, id).await {
         Ok(Some(s)) => s,
-        Ok(None) => return (StatusCode::NOT_FOUND, "İstek bulunamadı.").into_response(),
+        Ok(None) => {
+            return (StatusCode::NOT_FOUND, op.lang.t("err.request_not_found")).into_response()
+        }
         Err(e) => return internal("ilk parola okunamadı", e),
     };
     let mut page = FirstPasswordTemplate {
+        lang: op.lang,
         identity_id: id,
         name: header.0,
         username: header.1,
@@ -169,10 +176,7 @@ async fn show(
             let detail = serde_json::json!({ "first_password_id": fp });
             audit_operator(&state, &op, FIRST_PASSWORD_SHOWN, Some(id), detail).await;
         }
-        Status::AlreadyShown => {
-            page.error =
-                "Parola bir kez gösterildi ve silindi; gerekirse yeniden isteyin.".to_string()
-        }
+        Status::AlreadyShown => page.error = op.lang.t("err.first_password_shown").to_string(),
         Status::Rejected(reason) => page.error = reason,
     }
     render(&page)
@@ -220,6 +224,7 @@ mod tests {
                     username: "yardim.masasi".to_string(),
                     email: "ym@example.org".to_string(),
                     authorities: authorities.iter().map(|a| a.to_string()).collect(),
+                    lang: crate::i18n::DEFAULT,
                 };
                 let token = crate::operator_session::create_session(&pool, &operator)
                     .await

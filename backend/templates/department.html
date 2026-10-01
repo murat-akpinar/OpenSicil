@@ -2,32 +2,32 @@
 {% block title %}{{ dept.def.name }} — OpenSicil{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1 class="h1">{{ dept.def.name }} <span class="chip ml-2 text-sm">departman</span></h1>
-  <a class="link text-sm" href="/departments">Departmanlar</a>
+  <h1 class="h1">{{ dept.def.name }} <span class="chip ml-2 text-sm">{{ lang.t("departments.chip") }}</span></h1>
+  <a class="link text-sm" href="/departments">{{ lang.t("nav.departments") }}</a>
 </div>
 {% if !error.is_empty() %}<p class="alert alert-err">{{ error }}</p>{% endif %}
 {% let show_settings = true %}
 <form method="post" action="/departments/{{ dept.def.id }}" class="space-y-6">
   <div class="grid gap-4 sm:grid-cols-3">
     <div>
-      <label class="label" for="name">Ad</label>
+      <label class="label" for="name">{{ lang.t("field.name") }}</label>
       <input class="input" type="text" id="name" name="name" value="{{ dept.def.name }}" required>
     </div>
     <div>
-      <label class="label" for="code">Kod</label>
+      <label class="label" for="code">{{ lang.t("field.code") }}</label>
       <input class="input" type="text" id="code" name="code" value="{{ dept.code }}">
     </div>
     <div>
-      <label class="label" for="parent_id">Üst departman</label>
+      <label class="label" for="parent_id">{{ lang.t("departments.parent") }}</label>
       <select class="input" id="parent_id" name="parent_id">
-        <option value="">Kök</option>
+        <option value="">{{ lang.t("departments.root") }}</option>
         {% for p in parents %}<option value="{{ p.id }}"{% if p.selected %} selected{% endif %}>{{ p.label }}</option>{% endfor %}
       </select>
     </div>
   </div>
   {% include "definition_targets.html" %}
   {% if can_edit %}
-  <button class="btn btn-primary w-full" type="submit">Kaydet</button>
+  <button class="btn btn-primary w-full" type="submit">{{ lang.t("common.save") }}</button>
   {% endif %}
 </form>
 {% endblock %}

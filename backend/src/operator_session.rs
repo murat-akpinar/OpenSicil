@@ -3,6 +3,7 @@
 
 use sqlx::PgPool;
 
+use crate::i18n::Lang;
 use crate::token::{generate_token, hash_token};
 
 pub const SESSION_LIFETIME_HOURS: i64 = 8;
@@ -12,19 +13,22 @@ pub struct Operator {
     pub username: String,
     pub email: String,
     pub authorities: Vec<String>,
+    /// Arayuz dili tercihi; oturum satirinda saklanir (ADR-089)
+    pub lang: Lang,
 }
 
 pub async fn create_session(pool: &PgPool, operator: &Operator) -> Result<String, sqlx::Error> {
     let token = generate_token();
     sqlx::query(
-        "INSERT INTO operator_sessions (token_hash, subject, username, email, authorities, expires_at) \
-         VALUES ($1, $2, $3, $4, $5, now() + make_interval(hours => $6))",
+        "INSERT INTO operator_sessions (token_hash, subject, username, email, authorities, lang, expires_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, now() + make_interval(hours => $7))",
     )
     .bind(hash_token(&token))
     .bind(&operator.subject)
     .bind(&operator.username)
     .bind(&operator.email)
     .bind(&operator.authorities)
+    .bind(operator.lang.code())
     .bind(SESSION_LIFETIME_HOURS as i32)
     .execute(pool)
     .await?;
@@ -32,19 +36,32 @@ pub async fn create_session(pool: &PgPool, operator: &Operator) -> Result<String
 }
 
 pub async fn validate_session(pool: &PgPool, token: &str) -> Result<Option<Operator>, sqlx::Error> {
-    let row: Option<(String, String, String, Vec<String>)> = sqlx::query_as(
-        "SELECT subject, username, email, authorities FROM operator_sessions \
+    let row: Option<(String, String, String, Vec<String>, String)> = sqlx::query_as(
+        "SELECT subject, username, email, authorities, lang FROM operator_sessions \
          WHERE token_hash = $1 AND expires_at > now()",
     )
     .bind(hash_token(token))
     .fetch_optional(pool)
     .await?;
-    Ok(row.map(|(subject, username, email, authorities)| Operator {
-        subject,
-        username,
-        email,
-        authorities,
-    }))
+    Ok(
+        row.map(|(subject, username, email, authorities, lang)| Operator {
+            subject,
+            username,
+            email,
+            authorities,
+            lang: Lang::from_code(&lang),
+        }),
+    )
+}
+
+/// Dil secicisi: tercih bu oturum icin kalicidir (ADR-089).
+pub async fn set_lang(pool: &PgPool, token: &str, lang: Lang) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE operator_sessions SET lang = $2 WHERE token_hash = $1")
+        .bind(hash_token(token))
+        .bind(lang.code())
+        .execute(pool)
+        .await?;
+    Ok(())
 }
 
 pub async fn delete_session(pool: &PgPool, token: &str) -> Result<(), sqlx::Error> {
@@ -65,6 +82,7 @@ mod tests {
             username: "test-admin".to_string(),
             email: "test-admin@example.org".to_string(),
             authorities: vec!["admin".to_string(), "hr".to_string()],
+            lang: crate::i18n::DEFAULT,
         }
     }
 

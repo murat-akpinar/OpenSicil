@@ -18,6 +18,7 @@
 - Faz 1a dagitim ve migration komutlarini doldur
 - MidPoint denemesi yapıldı, ADR-002 kararı degismedi
 - Gösterge panelini v1 kapsamına ekle (ADR-076)
+- Arayüz kabuğu kutucuğu işaretlendi, durum notu
 
 ### Testler
 
@@ -67,4 +68,5 @@
 - Mevcut hesap ipucuyla gözlem modunda sahiplenme (ADR-018, ADR-086)
 - Gözlem farkı ve tek kimlik için yönetime alma (ADR-087)
 - Arayüz kabuğu — derlenmiş Tailwind CSS, Catppuccin teması, self-host font (ADR-088)
+- TR/EN dil seçimi — gömülü TOML, lang.t(), tercih oturumda (ADR-089)
 

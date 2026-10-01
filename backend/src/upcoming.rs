@@ -12,6 +12,7 @@ use axum::Router;
 use serde::Deserialize;
 use sqlx::PgPool;
 
+use crate::i18n::Lang;
 use crate::identity_web::{internal, OperatorSession};
 use crate::web::{render, AppState};
 
@@ -19,7 +20,10 @@ const DEFAULT_DAYS: i32 = 30;
 const MAX_DAYS: i32 = 365;
 
 pub struct Upcoming {
+    /// Olay turu anahtari; ekran karsiligi i18n'de (upcomingkind.<anahtar>)
     pub kind: String,
+    /// Tura bagli ek bilgi (ek rolde rolun adi), yoksa bos
+    pub detail: String,
     pub identity_id: i64,
     pub name: String,
     pub day: String,
@@ -27,23 +31,27 @@ pub struct Upcoming {
 
 // Dort kaynak tek sorguda; gunler kurulum saat diliminde (ADR-039).
 pub async fn list(pool: &PgPool, time_zone: &str, days: i32) -> Result<Vec<Upcoming>, sqlx::Error> {
-    let rows: Vec<(String, i64, String, String)> = sqlx::query_as(
+    // Tur ekranda cevrilir (ADR-089): sorgu metin degil anahtar ve ek bilgi dondurur.
+    let rows: Vec<(String, String, i64, String, String)> = sqlx::query_as(
         "WITH today AS (SELECT (now() AT TIME ZONE $1)::date AS d), \
          ends AS ( \
-           SELECT 'Bitiş' AS kind, i.id, i.given_name || ' ' || i.surname AS name, \
+           SELECT 'end' AS kind, ''::text AS detail, i.id, \
+                  i.given_name || ' ' || i.surname AS name, \
                   ((i.end_at AT TIME ZONE $1) - interval '1 day')::date AS day \
            FROM identities i WHERE i.deleted_at IS NULL AND i.end_at > now() \
            UNION ALL \
-           SELECT 'Ek rol bitişi: ' || r.name, i.id, i.given_name || ' ' || i.surname, a.ends_on \
+           SELECT 'role_end', r.name, i.id, i.given_name || ' ' || i.surname, a.ends_on \
            FROM identity_additional_roles a JOIN identities i ON i.id = a.identity_id \
            JOIN roles r ON r.id = a.role_id WHERE i.deleted_at IS NULL AND a.ends_on IS NOT NULL \
            UNION ALL \
-           SELECT 'Askı başlangıcı', i.id, i.given_name || ' ' || i.surname, i.suspension_start \
+           SELECT 'suspension_start', '', i.id, i.given_name || ' ' || i.surname, \
+                  i.suspension_start \
            FROM identities i WHERE i.deleted_at IS NULL AND i.suspension_start IS NOT NULL \
            UNION ALL \
-           SELECT 'Askıdan dönüş', i.id, i.given_name || ' ' || i.surname, i.suspension_end + 1 \
+           SELECT 'suspension_return', '', i.id, i.given_name || ' ' || i.surname, \
+                  i.suspension_end + 1 \
            FROM identities i WHERE i.deleted_at IS NULL AND i.suspension_end IS NOT NULL) \
-         SELECT e.kind, e.id, e.name, to_char(e.day, 'YYYY-MM-DD') FROM ends e, today \
+         SELECT e.kind, e.detail, e.id, e.name, to_char(e.day, 'YYYY-MM-DD') FROM ends e, today \
          WHERE e.day >= today.d AND e.day <= today.d + $2 ORDER BY e.day, e.name, e.kind",
     )
     .bind(time_zone)
@@ -52,8 +60,9 @@ pub async fn list(pool: &PgPool, time_zone: &str, days: i32) -> Result<Vec<Upcom
     .await?;
     Ok(rows
         .into_iter()
-        .map(|(kind, identity_id, name, day)| Upcoming {
+        .map(|(kind, detail, identity_id, name, day)| Upcoming {
             kind,
+            detail,
             identity_id,
             name,
             day,
@@ -73,18 +82,23 @@ struct DaysQuery {
 #[derive(Template)]
 #[template(path = "upcoming.html")]
 struct UpcomingTemplate {
+    lang: Lang,
     days: i32,
     rows: Vec<Upcoming>,
 }
 
 async fn page(
-    OperatorSession(_op): OperatorSession,
+    OperatorSession(op): OperatorSession,
     State(state): State<AppState>,
     Query(q): Query<DaysQuery>,
 ) -> Response {
     let days = q.days.unwrap_or(DEFAULT_DAYS).clamp(1, MAX_DAYS);
     match list(&state.pool, &state.time_zone, days).await {
-        Ok(rows) => render(&UpcomingTemplate { days, rows }),
+        Ok(rows) => render(&UpcomingTemplate {
+            lang: op.lang,
+            days,
+            rows,
+        }),
         Err(e) => internal("yaklaşan bitişler okunamadı", e),
     }
 }
@@ -131,14 +145,12 @@ mod tests {
         let kinds: Vec<&str> = rows.iter().map(|r| r.kind.as_str()).collect();
         assert_eq!(
             kinds,
-            vec![
-                "Askı başlangıcı",
-                "Ek rol bitişi: Nöbet",
-                "Bitiş",
-                "Askıdan dönüş"
-            ],
+            vec!["suspension_start", "role_end", "end", "suspension_return"],
             "{rows:?}",
         );
+        // Ek rolde tur anahtari yaninda rolun adi (ADR-089: metin ekranda kurulur)
+        assert_eq!(rows[1].detail, "Nöbet");
+        assert!(rows[0].detail.is_empty());
         assert_eq!(rows[2].identity_id, ids[0]);
         assert_eq!(
             list(&pool, tz, 4).await.unwrap().len(),

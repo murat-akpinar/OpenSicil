@@ -12,6 +12,7 @@ use axum::Router;
 use serde::Deserialize;
 use sqlx::PgPool;
 
+use crate::i18n::Lang;
 use crate::identity_web::{allowed, audit_operator, forbidden, internal, OperatorSession};
 use crate::operator_session::Operator;
 use crate::web::{render, AppState};
@@ -21,6 +22,7 @@ const RELEASE_AUTHORITIES: &[&str] = &["admin"];
 pub struct UsedName {
     pub id: i64,
     pub name: String,
+    /// Veritabani turu (username/email); ekran karsiligi i18n'de (usedkind.<tur>)
     pub kind: String,
     pub former_identity_id: String,
     pub burned_at: String,
@@ -52,11 +54,7 @@ pub async fn list(pool: &PgPool, time_zone: &str) -> Result<Vec<UsedName>, sqlx:
             |(id, name, kind, former, burned_at, released_at, reason)| UsedName {
                 id,
                 name,
-                kind: match kind.as_str() {
-                    "username" => "kullanıcı adı".to_string(),
-                    "email" => "e-posta".to_string(),
-                    other => other.to_string(),
-                },
+                kind,
                 former_identity_id: former.map(|i| format!("#{i}")).unwrap_or_default(),
                 burned_at,
                 released: match (released_at, reason) {
@@ -90,6 +88,7 @@ pub fn routes() -> Router<AppState> {
 #[derive(Template)]
 #[template(path = "used_names.html")]
 struct UsedNamesTemplate {
+    lang: Lang,
     names: Vec<UsedName>,
     error: String,
     can_release: bool,
@@ -98,6 +97,7 @@ struct UsedNamesTemplate {
 async fn render_page(state: &AppState, op: &Operator, error: String) -> Response {
     match list(&state.pool, &state.time_zone).await {
         Ok(names) => render(&UsedNamesTemplate {
+            lang: op.lang,
             names,
             error,
             can_release: allowed(op, RELEASE_AUTHORITIES),
@@ -123,11 +123,11 @@ async fn release_submit(
     Form(form): Form<ReleaseForm>,
 ) -> Response {
     if !allowed(&op, RELEASE_AUTHORITIES) {
-        return forbidden();
+        return forbidden(op.lang);
     }
     let reason = form.reason.trim();
     if reason.is_empty() {
-        return render_page(&state, &op, "Gerekçe boş olamaz".to_string()).await;
+        return render_page(&state, &op, op.lang.t("err.reason_required").to_string()).await;
     }
     match release(&state.pool, id, reason).await {
         Ok(true) => {
@@ -135,7 +135,7 @@ async fn release_submit(
             audit_operator(&state, &op, crate::audit::USED_NAME_RELEASED, None, detail).await;
             Redirect::to("/used-names").into_response()
         }
-        Ok(false) => (StatusCode::CONFLICT, "Kayıt yok ya da zaten serbest.").into_response(),
+        Ok(false) => (StatusCode::CONFLICT, op.lang.t("err.used_name_not_found")).into_response(),
         Err(e) => internal("serbest bırakma yazılamadı", e),
     }
 }
@@ -168,6 +168,7 @@ mod tests {
                     username: "sistem.yoneticisi".to_string(),
                     email: "sy@example.org".to_string(),
                     authorities: authorities.iter().map(|a| a.to_string()).collect(),
+                    lang: crate::i18n::DEFAULT,
                 };
                 let token = crate::operator_session::create_session(&pool, &operator)
                     .await

@@ -7,20 +7,18 @@ use serde::Deserialize;
 use sqlx::PgPool;
 
 use crate::desired_state::{lifecycle_state, Date, LifecycleState};
+use crate::i18n::Lang;
 use crate::national_id::{self, Keys, NationalId};
 use crate::operator_guard::{timeline_from_row, TimelineRow};
 use crate::timeline_sql;
 
-pub const EMPLOYMENT_TYPES: [(&str, &str); 4] = [
-    ("permanent", "Kadrolu"),
-    ("contract", "Sözleşmeli"),
-    ("intern", "Stajyer"),
-    ("outsourced", "Dış kaynak"),
-];
+// Ekran karsiligi i18n'de: employment.<anahtar> (ADR-089)
+pub const EMPLOYMENT_TYPES: [&str; 4] = ["permanent", "contract", "intern", "outsourced"];
 const PERMANENT: &str = "permanent";
 const E164_MIN_DIGITS: usize = 8;
 const E164_MAX_DIGITS: usize = 15;
 const INTERVENTION_PREFIX: &str = "müdahale gerekiyor: ";
+const INTERVENTION_STATUS: &str = "needs_intervention";
 const RECENT_LIMIT: i64 = 50;
 const EVENT_LIMIT: i64 = 20;
 
@@ -83,7 +81,7 @@ pub struct NewIdentity {
 }
 
 // ADR-086: sAMAccountName bicimi; LDAP kacisi worker'da, burada yalnizca sekil.
-pub fn valid_account_hint(raw: &str) -> Result<Option<String>, String> {
+pub fn valid_account_hint(raw: &str) -> Result<Option<String>, &'static str> {
     const MAX_LEN: usize = 20;
     let hint = raw.trim();
     if hint.is_empty() {
@@ -91,16 +89,13 @@ pub fn valid_account_hint(raw: &str) -> Result<Option<String>, String> {
     }
     let allowed = |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_');
     if hint.len() > MAX_LEN || !hint.chars().all(allowed) {
-        return Err(
-            "Mevcut hesap ipucu AD kullanıcı adıdır: en çok 20 karakter, harf, rakam, nokta, tire, alt çizgi"
-                .to_string(),
-        );
+        return Err("err.account_hint_shape");
     }
     Ok(Some(hint.to_string()))
 }
 
 // Sekil kontrolu burada; ADR-011 normallestirmesi worker'da (validate_manual).
-pub fn valid_requested_username(raw: &str) -> Result<Option<String>, String> {
+pub fn valid_requested_username(raw: &str) -> Result<Option<String>, &'static str> {
     const MAX_LEN: usize = 20;
     let name = raw.trim().to_lowercase();
     if name.is_empty() {
@@ -110,38 +105,35 @@ pub fn valid_requested_username(raw: &str) -> Result<Option<String>, String> {
         && name.chars().all(|c| c.is_alphanumeric() || c == '.')
         && !name.starts_with('.')
         && !name.ends_with('.');
-    shape_ok
-        .then_some(Some(name))
-        .ok_or_else(|| format!("Kullanıcı adı en fazla {MAX_LEN} karakter, harf/rakam/nokta"))
+    // err.username_shape metni MAX_LEN degerini icerir
+    shape_ok.then_some(Some(name)).ok_or("err.username_shape")
 }
 
-pub fn validate(f: &IdentityForm) -> Result<NewIdentity, String> {
-    let given_name = required(&f.given_name, "Ad")?;
-    let surname = required(&f.surname, "Soyad")?;
+// Doner: i18n anahtari (ADR-089); ceviri web katmaninda.
+pub fn validate(f: &IdentityForm) -> Result<NewIdentity, &'static str> {
+    let given_name = required(&f.given_name, "err.given_name_blank")?;
+    let surname = required(&f.surname, "err.surname_blank")?;
     let national_id = optional(&f.national_id)
         .map(|raw| national_id::parse(&f.national_id_country, &raw))
         .transpose()?;
     let mobile_phone = optional(&f.mobile_phone).map(valid_e164).transpose()?;
-    let department_id = parse_id(&f.department_id, "Departman")?;
-    let primary_role_id = parse_id(&f.primary_role_id, "Birincil rol")?;
+    let department_id = parse_id(&f.department_id, "err.department_required")?;
+    let primary_role_id = parse_id(&f.primary_role_id, "err.primary_role_required")?;
     let manager_id = optional(&f.manager_id)
-        .map(|m| parse_id(&m, "Yönetici"))
+        .map(|m| parse_id(&m, "err.manager_invalid"))
         .transpose()?;
-    if !EMPLOYMENT_TYPES
-        .iter()
-        .any(|(k, _)| *k == f.employment_type)
-    {
-        return Err("Çalışma tipi seçilmeli".to_string());
+    if !EMPLOYMENT_TYPES.contains(&f.employment_type.as_str()) {
+        return Err("err.employment_type_required");
     }
-    let start = valid_date(&f.start_date, "Başlangıç tarihi")?;
+    let start = valid_date(&f.start_date, "err.start_date_format")?;
     let end = optional(&f.end_date)
-        .map(|d| valid_date(&d, "Bitiş tarihi"))
+        .map(|d| valid_date(&d, "err.end_date_format"))
         .transpose()?;
     if f.employment_type != PERMANENT && end.is_none() {
-        return Err("Kadrolu dışında bitiş tarihi zorunlu".to_string());
+        return Err("err.end_required_non_permanent");
     }
     if end.is_some_and(|e| e < start) {
-        return Err("Bitiş tarihi başlangıçtan önce olamaz".to_string());
+        return Err("err.end_before_start");
     }
     Ok(NewIdentity {
         given_name,
@@ -160,8 +152,8 @@ pub fn validate(f: &IdentityForm) -> Result<NewIdentity, String> {
     })
 }
 
-fn required(value: &str, label: &str) -> Result<String, String> {
-    optional(value).ok_or_else(|| format!("{label} boş olamaz"))
+fn required(value: &str, key: &'static str) -> Result<String, &'static str> {
+    optional(value).ok_or(key)
 }
 
 fn optional(value: &str) -> Option<String> {
@@ -169,25 +161,21 @@ fn optional(value: &str) -> Option<String> {
     (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
-fn parse_id(value: &str, label: &str) -> Result<i64, String> {
-    value
-        .trim()
-        .parse()
-        .map_err(|_| format!("{label} seçilmeli"))
+fn parse_id(value: &str, key: &'static str) -> Result<i64, &'static str> {
+    value.trim().parse().map_err(|_| key)
 }
 
-fn valid_date(value: &str, label: &str) -> Result<Date, String> {
-    Date::from_iso(value.trim()).ok_or_else(|| format!("{label} YYYY-AA-GG biçiminde olmalı"))
+fn valid_date(value: &str, key: &'static str) -> Result<Date, &'static str> {
+    Date::from_iso(value.trim()).ok_or(key)
 }
 
 // E.164: '+' ve 8–15 rakam, ilk rakam 0 degil (docs/03 cep telefonu).
-fn valid_e164(value: String) -> Result<String, String> {
+fn valid_e164(value: String) -> Result<String, &'static str> {
     let digits = value.strip_prefix('+').unwrap_or("");
     let ok = (E164_MIN_DIGITS..=E164_MAX_DIGITS).contains(&digits.len())
         && digits.bytes().all(|b| b.is_ascii_digit())
         && !digits.starts_with('0');
-    ok.then_some(value)
-        .ok_or_else(|| "Cep telefonu +905321234567 biçiminde olmalı".to_string())
+    ok.then_some(value).ok_or("err.mobile_format")
 }
 
 #[derive(Debug)]
@@ -381,16 +369,6 @@ async fn choices(pool: &PgPool, sql: &'static str) -> Result<Vec<Choice>, sqlx::
         .collect())
 }
 
-pub fn state_label(state: LifecycleState) -> &'static str {
-    match state {
-        LifecycleState::Pending => "bekliyor",
-        LifecycleState::Active => "aktif",
-        LifecycleState::Suspended => "askıda",
-        LifecycleState::Departed => "ayrıldı",
-        LifecycleState::Deleted => "silindi",
-    }
-}
-
 // Durum etiketinin rengi (arayuz kabugu, ADR-088): sablonda `badge badge-<kind>`.
 pub fn state_kind(state: LifecycleState) -> &'static str {
     match state {
@@ -411,20 +389,6 @@ pub fn state_key(state: LifecycleState) -> &'static str {
         LifecycleState::Departed => "departed",
         LifecycleState::Deleted => "deleted",
     }
-}
-
-fn label_of_key(key: &str) -> &str {
-    [
-        LifecycleState::Pending,
-        LifecycleState::Active,
-        LifecycleState::Suspended,
-        LifecycleState::Departed,
-        LifecycleState::Deleted,
-    ]
-    .into_iter()
-    .find(|s| state_key(*s) == key)
-    .map(state_label)
-    .unwrap_or(key)
 }
 
 pub async fn load_state(
@@ -466,7 +430,7 @@ pub async fn recent(pool: &PgPool, time_zone: &str) -> Result<Vec<Listed>, sqlx:
             id,
             name,
             employee_number: employee_number.unwrap_or_default(),
-            state: state.map(state_label).unwrap_or(""),
+            state: state.map(state_key).unwrap_or(""),
             state_kind: state.map(state_kind).unwrap_or("muted"),
         });
     }
@@ -490,8 +454,6 @@ pub struct Person {
     pub upn: String,
     pub requested_username: String,
     pub name_conflict_override: bool,
-    pub state: &'static str,
-    pub state_kind: &'static str,
 }
 
 // ADR-022/042: istek ve karar yalnizca ad henuz olusmamisken yazilir (false = olusmus).
@@ -530,7 +492,8 @@ pub struct Account {
 pub struct Job {
     pub id: i64,
     pub target: String,
-    pub status: &'static str,
+    /// Veritabani durumu; ekran karsiligi i18n'de (job.<anahtar>)
+    pub status: String,
     pub status_kind: &'static str,
     pub attempts: i32,
     pub next_attempt_at: String,
@@ -549,6 +512,9 @@ pub struct Event {
 
 pub struct PersonPage {
     pub person: Person,
+    /// Turetilen durum anahtari; ekran karsiligi i18n'de (state.<anahtar>)
+    pub state: &'static str,
+    pub state_kind: &'static str,
     pub accounts: Vec<Account>,
     pub jobs: Vec<Job>,
     pub events: Vec<Event>,
@@ -573,15 +539,21 @@ pub struct LifecycleInfo {
     pub deleted: bool,
     /// Hic sahiplenilmis baglantisi yoksa iptal dugmesi gosterilir (ADR-048)
     pub can_cancel: bool,
-    /// ADR-041/F-38: yonetici ayrilmissa "(ayrildi → devir: X)" ya da devir yok uyarisi
-    pub manager_note: String,
+    /// ADR-041/F-38: yonetici ayrilmis mi ve (varsa) devir yoneticisinin adi
+    pub manager_departed: bool,
+    pub handover_name: String,
     pub subordinates: i64,
     /// Kimlik ayrilmis ve etkin devir yoneticisi yok: astlar yoneticisiz kalir
     pub orphaned_subordinates: bool,
 }
 
 // Yoneticinin durumu ve devir yoneticisi; etkin yonetici ADR-041 tek atlama.
-async fn manager_note(pool: &PgPool, time_zone: &str, id: i64) -> Result<String, sqlx::Error> {
+// Doner: (yonetici ayrilmis mi, devir yoneticisinin adi).
+async fn manager_info(
+    pool: &PgPool,
+    time_zone: &str,
+    id: i64,
+) -> Result<(bool, String), sqlx::Error> {
     let row: Option<(i64, Option<i64>, Option<String>)> = sqlx::query_as(
         "SELECT m.id, m.handover_manager_id, h.given_name || ' ' || h.surname \
          FROM identities i JOIN identities m ON m.id = i.manager_id \
@@ -591,7 +563,7 @@ async fn manager_note(pool: &PgPool, time_zone: &str, id: i64) -> Result<String,
     .fetch_optional(pool)
     .await?;
     let Some((manager, handover, handover_name)) = row else {
-        return Ok(String::new());
+        return Ok((false, String::new()));
     };
     let gone = |s: Option<LifecycleState>| {
         matches!(
@@ -600,7 +572,7 @@ async fn manager_note(pool: &PgPool, time_zone: &str, id: i64) -> Result<String,
         )
     };
     if !gone(load_state(pool, time_zone, manager).await?) {
-        return Ok(String::new());
+        return Ok((false, String::new()));
     }
     let handover_state = match handover {
         Some(h) => load_state(pool, time_zone, h).await?,
@@ -608,8 +580,8 @@ async fn manager_note(pool: &PgPool, time_zone: &str, id: i64) -> Result<String,
     };
     Ok(
         match (handover_name, gone(handover_state), handover.is_some()) {
-            (Some(name), false, true) => format!(" (ayrıldı → devir: {name})"),
-            _ => " (ayrıldı, etkin yönetici yok)".to_string(),
+            (Some(name), false, true) => (true, name),
+            _ => (true, String::new()),
         },
     )
 }
@@ -651,6 +623,7 @@ async fn load_lifecycle(
     .bind(time_zone)
     .fetch_one(pool)
     .await?;
+    let manager = manager_info(pool, time_zone, id).await?;
     Ok(LifecycleInfo {
         end_date: r.0.unwrap_or_default(),
         handover_manager_id: r.1.map(|m| m.to_string()).unwrap_or_default(),
@@ -662,7 +635,8 @@ async fn load_lifecycle(
         departed: state == LifecycleState::Departed,
         deleted: state == LifecycleState::Deleted,
         can_cancel: r.7 && state != LifecycleState::Deleted,
-        manager_note: manager_note(pool, time_zone, id).await?,
+        manager_departed: manager.0,
+        handover_name: manager.1,
         subordinates: subordinates(pool, id).await?,
         orphaned_subordinates: state == LifecycleState::Departed
             && !handover_effective(pool, time_zone, r.1).await?,
@@ -688,7 +662,7 @@ pub enum LifecycleChange {
     Applied,
     /// `ayrildi`dan cikis: geri alma sayilir (ADR-059 madde 2)
     Reverted,
-    Rejected(String),
+    Rejected(&'static str),
 }
 
 // Planli ayrilis: son calisma gunu → ertesi gun 00:00 (ADR-038). Kimlik `ayrildi`
@@ -701,9 +675,7 @@ pub async fn set_departure(
     handover: Option<i64>,
 ) -> Result<LifecycleChange, sqlx::Error> {
     if Date::from_iso(end_date).is_none() {
-        return Ok(LifecycleChange::Rejected(
-            "Bitiş tarihi YYYY-AA-GG olmalı".to_string(),
-        ));
+        return Ok(LifecycleChange::Rejected("err.end_date_format"));
     }
     let before = load_state(pool, time_zone, id).await?;
     let done = sqlx::query(
@@ -719,10 +691,7 @@ pub async fn set_departure(
     .execute(pool)
     .await?;
     if done.rows_affected() != 1 {
-        return Ok(LifecycleChange::Rejected(
-            "Bitiş başlangıçtan önce olamaz, devir yöneticisi kendisi olamaz ya da kimlik silinmiş"
-                .to_string(),
-        ));
+        return Ok(LifecycleChange::Rejected("err.departure_rejected"));
     }
     after_departed(pool, time_zone, id, before).await
 }
@@ -836,16 +805,19 @@ pub async fn load_page(
     time_zone: &str,
     aead_key: &[u8; crate::crypto::KEY_LEN],
     id: i64,
+    lang: Lang,
 ) -> Result<Option<PersonPage>, sqlx::Error> {
     let Some(state) = load_state(pool, time_zone, id).await? else {
         return Ok(None);
     };
-    let person = load_person(pool, time_zone, aead_key, id, state).await?;
+    let person = load_person(pool, time_zone, aead_key, id, lang).await?;
     let jobs = load_jobs(pool, time_zone, id).await?;
     let name_intervention =
-        person.username.is_empty() && jobs.iter().any(|j| j.status == INTERVENTION_LABEL);
+        person.username.is_empty() && jobs.iter().any(|j| j.status == INTERVENTION_STATUS);
     Ok(Some(PersonPage {
-        accounts: load_accounts(pool, id, state).await?,
+        state: state_key(state),
+        state_kind: state_kind(state),
+        accounts: load_accounts(pool, id, state, lang).await?,
         events: load_events(pool, time_zone, id).await?,
         additional_roles: load_additional_roles(pool, id).await?,
         role_options: choices(
@@ -1014,7 +986,7 @@ async fn load_person(
     time_zone: &str,
     aead_key: &[u8; crate::crypto::KEY_LEN],
     id: i64,
-    state: LifecycleState,
+    lang: Lang,
 ) -> Result<Person, sqlx::Error> {
     let r: PersonRow = sqlx::query_as(
         "SELECT i.given_name, i.surname, i.employee_number, i.mobile_phone, i.national_id_enc, \
@@ -1038,16 +1010,12 @@ async fn load_person(
         national_id_masked: r
             .4
             .as_deref()
-            .map(|enc| masked(aead_key, enc))
+            .map(|enc| masked(aead_key, enc, lang))
             .unwrap_or_default(),
         department: r.5,
         role: r.6,
         manager: r.7.unwrap_or_default(),
-        employment_type: EMPLOYMENT_TYPES
-            .iter()
-            .find(|(k, _)| *k == r.8)
-            .map(|(_, l)| l.to_string())
-            .unwrap_or(r.8),
+        employment_type: r.8,
         start_date: r.9,
         end_at: r.10.unwrap_or_default(),
         username: r.11.unwrap_or_default(),
@@ -1055,18 +1023,16 @@ async fn load_person(
         upn: r.13.unwrap_or_default(),
         requested_username: r.14.unwrap_or_default(),
         name_conflict_override: r.15,
-        state: state_label(state),
-        state_kind: state_kind(state),
     })
 }
 
 // Acik goruntuleme ayri yetki ve denetim kaydi ister (docs/07); burada yalnizca maske.
-fn masked(aead_key: &[u8; crate::crypto::KEY_LEN], enc: &[u8]) -> String {
+fn masked(aead_key: &[u8; crate::crypto::KEY_LEN], enc: &[u8], lang: Lang) -> String {
     match national_id::decrypt(aead_key, enc) {
         Ok(value) => national_id::mask(&value),
         Err(e) => {
             eprintln!("identity: kimlik numarası çözülemedi: {e}");
-            "çözülemedi".to_string()
+            lang.t("person.undecryptable").to_string()
         }
     }
 }
@@ -1077,6 +1043,7 @@ async fn load_accounts(
     pool: &PgPool,
     id: i64,
     state: LifecycleState,
+    lang: Lang,
 ) -> Result<Vec<Account>, sqlx::Error> {
     type Row = (
         i64,
@@ -1109,17 +1076,15 @@ async fn load_accounts(
                     target_id,
                     target,
                     diff: match observed {
-                        true => result.unwrap_or_else(|| OBSERVED_NO_DIFF.to_string()),
-                        false => diff_text(state, external_id.is_some(), applied.as_deref()),
+                        true => {
+                            result.unwrap_or_else(|| lang.t("diff.observed_pending").to_string())
+                        }
+                        false => diff_text(lang, state, external_id.is_some(), applied.as_deref()),
                     },
                     external_id: external_id.unwrap_or_default(),
-                    origin: origin.as_deref().map(link_label).unwrap_or_default(),
-                    mode: mode.as_deref().map(link_label).unwrap_or_default(),
-                    applied_state: applied
-                        .as_deref()
-                        .map(label_of_key)
-                        .unwrap_or("")
-                        .to_string(),
+                    origin: origin.unwrap_or_default(),
+                    mode: mode.unwrap_or_default(),
+                    applied_state: applied.unwrap_or_default(),
                     observed,
                     manage_requested: requested,
                 }
@@ -1129,7 +1094,6 @@ async fn load_accounts(
 }
 
 const OBSERVED_MODE: &str = "observed";
-const OBSERVED_NO_DIFF: &str = "fark henüz hesaplanmadı: iş bekliyor";
 
 // ADR-018/087: operator farki gorup onaylar; backend yalnizca istegi yazar, modu
 // worker cevirir. Yonetilen ya da silinmis baglantida islem yok (false).
@@ -1165,41 +1129,18 @@ pub async fn request_management_observed(pool: &PgPool, id: i64) -> Result<u64, 
     Ok(done.rows_affected())
 }
 
-// account_links koken/mod anahtarlarinin ekran karsiligi (docs/03 hesap baglantisi).
-pub fn link_label(key: &str) -> String {
-    match key {
-        "provisioned" => "açıldı",
-        "adopted" => "sahiplenildi",
-        "managed" => "yönetiliyor",
-        "observed" => "gözlem",
-        other => other,
-    }
-    .to_string()
-}
-
-pub fn diff_text(state: LifecycleState, linked: bool, applied: Option<&str>) -> String {
+// account_links koken/mod ve durum anahtarlarinin ekran karsiligi i18n'de
+// (link.<anahtar>, state.<anahtar>); burada yalnizca fark cumlesi kurulur.
+pub fn diff_text(lang: Lang, state: LifecycleState, linked: bool, applied: Option<&str>) -> String {
     let desired = state_key(state);
     match applied {
-        _ if !linked => "hesap yok".to_string(),
-        Some(a) if a == desired => "uyumlu".to_string(),
-        Some(a) => format!(
-            "hedefte {}, olması gereken {}",
-            label_of_key(a),
-            state_label(state)
+        _ if !linked => lang.t("diff.no_account").to_string(),
+        Some(a) if a == desired => lang.t("diff.in_sync").to_string(),
+        Some(a) => lang.tn(
+            "diff.mismatch",
+            &[lang.key("state", a), lang.key("state", desired)],
         ),
-        None => format!("henüz uygulanmadı, olması gereken {}", state_label(state)),
-    }
-}
-
-const INTERVENTION_LABEL: &str = "müdahale gerekiyor";
-
-fn status_label(status: &str) -> &'static str {
-    match status {
-        "queued" => "kuyrukta",
-        "running" => "çalışıyor",
-        "succeeded" => "tamamlandı",
-        "needs_intervention" => INTERVENTION_LABEL,
-        _ => "bilinmiyor",
+        None => lang.t1("diff.not_applied", lang.key("state", desired)),
     }
 }
 
@@ -1259,14 +1200,14 @@ pub(crate) async fn load_jobs(
                 Job {
                     id,
                     target,
-                    status: status_label(&status),
                     status_kind: status_kind(&status),
                     attempts,
                     next_attempt_at: next,
                     summary,
                     detail,
                     result: result.unwrap_or_default(),
-                    retryable: status == "needs_intervention" && !retry,
+                    retryable: status == INTERVENTION_STATUS && !retry,
+                    status,
                 }
             },
         )
@@ -1328,31 +1269,48 @@ mod tests {
         assert_eq!(n.end_date.as_deref(), Some("2026-12-31"));
     }
 
+    // Dogrulama i18n anahtari dondurur (ADR-089); operator metni web katmaninda cevrilir.
     #[test]
     fn validate_rejects_bad_input_with_operator_messages() {
         let check = |mutate: fn(&mut IdentityForm), expected: &str| {
             let mut f = form();
             mutate(&mut f);
-            let err = validate(&f).unwrap_err();
-            assert!(err.contains(expected), "{err}");
+            let key = validate(&f).unwrap_err();
+            assert_eq!(key, expected);
+            assert_ne!(Lang::Tr.t(key), key, "anahtar tr.toml'de yok: {key}");
         };
-        check(|f| f.given_name = "  ".to_string(), "Ad boş");
-        check(|f| f.department_id = String::new(), "Departman");
-        check(|f| f.employment_type = "x".to_string(), "Çalışma tipi");
-        check(|f| f.start_date = "01.10.2026".to_string(), "Başlangıç");
-        check(|f| f.end_date = String::new(), "Kadrolu dışında");
+        check(|f| f.given_name = "  ".to_string(), "err.given_name_blank");
+        check(
+            |f| f.department_id = String::new(),
+            "err.department_required",
+        );
+        check(
+            |f| f.employment_type = "x".to_string(),
+            "err.employment_type_required",
+        );
+        check(
+            |f| f.start_date = "01.10.2026".to_string(),
+            "err.start_date_format",
+        );
+        check(
+            |f| f.end_date = String::new(),
+            "err.end_required_non_permanent",
+        );
         check(
             |f| f.end_date = "2026-09-01".to_string(),
-            "başlangıçtan önce",
+            "err.end_before_start",
         );
         check(
             |f| f.mobile_phone = "05321234567".to_string(),
-            "Cep telefonu",
+            "err.mobile_format",
         );
-        check(|f| f.mobile_phone = "+0532".to_string(), "Cep telefonu");
+        check(
+            |f| f.mobile_phone = "+0532".to_string(),
+            "err.mobile_format",
+        );
         check(
             |f| f.national_id = "10000000147".to_string(),
-            "kontrol hanesi",
+            "err.tr_id_checksum",
         );
     }
 
@@ -1412,15 +1370,19 @@ mod tests {
     #[test]
     fn diff_text_compares_desired_with_applied() {
         use LifecycleState::*;
-        assert_eq!(diff_text(Active, false, None), "hesap yok");
-        assert_eq!(diff_text(Active, true, Some("active")), "uyumlu");
+        let tr = Lang::Tr;
+        assert_eq!(diff_text(tr, Active, false, None), "hesap yok");
+        assert_eq!(diff_text(tr, Active, true, Some("active")), "uyumlu");
         assert_eq!(
-            diff_text(Active, true, Some("pending")),
+            diff_text(tr, Active, true, Some("pending")),
             "hedefte bekliyor, olması gereken aktif"
         );
-        assert!(diff_text(Departed, true, None).contains("henüz uygulanmadı"));
-        assert_eq!(link_label("provisioned"), "açıldı");
-        assert_eq!(link_label("x"), "x");
+        assert!(diff_text(tr, Departed, true, None).contains("henüz uygulanmadı"));
+        // Dil degisince ayni fark Ingilizce (ADR-089)
+        assert_eq!(
+            diff_text(Lang::En, Active, true, Some("pending")),
+            "target has pending, expected active"
+        );
     }
 
     #[tokio::test]
@@ -1503,15 +1465,19 @@ mod tests {
         assert!(similar_name_exists(&pool, "ayşe", "YILMAZ").await.unwrap());
         assert!(!similar_name_exists(&pool, "Yok", "Kimse").await.unwrap());
 
-        let page = load_page(&pool, tz, keys.aead, id).await.unwrap().unwrap();
+        let page = load_page(&pool, tz, keys.aead, id, Lang::Tr)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(page.person.national_id_masked, "10*******46");
-        assert_eq!(page.person.state, "aktif");
+        assert_eq!(page.state, "active");
         assert_eq!(page.person.manager, "Ayşe Yılmaz");
         assert_eq!(page.accounts.len(), 2);
         assert_eq!(page.accounts[0].diff, "hesap yok");
         assert_eq!(page.jobs.len(), 2);
-        assert_eq!(page.jobs[0].status, "kuyrukta");
-        assert!(load_page(&pool, tz, keys.aead, 999_999)
+        assert_eq!(page.jobs[0].status, "queued");
+        assert_eq!(Lang::Tr.key("job", &page.jobs[0].status), "kuyrukta");
+        assert!(load_page(&pool, tz, keys.aead, 999_999, Lang::Tr)
             .await
             .unwrap()
             .is_none());
@@ -1526,7 +1492,10 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        let page = load_page(&pool, tz, keys.aead, id).await.unwrap().unwrap();
+        let page = load_page(&pool, tz, keys.aead, id, Lang::Tr)
+            .await
+            .unwrap()
+            .unwrap();
         assert!(page.name_intervention);
         assert_eq!(page.person.requested_username, "ozel.ad");
         assert!(page.person.name_conflict_override);
@@ -1540,7 +1509,7 @@ mod tests {
             "ad oluştuktan sonra istek yazılmaz"
         );
         assert!(
-            !load_page(&pool, tz, keys.aead, id)
+            !load_page(&pool, tz, keys.aead, id, Lang::Tr)
                 .await
                 .unwrap()
                 .unwrap()
@@ -1713,7 +1682,8 @@ mod tests {
         let info = load_lifecycle(&pool, tz, id, LifecycleState::Active)
             .await
             .unwrap();
-        assert_eq!(info.manager_note, " (ayrıldı → devir: Ali Kaya)");
+        assert!(info.manager_departed);
+        assert_eq!(info.handover_name, "Ali Kaya");
         let boss = load_lifecycle(&pool, tz, ids[0], LifecycleState::Departed)
             .await
             .unwrap();
@@ -1731,7 +1701,8 @@ mod tests {
         let info = load_lifecycle(&pool, tz, id, LifecycleState::Active)
             .await
             .unwrap();
-        assert_eq!(info.manager_note, " (ayrıldı, etkin yönetici yok)");
+        assert!(info.manager_departed);
+        assert!(info.handover_name.is_empty());
 
         drop(pool);
         crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
@@ -1740,7 +1711,7 @@ mod tests {
     trait AwaitOk {
         fn await_ok(self) -> NewIdentity;
     }
-    impl AwaitOk for Result<NewIdentity, String> {
+    impl AwaitOk for Result<NewIdentity, &'static str> {
         fn await_ok(self) -> NewIdentity {
             self.expect("form geçerli olmalı")
         }

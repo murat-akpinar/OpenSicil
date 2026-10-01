@@ -1,12 +1,12 @@
 {% extends "base.html" %}
-{% block title %}Departmanlar — OpenSicil{% endblock %}
+{% block title %}{{ lang.t("nav.departments") }} — OpenSicil{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1 class="h1">Departmanlar</h1>
+  <h1 class="h1">{{ lang.t("nav.departments") }}</h1>
 </div>
 {% if !error.is_empty() %}<p class="alert alert-err">{{ error }}</p>{% endif %}
 <table class="tbl mb-6">
-  <thead><tr><th>Ad</th><th>Kod</th><th>Öğe</th></tr></thead>
+  <thead><tr><th>{{ lang.t("field.name") }}</th><th>{{ lang.t("field.code") }}</th><th>{{ lang.t("field.items") }}</th></tr></thead>
   <tbody>
   {% for d in departments %}
     <tr>
@@ -18,24 +18,24 @@
   </tbody>
 </table>
 {% if can_edit %}
-<h2 class="h2">Yeni departman</h2>
+<h2 class="h2">{{ lang.t("departments.new") }}</h2>
 <form method="post" action="/departments" class="card grid items-end gap-3 sm:grid-cols-3">
   <div>
-    <label class="label" for="name">Ad</label>
+    <label class="label" for="name">{{ lang.t("field.name") }}</label>
     <input class="input" type="text" id="name" name="name" required>
   </div>
   <div>
-    <label class="label" for="code">Kod</label>
+    <label class="label" for="code">{{ lang.t("field.code") }}</label>
     <input class="input" type="text" id="code" name="code">
   </div>
   <div>
-    <label class="label" for="parent_id">Üst departman</label>
+    <label class="label" for="parent_id">{{ lang.t("departments.parent") }}</label>
     <select class="input" id="parent_id" name="parent_id">
-      <option value="">Kök</option>
+      <option value="">{{ lang.t("departments.root") }}</option>
       {% for d in departments %}<option value="{{ d.id }}">{{ d.indent }}{{ d.name }}</option>{% endfor %}
     </select>
   </div>
-  <button class="btn btn-primary col-span-3" type="submit">Kaydet</button>
+  <button class="btn btn-primary col-span-3" type="submit">{{ lang.t("common.save") }}</button>
 </form>
 {% endif %}
 {% endblock %}

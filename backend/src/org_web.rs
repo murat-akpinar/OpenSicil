@@ -9,6 +9,7 @@ use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::Router;
 
+use crate::i18n::Lang;
 use crate::identity_web::{allowed, audit_operator, forbidden, internal, OperatorSession};
 use crate::operator_session::Operator;
 use crate::org::{self, CatalogOptions, Definition, Owner, SaveError, TargetSetting};
@@ -91,24 +92,24 @@ struct TargetView {
     upn_suffix: String,
 }
 
-fn item_label(c: &org::CatalogChoice) -> String {
+fn item_label(c: &org::CatalogChoice, lang: Lang) -> String {
     let mut label = c.display_name.clone();
     if !c.location.is_empty() && c.location != c.display_name {
         label.push_str(&format!(" ({})", c.location));
     }
     if c.missing {
-        label.push_str(" (kayıp)");
+        label.push_str(lang.t("catalog.missing"));
     }
     label
 }
 
-fn target_views(def: &Definition, options: &CatalogOptions) -> Vec<TargetView> {
+fn target_views(def: &Definition, options: &CatalogOptions, lang: Lang) -> Vec<TargetView> {
     let items = |list: &[org::CatalogChoice], target: i64, pick: &dyn Fn(i64) -> bool| {
         list.iter()
             .filter(|c| c.target_id == target)
             .map(|c| ItemView {
                 id: c.id,
-                label: item_label(c),
+                label: item_label(c, lang),
                 selected: pick(c.id),
             })
             .collect::<Vec<_>>()
@@ -151,9 +152,9 @@ fn settings_json(settings: &[TargetSetting]) -> serde_json::Value {
 }
 
 // Kutu: clippy result_large_err (Response buyuk); hata yolu sicak degil.
-fn save_error(e: SaveError, what: &str) -> Result<String, Box<Response>> {
+fn save_error(e: SaveError, what: &str) -> Result<&'static str, Box<Response>> {
     match e {
-        SaveError::Invalid(msg) => Ok(msg),
+        SaveError::Invalid(key) => Ok(key),
         SaveError::Db(e) => Err(Box::new(internal(what, e))),
     }
 }
@@ -161,8 +162,9 @@ fn save_error(e: SaveError, what: &str) -> Result<String, Box<Response>> {
 #[derive(Template)]
 #[template(path = "roles.html")]
 struct RolesTemplate {
+    lang: Lang,
     roles: Vec<org::RoleRow>,
-    kinds: &'static [(&'static str, &'static str)],
+    kinds: &'static [&'static str],
     error: String,
     can_edit: bool,
 }
@@ -170,6 +172,7 @@ struct RolesTemplate {
 #[derive(Template)]
 #[template(path = "role.html")]
 struct RoleTemplate {
+    lang: Lang,
     role: org::RoleDetail,
     targets: Vec<TargetView>,
     show_settings: bool,
@@ -180,6 +183,7 @@ struct RoleTemplate {
 #[derive(Template)]
 #[template(path = "departments.html")]
 struct DepartmentsTemplate {
+    lang: Lang,
     departments: Vec<org::DepartmentRow>,
     error: String,
     can_edit: bool,
@@ -188,6 +192,7 @@ struct DepartmentsTemplate {
 #[derive(Template)]
 #[template(path = "department.html")]
 struct DepartmentTemplate {
+    lang: Lang,
     dept: org::DepartmentDetail,
     parents: Vec<ItemView>,
     targets: Vec<TargetView>,
@@ -215,6 +220,7 @@ struct TargetFormView {
 #[derive(Template)]
 #[template(path = "targets.html")]
 struct TargetsTemplate {
+    lang: Lang,
     targets: Vec<TargetFormView>,
     error: String,
     can_edit: bool,
@@ -223,6 +229,7 @@ struct TargetsTemplate {
 async fn render_roles(state: &AppState, op: &Operator, error: String) -> Response {
     match org::list_roles(&state.pool).await {
         Ok(roles) => render(&RolesTemplate {
+            lang: op.lang,
             roles,
             kinds: &org::ROLE_KINDS,
             error,
@@ -245,7 +252,7 @@ async fn create_role(
     Form(form): Form<Vec<(String, String)>>,
 ) -> Response {
     if !allowed(&op, WRITE_AUTHORITIES) {
-        return forbidden();
+        return forbidden(op.lang);
     }
     let f = Fields(form);
     match org::create_role(&state.pool, f.get("kind"), f.get("name"), f.get("title")).await {
@@ -255,7 +262,7 @@ async fn create_role(
             Redirect::to(&format!("/roles/{id}")).into_response()
         }
         Err(e) => match save_error(e, "rol oluşturulamadı") {
-            Ok(msg) => render_roles(&state, &op, msg).await,
+            Ok(key) => render_roles(&state, &op, op.lang.t(key).to_string()).await,
             Err(response) => *response,
         },
     }
@@ -267,11 +274,14 @@ async fn render_role(state: &AppState, op: &Operator, id: i64, error: String) ->
         org::catalog_options(&state.pool).await,
     ) {
         (Ok(Some(role)), Ok(options)) => (role, options),
-        (Ok(None), _) => return (StatusCode::NOT_FOUND, "Rol bulunamadı.").into_response(),
+        (Ok(None), _) => {
+            return (StatusCode::NOT_FOUND, op.lang.t("err.role_not_found")).into_response()
+        }
         (Err(e), _) | (_, Err(e)) => return internal("rol okunamadı", e),
     };
     render(&RoleTemplate {
-        targets: target_views(&role.def, &options),
+        lang: op.lang,
+        targets: target_views(&role.def, &options, op.lang),
         show_settings: role.kind == "primary",
         role,
         error,
@@ -294,11 +304,13 @@ async fn save_role(
     Form(form): Form<Vec<(String, String)>>,
 ) -> Response {
     if !allowed(&op, WRITE_AUTHORITIES) {
-        return forbidden();
+        return forbidden(op.lang);
     }
     let current = match org::load_role(&state.pool, id).await {
         Ok(Some(role)) => role,
-        Ok(None) => return (StatusCode::NOT_FOUND, "Rol bulunamadı.").into_response(),
+        Ok(None) => {
+            return (StatusCode::NOT_FOUND, op.lang.t("err.role_not_found")).into_response()
+        }
         Err(e) => return internal("rol okunamadı", e),
     };
     let f = Fields(form);
@@ -309,7 +321,7 @@ async fn save_role(
     };
     if let Err(e) = org::save_role(&state.pool, id, f.get("title"), &edit).await {
         return match save_error(e, "rol kaydedilemedi") {
-            Ok(msg) => render_role(&state, &op, id, msg).await,
+            Ok(key) => render_role(&state, &op, id, op.lang.t(key).to_string()).await,
             Err(response) => *response,
         };
     }
@@ -334,6 +346,7 @@ async fn enqueue_affected(state: &AppState, owner: Owner, id: i64) {
 async fn render_departments(state: &AppState, op: &Operator, error: String) -> Response {
     match org::list_departments(&state.pool).await {
         Ok(departments) => render(&DepartmentsTemplate {
+            lang: op.lang,
             departments,
             error,
             can_edit: allowed(op, WRITE_AUTHORITIES),
@@ -355,7 +368,7 @@ async fn create_department(
     Form(form): Form<Vec<(String, String)>>,
 ) -> Response {
     if !allowed(&op, WRITE_AUTHORITIES) {
-        return forbidden();
+        return forbidden(op.lang);
     }
     let f = Fields(form);
     let parent = f.opt_i64("parent_id");
@@ -366,7 +379,7 @@ async fn create_department(
             Redirect::to(&format!("/departments/{id}")).into_response()
         }
         Err(e) => match save_error(e, "departman oluşturulamadı") {
-            Ok(msg) => render_departments(&state, &op, msg).await,
+            Ok(key) => render_departments(&state, &op, op.lang.t(key).to_string()).await,
             Err(response) => *response,
         },
     }
@@ -375,7 +388,9 @@ async fn create_department(
 async fn render_department(state: &AppState, op: &Operator, id: i64, error: String) -> Response {
     let dept = match org::load_department(&state.pool, id).await {
         Ok(Some(d)) => d,
-        Ok(None) => return (StatusCode::NOT_FOUND, "Departman bulunamadı.").into_response(),
+        Ok(None) => {
+            return (StatusCode::NOT_FOUND, op.lang.t("err.department_not_found")).into_response()
+        }
         Err(e) => return internal("departman okunamadı", e),
     };
     let (departments, options) = match (
@@ -386,7 +401,8 @@ async fn render_department(state: &AppState, op: &Operator, id: i64, error: Stri
         (Err(e), _) | (_, Err(e)) => return internal("departman seçenekleri okunamadı", e),
     };
     render(&DepartmentTemplate {
-        targets: target_views(&dept.def, &options),
+        lang: op.lang,
+        targets: target_views(&dept.def, &options, op.lang),
         parents: parent_options(&dept, &departments),
         dept,
         error,
@@ -409,11 +425,13 @@ async fn save_department(
     Form(form): Form<Vec<(String, String)>>,
 ) -> Response {
     if !allowed(&op, WRITE_AUTHORITIES) {
-        return forbidden();
+        return forbidden(op.lang);
     }
     let current = match org::load_department(&state.pool, id).await {
         Ok(Some(d)) => d,
-        Ok(None) => return (StatusCode::NOT_FOUND, "Departman bulunamadı.").into_response(),
+        Ok(None) => {
+            return (StatusCode::NOT_FOUND, op.lang.t("err.department_not_found")).into_response()
+        }
         Err(e) => return internal("departman okunamadı", e),
     };
     let f = Fields(form);
@@ -425,7 +443,7 @@ async fn save_department(
     };
     if let Err(e) = org::save_department(&state.pool, id, f.get("code"), parent, &edit).await {
         return match save_error(e, "departman kaydedilemedi") {
-            Ok(msg) => render_department(&state, &op, id, msg).await,
+            Ok(key) => render_department(&state, &op, id, op.lang.t(key).to_string()).await,
             Err(response) => *response,
         };
     }
@@ -456,7 +474,7 @@ async fn render_targets(state: &AppState, op: &Operator, error: String) -> Respo
                 .filter(|c| c.target_id == target.id)
                 .map(|c| ItemView {
                     id: c.id,
-                    label: item_label(c),
+                    label: item_label(c, op.lang),
                     selected: target.default_container_item_id == Some(c.id),
                 })
                 .collect(),
@@ -464,6 +482,7 @@ async fn render_targets(state: &AppState, op: &Operator, error: String) -> Respo
         })
         .collect();
     render(&TargetsTemplate {
+        lang: op.lang,
         targets: views,
         error,
         can_edit: allowed(op, WRITE_AUTHORITIES),
@@ -484,14 +503,14 @@ async fn save_target(
     Form(form): Form<Vec<(String, String)>>,
 ) -> Response {
     if !allowed(&op, WRITE_AUTHORITIES) {
-        return forbidden();
+        return forbidden(op.lang);
     }
     let Some(mut target) = org::list_targets(&state.pool)
         .await
         .map(|t| t.into_iter().find(|t| t.id == id))
         .unwrap_or_default()
     else {
-        return (StatusCode::NOT_FOUND, "Hedef sistem bulunamadı.").into_response();
+        return (StatusCode::NOT_FOUND, op.lang.t("err.target_not_found")).into_response();
     };
     let f = Fields(form);
     target.provision_account_default = f.get("provision_account_default") == "1";
@@ -501,13 +520,13 @@ async fn save_target(
         f.get("retention_days").trim().parse().ok(),
         f.get("password_reset_delay_days").trim().parse().ok(),
     ) else {
-        return render_targets(&state, &op, "Gün sayıları tam sayı olmalı".to_string()).await;
+        return render_targets(&state, &op, op.lang.t("err.day_numbers").to_string()).await;
     };
     target.retention_days = retention;
     target.password_reset_delay_days = delay;
     if let Err(e) = org::save_target(&state.pool, &target).await {
         return match save_error(e, "hedef sistem kaydedilemedi") {
-            Ok(msg) => render_targets(&state, &op, msg).await,
+            Ok(key) => render_targets(&state, &op, op.lang.t(key).to_string()).await,
             Err(response) => *response,
         };
     }
@@ -535,6 +554,7 @@ mod tests {
             username: "rol.yoneticisi".to_string(),
             email: "rol@example.org".to_string(),
             authorities: authorities.iter().map(|a| a.to_string()).collect(),
+            lang: crate::i18n::DEFAULT,
         };
         let token = crate::operator_session::create_session(pool, &operator)
             .await

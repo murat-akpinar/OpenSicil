@@ -7,26 +7,22 @@ use sqlx::{PgPool, Postgres, Transaction};
 
 use crate::jobs::Priority;
 
-// ADR-017: agac derinligi en fazla 8.
+// ADR-017: agac derinligi en fazla 8. err.depth_exceeded metni bu sayiyi icerir.
 pub const MAX_DEPTH: i64 = 8;
-pub const ROLE_KINDS: [(&str, &str); 3] = [
-    ("base", "Temel"),
-    ("primary", "Birincil"),
-    ("additional", "Ek"),
-];
+// Ekran karsiligi i18n'de: rolekind.<anahtar> (ADR-089)
+pub const ROLE_KINDS: [&str; 3] = ["base", "primary", "additional"];
 
+// Invalid: hata metni degil i18n anahtari (ADR-089); ceviri web katmaninda.
 #[derive(Debug)]
 pub enum SaveError {
-    Invalid(String),
+    Invalid(&'static str),
     Db(sqlx::Error),
 }
 
 impl From<sqlx::Error> for SaveError {
     fn from(e: sqlx::Error) -> Self {
         match e.as_database_error() {
-            Some(db) if db.is_unique_violation() => {
-                SaveError::Invalid("Bu ad ya da kod zaten kullanılıyor".to_string())
-            }
+            Some(db) if db.is_unique_violation() => SaveError::Invalid("err.name_or_code_taken"),
             _ => SaveError::Db(e),
         }
     }
@@ -34,18 +30,10 @@ impl From<sqlx::Error> for SaveError {
 
 pub struct RoleRow {
     pub id: i64,
-    pub kind_label: &'static str,
+    pub kind: String,
     pub name: String,
     pub title: String,
     pub entitlements: i64,
-}
-
-pub fn kind_label(kind: &str) -> &'static str {
-    ROLE_KINDS
-        .iter()
-        .find(|(k, _)| *k == kind)
-        .map(|(_, l)| *l)
-        .unwrap_or("")
 }
 
 pub async fn list_roles(pool: &PgPool) -> Result<Vec<RoleRow>, sqlx::Error> {
@@ -60,7 +48,7 @@ pub async fn list_roles(pool: &PgPool) -> Result<Vec<RoleRow>, sqlx::Error> {
         .into_iter()
         .map(|(id, kind, name, title, entitlements)| RoleRow {
             id,
-            kind_label: kind_label(&kind),
+            kind,
             name,
             title: title.unwrap_or_default(),
             entitlements,
@@ -75,17 +63,15 @@ pub async fn create_role(
     name: &str,
     title: &str,
 ) -> Result<i64, SaveError> {
-    if !ROLE_KINDS.iter().any(|(k, _)| *k == kind) {
-        return Err(SaveError::Invalid("Rol türü seçilmeli".to_string()));
+    if !ROLE_KINDS.contains(&kind) {
+        return Err(SaveError::Invalid("err.role_kind_required"));
     }
     let name = name.trim();
     if name.is_empty() {
-        return Err(SaveError::Invalid("Rol adı boş olamaz".to_string()));
+        return Err(SaveError::Invalid("err.role_name_blank"));
     }
     if kind == "base" && base_role_exists(pool).await? {
-        return Err(SaveError::Invalid(
-            "Temel rol kurulumda tektir, zaten var".to_string(),
-        ));
+        return Err(SaveError::Invalid("err.base_role_exists"));
     }
     let title = (kind == "primary" && !title.trim().is_empty()).then(|| title.trim().to_string());
     Ok(
@@ -126,7 +112,6 @@ pub struct Definition {
 pub struct RoleDetail {
     pub def: Definition,
     pub kind: String,
-    pub kind_label: &'static str,
     pub title: String,
 }
 
@@ -253,7 +238,6 @@ pub async fn load_role(pool: &PgPool, id: i64) -> Result<Option<RoleDetail>, sql
     };
     Ok(Some(RoleDetail {
         def: load_definition(pool, Owner::Role, id, name).await?,
-        kind_label: kind_label(&kind),
         kind,
         title: title.unwrap_or_default(),
     }))
@@ -325,8 +309,8 @@ fn blank_to_null(value: &str) -> Option<String> {
     (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
-fn required_name(name: &str, label: &str) -> Result<String, SaveError> {
-    blank_to_null(name).ok_or_else(|| SaveError::Invalid(format!("{label} boş olamaz")))
+fn required_name(name: &str, key: &'static str) -> Result<String, SaveError> {
+    blank_to_null(name).ok_or(SaveError::Invalid(key))
 }
 
 // ADR-007: tek degerli ayar yalnizca birincil rolde; digerlerinde gelen ayar yok sayilir.
@@ -336,7 +320,7 @@ pub async fn save_role(
     title: &str,
     edit: &DefinitionEdit,
 ) -> Result<(), SaveError> {
-    let name = required_name(&edit.name, "Rol adı")?;
+    let name = required_name(&edit.name, "err.role_name_blank")?;
     let kind: String = sqlx::query_scalar("SELECT kind FROM roles WHERE id = $1")
         .bind(id)
         .fetch_one(pool)
@@ -397,12 +381,10 @@ pub async fn create_department(
     code: &str,
     parent_id: Option<i64>,
 ) -> Result<i64, SaveError> {
-    let name = required_name(name, "Departman adı")?;
+    let name = required_name(name, "err.department_name_blank")?;
     if let Some(parent) = parent_id {
         if ancestor_depth(pool, parent).await? >= MAX_DEPTH {
-            return Err(SaveError::Invalid(format!(
-                "Derinlik {MAX_DEPTH} seviyeyi aşıyor (ADR-017)"
-            )));
+            return Err(SaveError::Invalid("err.depth_exceeded"));
         }
     }
     Ok(sqlx::query_scalar(
@@ -422,7 +404,7 @@ pub async fn save_department(
     parent_id: Option<i64>,
     edit: &DefinitionEdit,
 ) -> Result<(), SaveError> {
-    let name = required_name(&edit.name, "Departman adı")?;
+    let name = required_name(&edit.name, "err.department_name_blank")?;
     validate_parent(pool, id, parent_id).await?;
     let mut tx = pool.begin().await?;
     sqlx::query("UPDATE departments SET name = $2, code = $3, parent_id = $4 WHERE id = $1")
@@ -476,14 +458,10 @@ async fn validate_parent(pool: &PgPool, id: i64, parent_id: Option<i64>) -> Resu
     };
     let (height, cycle) = subtree(pool, id, Some(parent)).await?;
     if cycle {
-        return Err(SaveError::Invalid(
-            "Üst departman kendisi ya da kendi alt departmanı olamaz".to_string(),
-        ));
+        return Err(SaveError::Invalid("err.parent_cycle"));
     }
     if ancestor_depth(pool, parent).await? + height > MAX_DEPTH {
-        return Err(SaveError::Invalid(format!(
-            "Derinlik {MAX_DEPTH} seviyeyi aşıyor (ADR-017)"
-        )));
+        return Err(SaveError::Invalid("err.depth_exceeded"));
     }
     Ok(())
 }
@@ -599,7 +577,7 @@ pub async fn list_targets(pool: &PgPool) -> Result<Vec<TargetRow>, sqlx::Error> 
 // ADR-024: saklama ve silme onayi hedef basina; konteyner ayni hedefin OU/COS'u (FK).
 pub async fn save_target(pool: &PgPool, t: &TargetRow) -> Result<(), SaveError> {
     if t.retention_days < 0 || t.password_reset_delay_days < 0 {
-        return Err(SaveError::Invalid("Gün sayısı negatif olamaz".to_string()));
+        return Err(SaveError::Invalid("err.negative_days"));
     }
     sqlx::query(
         "UPDATE target_systems SET provision_account_default = $2, default_container_item_id = $3, \
@@ -616,7 +594,7 @@ pub async fn save_target(pool: &PgPool, t: &TargetRow) -> Result<(), SaveError> 
     .await
     .map_err(|e| match e.as_database_error() {
         Some(db) if db.is_foreign_key_violation() => {
-            SaveError::Invalid("Konteyner bu hedefin OU/COS öğesi olmalı".to_string())
+            SaveError::Invalid("err.container_wrong_target")
         }
         _ => SaveError::Db(e),
     })?;

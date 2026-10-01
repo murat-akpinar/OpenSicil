@@ -1,23 +1,23 @@
 {% extends "base.html" %}
-{% block title %}Yaklaşan bitişler — OpenSicil{% endblock %}
+{% block title %}{{ lang.t("nav.upcoming") }} — OpenSicil{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1 class="h1">Yaklaşan bitişler — {{ days }} gün</h1>
+  <h1 class="h1">{{ lang.t("nav.upcoming") }} — {{ lang.t1("upcoming.days_window", days) }}</h1>
 </div>
 <form method="get" action="/upcoming" class="flex gap-2 items-end mb-4 text-sm">
-  <label>Gün <input class="input w-24" type="number" min="1" max="365" name="days" value="{{ days }}"></label>
-  <button class="btn btn-primary" type="submit">Göster</button>
+  <label>{{ lang.t("upcoming.days") }} <input class="input w-24" type="number" min="1" max="365" name="days" value="{{ days }}"></label>
+  <button class="btn btn-primary" type="submit">{{ lang.t("upcoming.show") }}</button>
 </form>
 {% if rows.is_empty() %}
-<p class="muted">Bu pencerede bitiş, ek rol bitişi, askı başlangıcı ya da dönüş yok.</p>
+<p class="muted">{{ lang.t("upcoming.empty") }}</p>
 {% else %}
 <table class="tbl">
-  <thead><tr><th>Gün</th><th>Olay</th><th>Kişi</th></tr></thead>
+  <thead><tr><th>{{ lang.t("upcoming.day") }}</th><th>{{ lang.t("field.event") }}</th><th>{{ lang.t("field.person") }}</th></tr></thead>
   <tbody>
   {% for r in rows %}
     <tr>
       <td>{{ r.day }}</td>
-      <td>{{ r.kind }}</td>
+      <td>{{ lang.key("upcomingkind", r.kind) }}{% if !r.detail.is_empty() %}: {{ r.detail }}{% endif %}</td>
       <td><a class="link" href="/identities/{{ r.identity_id }}">{{ r.name }}</a></td>
     </tr>
   {% endfor %}

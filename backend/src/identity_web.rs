@@ -13,6 +13,7 @@ use axum::Router;
 use serde::Deserialize;
 
 use crate::cookie::{get_cookie, OPERATOR_SESSION_COOKIE_NAME};
+use crate::i18n::Lang;
 use crate::identity::{self, FormOptions, IdentityForm, PersonPage};
 use crate::operator_session::Operator;
 use crate::web::{render, AppState};
@@ -53,8 +54,8 @@ pub(crate) fn allowed(operator: &Operator, any_of: &[&str]) -> bool {
         .any(|a| any_of.contains(&a.as_str()))
 }
 
-pub(crate) fn forbidden() -> Response {
-    (StatusCode::FORBIDDEN, "Bu işlem için yetkiniz yok.").into_response()
+pub(crate) fn forbidden(lang: Lang) -> Response {
+    (StatusCode::FORBIDDEN, lang.t("err.no_permission")).into_response()
 }
 
 pub(crate) fn internal(what: &str, e: impl std::fmt::Display) -> Response {
@@ -90,7 +91,7 @@ async fn manage(
     Path((id, target_id)): Path<(i64, i64)>,
 ) -> Response {
     if !allowed(&op, REGISTER_AUTHORITIES) {
-        return forbidden();
+        return forbidden(op.lang);
     }
     match identity::request_management(&state.pool, id, target_id).await {
         Ok(true) => {
@@ -111,7 +112,7 @@ async fn manage(
             }
             Redirect::to(&format!("/identities/{id}")).into_response()
         }
-        Ok(false) => bad("Yönetime alınacak gözlem modunda hesap yok (ADR-018)."),
+        Ok(false) => bad(op.lang.t("err.observed_account_missing")),
         Err(e) => internal("yönetime alma isteği yazılamadı", e),
     }
 }
@@ -181,7 +182,7 @@ async fn departure(
     Form(form): Form<LifecycleForm>,
 ) -> Response {
     if !allowed(&op, REGISTER_AUTHORITIES) {
-        return forbidden();
+        return forbidden(op.lang);
     }
     let handover = opt(&form.handover_manager_id).and_then(|h| h.parse::<i64>().ok());
     let outcome = identity::set_departure(
@@ -220,7 +221,7 @@ async fn departure(
             )
             .await
         }
-        Ok(identity::LifecycleChange::Rejected(msg)) => bad(&msg),
+        Ok(identity::LifecycleChange::Rejected(key)) => bad(op.lang.t(key)),
         Err(e) => internal("ayrılış yazılamadı", e),
     }
 }
@@ -232,10 +233,10 @@ async fn emergency(
     Form(form): Form<LifecycleForm>,
 ) -> Response {
     if !allowed(&op, REGISTER_AUTHORITIES) {
-        return forbidden();
+        return forbidden(op.lang);
     }
     let Some(reason) = opt(&form.reason) else {
-        return bad("Acil ayrılış için gerekçe zorunlu.");
+        return bad(op.lang.t("err.emergency_reason_required"));
     };
     let handover = opt(&form.handover_manager_id).and_then(|h| h.parse::<i64>().ok());
     match identity::set_emergency_departure(&state.pool, id, handover).await {
@@ -252,7 +253,7 @@ async fn emergency(
             )
             .await
         }
-        Ok(false) => bad("Kimlik silinmiş ya da devir yöneticisi kendisi."),
+        Ok(false) => bad(op.lang.t("err.identity_deleted_or_self_handover")),
         Err(e) => internal("acil ayrılış yazılamadı", e),
     }
 }
@@ -264,11 +265,11 @@ async fn revert(
     Form(form): Form<LifecycleForm>,
 ) -> Response {
     if !allowed(&op, REGISTER_AUTHORITIES) {
-        return forbidden();
+        return forbidden(op.lang);
     }
     let return_day = opt(&form.return_day);
     if return_day.is_some_and(|d| crate::desired_state::Date::from_iso(d).is_none()) {
-        return bad("Dönüş günü YYYY-AA-GG olmalı.");
+        return bad(op.lang.t("err.return_day_format"));
     }
     match identity::revert_departure(&state.pool, id, return_day).await {
         Ok(true) => {
@@ -284,9 +285,7 @@ async fn revert(
             )
             .await
         }
-        Ok(false) => bad(
-            "Geri alınacak bitiş yok, kimlik silinmiş ya da kadrolu dışı: kadrolu dışında ileri tarihli yeni bitiş girin.",
-        ),
+        Ok(false) => bad(op.lang.t("err.revert_not_possible")),
         Err(e) => internal("geri alma yazılamadı", e),
     }
 }
@@ -297,7 +296,7 @@ async fn cancel(
     Path(id): Path<i64>,
 ) -> Response {
     if !allowed(&op, REGISTER_AUTHORITIES) {
-        return forbidden();
+        return forbidden(op.lang);
     }
     match identity::cancel_registration(&state.pool, id).await {
         Ok(true) => {
@@ -313,9 +312,7 @@ async fn cancel(
             )
             .await
         }
-        Ok(false) => {
-            bad("Sahiplenilmiş hesabı olan ya da silinmiş kimlik iptal edilemez (ADR-048).")
-        }
+        Ok(false) => bad(op.lang.t("err.cancel_not_possible")),
         Err(e) => internal("iptal yazılamadı", e),
     }
 }
@@ -327,7 +324,7 @@ async fn suspend(
     Form(form): Form<LifecycleForm>,
 ) -> Response {
     if !allowed(&op, REGISTER_AUTHORITIES) {
-        return forbidden();
+        return forbidden(op.lang);
     }
     let end = opt(&form.suspension_end);
     match identity::set_suspension(&state.pool, id, form.suspension_start.trim(), end).await {
@@ -344,7 +341,7 @@ async fn suspend(
             )
             .await
         }
-        Ok(false) => bad("Askı tarihleri YYYY-AA-GG olmalı, son gün ilk günden önce olamaz."),
+        Ok(false) => bad(op.lang.t("err.suspension_dates")),
         Err(e) => internal("askı yazılamadı", e),
     }
 }
@@ -355,7 +352,7 @@ async fn lift(
     Path(id): Path<i64>,
 ) -> Response {
     if !allowed(&op, REGISTER_AUTHORITIES) {
-        return forbidden();
+        return forbidden(op.lang);
     }
     match identity::lift_suspension(&state.pool, id).await {
         Ok(true) => {
@@ -371,7 +368,7 @@ async fn lift(
             )
             .await
         }
-        Ok(false) => bad("Kaldırılacak askı yok."),
+        Ok(false) => bad(op.lang.t("err.no_suspension")),
         Err(e) => internal("askı kaldırılamadı", e),
     }
 }
@@ -384,11 +381,13 @@ async fn edit_form(
     Path(id): Path<i64>,
 ) -> Response {
     if !allowed(&op, REGISTER_AUTHORITIES) {
-        return forbidden();
+        return forbidden(op.lang);
     }
     match identity::load_form(&state.pool, id).await {
-        Ok(Some(form)) => render_form(&state, form, String::new(), false, Some(id)).await,
-        Ok(None) => (StatusCode::NOT_FOUND, "Kimlik bulunamadı.").into_response(),
+        Ok(Some(form)) => {
+            render_form(&state, op.lang, form, String::new(), FormMode::Edit(id)).await
+        }
+        Ok(None) => (StatusCode::NOT_FOUND, op.lang.t("err.identity_not_found")).into_response(),
         Err(e) => internal("kimlik okunamadı", e),
     }
 }
@@ -400,22 +399,25 @@ async fn edit_submit(
     Form(form): Form<IdentityForm>,
 ) -> Response {
     if !allowed(&op, REGISTER_AUTHORITIES) {
-        return forbidden();
+        return forbidden(op.lang);
     }
     let new = match identity::validate(&form) {
         Ok(n) => n,
-        Err(msg) => return render_form(&state, form, msg, false, Some(id)).await,
+        Err(key) => {
+            let msg = op.lang.t(key).to_string();
+            return render_form(&state, op.lang, form, msg, FormMode::Edit(id)).await;
+        }
     };
     if let Err(e) = identity::update_mover(&state.pool, id, &new).await {
         let db = e.as_database_error();
         if db.is_some_and(|d| d.is_unique_violation()) {
-            let msg = "Bu sicil no başka bir kimlikte kayıtlı".to_string();
-            return render_form(&state, form, msg, false, Some(id)).await;
+            let msg = op.lang.t("err.duplicate_employee_number").to_string();
+            return render_form(&state, op.lang, form, msg, FormMode::Edit(id)).await;
         }
         // docs/03: kadrolu disinda bitis zorunlu; bitis ayrilis ekranindan girilir (3c)
         if db.is_some_and(|d| d.is_check_violation()) {
-            let msg = "Kadrolu dışı çalışma tipi için önce bitiş tarihi girilmeli".to_string();
-            return render_form(&state, form, msg, false, Some(id)).await;
+            let msg = op.lang.t("err.non_permanent_needs_end").to_string();
+            return render_form(&state, op.lang, form, msg, FormMode::Edit(id)).await;
         }
         return internal("kimlik güncellenemedi", e);
     }
@@ -460,15 +462,19 @@ async fn assign_role(
     Form(form): Form<RoleForm>,
 ) -> Response {
     if !allowed(&op, REGISTER_AUTHORITIES) {
-        return forbidden();
+        return forbidden(op.lang);
     }
     let Ok(role_id) = form.role_id.trim().parse::<i64>() else {
-        return (StatusCode::BAD_REQUEST, "Ek rol seçilmeli.").into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            op.lang.t("err.additional_role_required"),
+        )
+            .into_response();
     };
     let ends_on = form.ends_on.trim();
     let ends_on = (!ends_on.is_empty()).then_some(ends_on);
     if ends_on.is_some_and(|d| crate::desired_state::Date::from_iso(d).is_none()) {
-        return (StatusCode::BAD_REQUEST, "Bitiş tarihi YYYY-AA-GG olmalı.").into_response();
+        return (StatusCode::BAD_REQUEST, op.lang.t("err.end_date_format")).into_response();
     }
     match identity::assign_role(&state.pool, &state.time_zone, id, role_id, ends_on).await {
         Ok(true) => {
@@ -484,18 +490,14 @@ async fn assign_role(
             enqueue_single(&state, id).await;
             Redirect::to(&format!("/identities/{id}")).into_response()
         }
-        Ok(false) => (
-            StatusCode::BAD_REQUEST,
-            "Bitiş tarihi geçmiş bir ek rol kaydedilemez (ADR-020).",
-        )
-            .into_response(),
+        Ok(false) => (StatusCode::BAD_REQUEST, op.lang.t("err.past_end_date_role")).into_response(),
         Err(e)
             if e.as_database_error()
                 .is_some_and(|d| d.is_foreign_key_violation()) =>
         {
             (
                 StatusCode::BAD_REQUEST,
-                "Yalnızca ek tür roller atanabilir.",
+                op.lang.t("err.only_additional_roles"),
             )
                 .into_response()
         }
@@ -509,7 +511,7 @@ async fn remove_role(
     Path((id, role_id)): Path<(i64, i64)>,
 ) -> Response {
     if !allowed(&op, REGISTER_AUTHORITIES) {
-        return forbidden();
+        return forbidden(op.lang);
     }
     match identity::remove_role(&state.pool, id, role_id).await {
         Ok(true) => {
@@ -547,11 +549,11 @@ async fn request_names(
     Form(form): Form<NamesForm>,
 ) -> Response {
     if !allowed(&op, REGISTER_AUTHORITIES) {
-        return forbidden();
+        return forbidden(op.lang);
     }
     let requested = match identity::valid_requested_username(&form.requested_username) {
         Ok(r) => r,
-        Err(msg) => return (StatusCode::BAD_REQUEST, msg).into_response(),
+        Err(key) => return (StatusCode::BAD_REQUEST, op.lang.t(key)).into_response(),
     };
     let override_conflicts = form.name_conflict_override.is_some();
     match identity::request_names(&state.pool, id, requested.as_deref(), override_conflicts).await {
@@ -559,7 +561,7 @@ async fn request_names(
         Ok(false) => {
             return (
                 StatusCode::CONFLICT,
-                "Kullanıcı adı zaten oluşmuş, değiştirilemez (ADR-011).",
+                op.lang.t("err.username_already_created"),
             )
                 .into_response()
         }
@@ -586,9 +588,11 @@ async fn request_names(
 #[derive(Template)]
 #[template(path = "identity_form.html")]
 struct IdentityFormTemplate {
+    lang: Lang,
     form: IdentityForm,
     options: FormOptions,
-    employment_types: &'static [(&'static str, &'static str)],
+    /// (calisma tipi anahtari, secili mi): secim sablonda degil burada hesaplanir
+    employment_types: Vec<(&'static str, bool)>,
     error: String,
     duplicate_warning: bool,
     /// Duzenleme: tarih, kimlik no ve kullanici adi alanlari gizli (ADR-083)
@@ -601,6 +605,7 @@ struct IdentityFormTemplate {
 #[derive(Template)]
 #[template(path = "identity.html")]
 struct PersonTemplate {
+    lang: Lang,
     page: PersonPage,
     can_retry: bool,
     can_edit_names: bool,
@@ -609,33 +614,46 @@ struct PersonTemplate {
 
 async fn new_form(OperatorSession(op): OperatorSession, State(state): State<AppState>) -> Response {
     if !allowed(&op, REGISTER_AUTHORITIES) {
-        return forbidden();
+        return forbidden(op.lang);
     }
     let form = IdentityForm {
         national_id_country: "TR".to_string(),
         ..IdentityForm::default()
     };
-    render_form(&state, form, String::new(), false, None).await
+    render_form(&state, op.lang, form, String::new(), FormMode::New).await
+}
+
+// Formun gorunumu: yeni kayit, mukerrer uyarisi ya da duzenleme (ADR-078/083).
+#[derive(Clone, Copy)]
+enum FormMode {
+    New,
+    Duplicate,
+    Edit(i64),
 }
 
 async fn render_form(
     state: &AppState,
+    lang: Lang,
     form: IdentityForm,
     error: String,
-    duplicate_warning: bool,
-    editing: Option<i64>,
+    mode: FormMode,
 ) -> Response {
+    let employment_types = identity::EMPLOYMENT_TYPES
+        .iter()
+        .map(|kind| (*kind, *kind == form.employment_type))
+        .collect();
     match identity::form_options(&state.pool).await {
         Ok(options) => render(&IdentityFormTemplate {
+            lang,
             form,
             options,
-            employment_types: &identity::EMPLOYMENT_TYPES,
+            employment_types,
             error,
-            duplicate_warning,
-            editing: editing.is_some(),
-            action: match editing {
-                Some(id) => format!("/identities/{id}/edit"),
-                None => "/identities".to_string(),
+            duplicate_warning: matches!(mode, FormMode::Duplicate),
+            editing: matches!(mode, FormMode::Edit(_)),
+            action: match mode {
+                FormMode::Edit(id) => format!("/identities/{id}/edit"),
+                _ => "/identities".to_string(),
             },
             ownership_enabled: crate::common_settings::CommonSettings::from_env()
                 .is_ok_and(|c| c.ownership_mode_enabled),
@@ -650,15 +668,20 @@ async fn create(
     Form(form): Form<IdentityForm>,
 ) -> Response {
     if !allowed(&op, REGISTER_AUTHORITIES) {
-        return forbidden();
+        return forbidden(op.lang);
     }
     let new = match identity::validate(&form) {
         Ok(n) => n,
-        Err(msg) => return render_form(&state, form, msg, false, None).await,
+        Err(key) => {
+            let msg = op.lang.t(key).to_string();
+            return render_form(&state, op.lang, form, msg, FormMode::New).await;
+        }
     };
     if new.national_id.is_none() && form.confirm_duplicate.is_none() {
         match identity::similar_name_exists(&state.pool, &new.given_name, &new.surname).await {
-            Ok(true) => return render_form(&state, form, String::new(), true, None).await,
+            Ok(true) => {
+                return render_form(&state, op.lang, form, String::new(), FormMode::Duplicate).await
+            }
             Ok(false) => {}
             Err(e) => return internal("mükerrer kişi kontrolü", e),
         }
@@ -667,13 +690,13 @@ async fn create(
     let issue = !form.issue_first_password.is_empty();
     if issue {
         if !allowed(&op, crate::first_password::AUTHORITIES) {
-            return forbidden();
+            return forbidden(op.lang);
         }
         match identity::starts_by_today(&state.pool, &new.start_date, &state.time_zone).await {
             Ok(true) => {}
             Ok(false) => {
-                let msg = "İlk parola yalnızca başlangıç tarihi bugün ya da geçmişte olan kayda verilir; önce kaydedin, kişi gelince kişi sayfasından isteyin".to_string();
-                return render_form(&state, form, msg, false, None).await;
+                let msg = op.lang.t("err.first_password_start_date").to_string();
+                return render_form(&state, op.lang, form, msg, FormMode::New).await;
             }
             Err(e) => return internal("tarih kontrolü", e),
         }
@@ -687,8 +710,8 @@ async fn create(
     let (id, first_password) = match created {
         Ok(created) => created,
         Err(identity::CreateError::DuplicateNationalId) => {
-            let msg = "Bu kimlik numarası zaten kayıtlı".to_string();
-            return render_form(&state, form, msg, false, None).await;
+            let msg = op.lang.t("err.duplicate_national_id").to_string();
+            return render_form(&state, op.lang, form, msg, FormMode::New).await;
         }
         Err(identity::CreateError::Db(e)) => return internal("kimlik kaydedilemedi", e),
     };
@@ -725,14 +748,15 @@ async fn show(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Response {
-    match identity::load_page(&state.pool, &state.time_zone, &state.aead_key, id).await {
+    match identity::load_page(&state.pool, &state.time_zone, &state.aead_key, id, op.lang).await {
         Ok(Some(page)) => render(&PersonTemplate {
+            lang: op.lang,
             page,
             can_retry: allowed(&op, RETRY_AUTHORITIES),
             can_edit_names: allowed(&op, REGISTER_AUTHORITIES),
             can_first_password: allowed(&op, crate::first_password::AUTHORITIES),
         }),
-        Ok(None) => (StatusCode::NOT_FOUND, "Kimlik bulunamadı.").into_response(),
+        Ok(None) => (StatusCode::NOT_FOUND, op.lang.t("err.identity_not_found")).into_response(),
         Err(e) => internal("kişi sayfası okunamadı", e),
     }
 }
@@ -743,7 +767,7 @@ async fn retry(
     Path((id, job_id)): Path<(i64, i64)>,
 ) -> Response {
     if !allowed(&op, RETRY_AUTHORITIES) {
-        return forbidden();
+        return forbidden(op.lang);
     }
     match crate::jobs::request_retry(&state.pool, job_id, id).await {
         Ok(true) => {
@@ -795,6 +819,7 @@ mod tests {
             username: "ik.operatoru".to_string(),
             email: "ik@example.org".to_string(),
             authorities: authorities.iter().map(|a| a.to_string()).collect(),
+            lang: crate::i18n::DEFAULT,
         };
         let token = crate::operator_session::create_session(pool, &operator)
             .await

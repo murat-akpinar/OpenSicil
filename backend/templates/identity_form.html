@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% block title %}{% if editing %}Kimliği düzenle{% else %}Yeni kimlik{% endif %} — OpenSicil{% endblock %}
+{% block title %}{% if editing %}{{ lang.t("form.edit_title") }}{% else %}{{ lang.t("form.new_title") }}{% endif %} — OpenSicil{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1 class="h1">{% if editing %}Kimliği düzenle{% else %}Yeni kimlik{% endif %}</h1>
+  <h1 class="h1">{% if editing %}{{ lang.t("form.edit_title") }}{% else %}{{ lang.t("form.new_title") }}{% endif %}</h1>
 </div>
 {% if editing %}
-<p class="mb-4 text-sm muted">Görev değişikliği ve çalışma tipi dönüşümü (ADR-042): tarihler, kimlik no ve kullanıcı adı burada değişmez; kayıt her hedef için iş açar.</p>
+<p class="mb-4 text-sm muted">{{ lang.t("form.edit_note") }}</p>
 {% endif %}
 {% if !error.is_empty() %}
 <p class="alert alert-err">{{ error }}</p>
@@ -18,101 +18,101 @@
   {% endif %}
   {% if duplicate_warning %}
   <div class="alert alert-warn">
-    <p>Aynı ad-soyadlı silinmemiş bir kimlik var. Mükerrer kişi olabilir.</p>
-    <label class="check mt-2"><input type="checkbox" name="confirm_duplicate" value="1"> Yine de kaydet</label>
+    <p>{{ lang.t("form.duplicate_warning") }}</p>
+    <label class="check mt-2"><input type="checkbox" name="confirm_duplicate" value="1"> {{ lang.t("form.save_anyway") }}</label>
   </div>
   {% endif %}
   <div class="grid gap-x-4 sm:grid-cols-2">
     <div class="field">
-      <label class="label" for="given_name">Ad</label>
+      <label class="label" for="given_name">{{ lang.t("field.given_name") }}</label>
       <input class="input" type="text" id="given_name" name="given_name" value="{{ form.given_name }}" required>
     </div>
     <div class="field">
-      <label class="label" for="surname">Soyad</label>
+      <label class="label" for="surname">{{ lang.t("field.surname") }}</label>
       <input class="input" type="text" id="surname" name="surname" value="{{ form.surname }}" required>
     </div>
     {% if !editing %}
     <div class="field">
-      <label class="label" for="national_id_country">Ülke</label>
+      <label class="label" for="national_id_country">{{ lang.t("form.country") }}</label>
       <input class="input" type="text" id="national_id_country" name="national_id_country" value="{{ form.national_id_country }}" maxlength="2">
     </div>
     <div class="field">
-      <label class="label" for="national_id">Kimlik numarası (isteğe bağlı)</label>
+      <label class="label" for="national_id">{{ lang.t("form.national_id") }}</label>
       <input class="input" type="text" id="national_id" name="national_id" value="{{ form.national_id }}" autocomplete="off">
     </div>
     <div class="field">
-      <label class="label" for="requested_username">Kullanıcı adı (isteğe bağlı; boşsa şablon üretir)</label>
+      <label class="label" for="requested_username">{{ lang.t("form.requested_username") }}</label>
       <input class="input" type="text" id="requested_username" name="requested_username" value="{{ form.requested_username }}" maxlength="20" autocomplete="off">
     </div>
     {% endif %}
     <div class="field">
-      <label class="label" for="employee_number">Sicil no</label>
+      <label class="label" for="employee_number">{{ lang.t("field.employee_number") }}</label>
       <input class="input" type="text" id="employee_number" name="employee_number" value="{{ form.employee_number }}">
     </div>
     <div class="field">
-      <label class="label" for="mobile_phone">Cep telefonu (+90…)</label>
+      <label class="label" for="mobile_phone">{{ lang.t("form.mobile_phone") }}</label>
       <input class="input" type="tel" id="mobile_phone" name="mobile_phone" value="{{ form.mobile_phone }}">
     </div>
     <div class="field">
-      <label class="label" for="department_id">Departman</label>
+      <label class="label" for="department_id">{{ lang.t("field.department") }}</label>
       <select class="input" id="department_id" name="department_id" required>
-        <option value="">Seçin</option>
+        <option value="">{{ lang.t("common.select") }}</option>
         {% for c in options.departments %}
         <option value="{{ c.id }}"{% if c.id == form.department_id %} selected{% endif %}>{{ c.label }}</option>
         {% endfor %}
       </select>
     </div>
     <div class="field">
-      <label class="label" for="primary_role_id">Birincil rol</label>
+      <label class="label" for="primary_role_id">{{ lang.t("field.primary_role") }}</label>
       <select class="input" id="primary_role_id" name="primary_role_id" required>
-        <option value="">Seçin</option>
+        <option value="">{{ lang.t("common.select") }}</option>
         {% for c in options.roles %}
         <option value="{{ c.id }}"{% if c.id == form.primary_role_id %} selected{% endif %}>{{ c.label }}</option>
         {% endfor %}
       </select>
     </div>
     <div class="field">
-      <label class="label" for="manager_id">Yönetici</label>
+      <label class="label" for="manager_id">{{ lang.t("field.manager") }}</label>
       <select class="input" id="manager_id" name="manager_id">
-        <option value="">Yok</option>
+        <option value="">{{ lang.t("common.none") }}</option>
         {% for c in options.managers %}
         <option value="{{ c.id }}"{% if c.id == form.manager_id %} selected{% endif %}>{{ c.label }}</option>
         {% endfor %}
       </select>
     </div>
     <div class="field">
-      <label class="label" for="employment_type">Çalışma tipi</label>
+      <label class="label" for="employment_type">{{ lang.t("field.employment_type") }}</label>
       <select class="input" id="employment_type" name="employment_type" required>
-        {% for t in employment_types %}
-        <option value="{{ t.0 }}"{% if t.0 == form.employment_type %} selected{% endif %}>{{ t.1 }}</option>
+        {% for et in employment_types %}
+        <option value="{{ et.0 }}"{% if et.1 %} selected{% endif %}>{{ lang.key("employment", et.0) }}</option>
         {% endfor %}
       </select>
     </div>
     {% if !editing %}
     <div class="field">
-      <label class="label" for="start_date">Başlangıç tarihi</label>
+      <label class="label" for="start_date">{{ lang.t("form.start_date") }}</label>
       <input class="input" type="date" id="start_date" name="start_date" value="{{ form.start_date }}" required>
     </div>
     <div class="field">
-      <label class="label" for="end_date">Bitiş tarihi (kadrolu dışında zorunlu)</label>
+      <label class="label" for="end_date">{{ lang.t("form.end_date") }}</label>
       <input class="input" type="date" id="end_date" name="end_date" value="{{ form.end_date }}">
     </div>
     {% if ownership_enabled %}
     <div class="field sm:col-span-2">
-      <label class="label" for="existing_ad_account_hint">Mevcut AD hesabı (sahiplenme, ADR-018)</label>
-      <input class="input" type="text" id="existing_ad_account_hint" name="existing_ad_account_hint" value="{{ form.existing_ad_account_hint }}" maxlength="20" autocomplete="off" placeholder="AD kullanıcı adı; doluysa hesap açılmaz, gözlem modunda bağlanır">
+      <label class="label" for="existing_ad_account_hint">{{ lang.t("form.ad_hint") }}</label>
+      <input class="input" type="text" id="existing_ad_account_hint" name="existing_ad_account_hint" value="{{ form.existing_ad_account_hint }}" maxlength="20" autocomplete="off" placeholder="{{ lang.t("form.ad_hint_placeholder") }}">
     </div>
     {% endif %}
     {% endif %}
   </div>
   <div class="flex flex-wrap gap-2">
-    <button class="btn btn-primary" type="submit">Kaydet</button>
+    <button class="btn btn-primary" type="submit">{{ lang.t("common.save") }}</button>
     {% if !editing %}
-    <button class="btn btn-ok" type="submit" name="issue_first_password" value="1">Kaydet ve ilk parolayı ver</button>
+    <button class="btn btn-ok" type="submit" name="issue_first_password" value="1">{{ lang.t("form.save_and_first_password") }}</button>
     {% endif %}
   </div>
   {% if !editing %}
-  <p class="muted text-xs">Kişi masada bekliyorsa: başlangıç bugün ya da geçmişte olmalı; hesap açılır, parola bir kez gösterilir (ADR-056).</p>
+  <p class="muted text-xs">{{ lang.t("form.first_password_note") }}</p>
   {% endif %}
 </form>
 {% endblock %}

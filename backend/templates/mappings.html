@@ -1,57 +1,57 @@
 {% extends "base.html" %}
-{% block title %}{{ target_name }} eşlemesi — OpenSicil{% endblock %}
+{% block title %}{{ target_name }} — OpenSicil{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1 class="h1">{{ target_name }} — öznitelik eşlemesi</h1>
-  <a class="link text-sm" href="/targets">Hedef sistemler</a>
+  <h1 class="h1">{{ target_name }} — {{ lang.t("mappings.title") }}</h1>
+  <a class="link text-sm" href="/targets">{{ lang.t("nav.targets") }}</a>
 </div>
-<p class="mb-4 text-sm muted">Hedef öznitelik kodda sabit izinli listeden seçilir (ADR-029); listede olmayan satırı worker reddeder. "Sadece boşsa yaz" hedefteki dolu değeri korur (ADR-034). Hassas kaynak (kimlik no, cep) yalnızca Sistem yöneticisi ve açık onayla; worker ayarı kapalıysa yine reddeder.</p>
+<p class="mb-4 text-sm muted">{{ lang.t("mappings.intro") }}</p>
 {% if !error.is_empty() %}<p class="alert alert-err">{{ error }}</p>{% endif %}
 <table class="tbl mb-6">
-  <thead><tr><th>Öznitelik</th><th>Kaynak</th><th>Metin</th><th>Dönüşüm</th><th>Boşsa yaz</th><th></th></tr></thead>
+  <thead><tr><th>{{ lang.t("mappings.attribute") }}</th><th>{{ lang.t("mappings.source") }}</th><th>{{ lang.t("mappings.text") }}</th><th>{{ lang.t("mappings.transform") }}</th><th>{{ lang.t("mappings.write_if_empty_short") }}</th><th></th></tr></thead>
   <tbody>
   {% for r in rows %}
     <tr>
       <td>{{ r.attribute }}</td>
-      <td>{{ r.source }}{% if r.sensitive %} <span class="warn">(hassas)</span>{% endif %}</td>
+      <td>{{ lang.t(r.source) }}{% if r.sensitive %} <span class="warn">{{ lang.t("mappings.sensitive_tag") }}</span>{% endif %}</td>
       <td>{{ r.source_text }}</td>
-      <td>{{ r.transform }}</td>
-      <td>{% if r.write_if_empty %}evet{% endif %}</td>
-      <td>{% if can_edit %}<form method="post" action="/targets/{{ target_id }}/mappings/{{ r.id }}/delete"><button class="btn btn-sm" type="submit">Sil</button></form>{% endif %}</td>
+      <td>{{ lang.t(r.transform) }}</td>
+      <td>{% if r.write_if_empty %}{{ lang.t("common.yes") }}{% endif %}</td>
+      <td>{% if can_edit %}<form method="post" action="/targets/{{ target_id }}/mappings/{{ r.id }}/delete"><button class="btn btn-sm" type="submit">{{ lang.t("common.delete") }}</button></form>{% endif %}</td>
     </tr>
   {% endfor %}
   </tbody>
 </table>
 {% if can_edit %}
-<h2 class="h2">Yeni satır</h2>
+<h2 class="h2">{{ lang.t("mappings.new_row") }}</h2>
 <form method="post" action="/targets/{{ target_id }}/mappings" class="card grid items-end gap-3 sm:grid-cols-3">
   <div>
-    <label class="label" for="target_attribute">Hedef öznitelik</label>
+    <label class="label" for="target_attribute">{{ lang.t("mappings.target_attribute") }}</label>
     <select class="input" id="target_attribute" name="target_attribute">
       {% for a in attributes %}<option value="{{ a }}">{{ a }}</option>{% endfor %}
     </select>
   </div>
   <div>
-    <label class="label" for="source_kind">Kaynak</label>
+    <label class="label" for="source_kind">{{ lang.t("mappings.source") }}</label>
     <select class="input" id="source_kind" name="source_kind">
-      {% for s in sources %}{% if can_sensitive || !s.2 %}<option value="{{ s.0 }}">{{ s.1 }}</option>{% endif %}{% endfor %}
+      {% for s in sources %}{% if can_sensitive || !s.2 %}<option value="{{ s.0 }}">{{ lang.t(s.1) }}</option>{% endif %}{% endfor %}
     </select>
   </div>
   <div>
-    <label class="label" for="source_text">Sabit metin / şablon</label>
+    <label class="label" for="source_text">{{ lang.t("mappings.constant_or_template") }}</label>
     <input class="input" type="text" id="source_text" name="source_text">
   </div>
   <div>
-    <label class="label" for="transform">Dönüşüm</label>
+    <label class="label" for="transform">{{ lang.t("mappings.transform") }}</label>
     <select class="input" id="transform" name="transform">
-      {% for t in transforms %}<option value="{{ t.0 }}">{{ t.1 }}</option>{% endfor %}
+      {% for t in transforms %}<option value="{{ t.0 }}">{{ lang.t(t.1) }}</option>{% endfor %}
     </select>
   </div>
-  <label class="check"><input type="checkbox" name="write_if_empty" value="1"> Sadece boşsa yaz (ADR-034)</label>
+  <label class="check"><input type="checkbox" name="write_if_empty" value="1"> {{ lang.t("mappings.write_if_empty") }}</label>
   {% if can_sensitive %}
-  <label class="text-sm warn"><input type="checkbox" name="sensitive_ack" value="1"> Hassas kaynak: bu veri hedefte okunabilir olacak, onaylıyorum (ADR-012)</label>
+  <label class="text-sm warn"><input type="checkbox" name="sensitive_ack" value="1"> {{ lang.t("mappings.sensitive_ack") }}</label>
   {% endif %}
-  <button class="btn btn-primary col-span-3" type="submit">Ekle</button>
+  <button class="btn btn-primary col-span-3" type="submit">{{ lang.t("common.add") }}</button>
 </form>
 {% endif %}
 {% endblock %}

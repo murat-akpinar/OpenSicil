@@ -178,6 +178,7 @@ mod tests {
             username: username.to_string(),
             email: format!("{username}@example.com"),
             authorities: vec!["hr".to_string()],
+            lang: crate::i18n::DEFAULT,
         };
         let departed_token =
             crate::operator_session::create_session(&pool, &operator("ayse.yilmaz"))

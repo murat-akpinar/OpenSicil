@@ -75,25 +75,25 @@ pub fn attribute_allowed(target_kind: &str, attribute: &str) -> bool {
     allowed_attributes(target_kind).contains(&attribute)
 }
 
-/// (anahtar, ekran etiketi, hassas mi — ADR-012: varsayilan hicbir yere eslenmez)
+/// (anahtar, i18n etiket anahtari, hassas mi — ADR-012: varsayilan hicbir yere eslenmez)
 pub const SOURCES: &[(&str, &str, bool)] = &[
-    ("given_name", "Ad", false),
-    ("surname", "Soyad", false),
-    ("employee_number", "Sicil no", false),
-    ("email", "E-posta", false),
-    ("username", "Kullanıcı adı", false),
-    ("upn", "UPN", false),
-    ("department_name", "Departman adı", false),
-    ("root_department_name", "Kök departman adı", false),
-    ("title", "Birincil rol unvanı", false),
-    ("manager_account", "Yöneticinin hedefteki hesabı", false),
-    ("employment_type", "Çalışma tipi", false),
-    ("start_date", "Başlangıç tarihi", false),
-    ("end_date", "Bitiş tarihi", false),
-    ("mobile_phone", "Cep telefonu", true),
-    ("national_id", "Ulusal kimlik numarası", true),
-    ("constant", "Sabit metin", false),
-    ("template", "Şablon: {given} {surname} {employee_number} {department} {root_department} {title} {username} {email} {upn}", false),
+    ("given_name", "mapsrc.given_name", false),
+    ("surname", "mapsrc.surname", false),
+    ("employee_number", "mapsrc.employee_number", false),
+    ("email", "mapsrc.email", false),
+    ("username", "mapsrc.username", false),
+    ("upn", "mapsrc.upn", false),
+    ("department_name", "mapsrc.department_name", false),
+    ("root_department_name", "mapsrc.root_department_name", false),
+    ("title", "mapsrc.title", false),
+    ("manager_account", "mapsrc.manager_account", false),
+    ("employment_type", "mapsrc.employment_type", false),
+    ("start_date", "mapsrc.start_date", false),
+    ("end_date", "mapsrc.end_date", false),
+    ("mobile_phone", "mapsrc.mobile_phone", true),
+    ("national_id", "mapsrc.national_id", true),
+    ("constant", "mapsrc.constant", false),
+    ("template", "mapsrc.template", false),
 ];
 
 /// None: bilinmeyen kaynak.
@@ -104,7 +104,7 @@ pub fn source_is_sensitive(key: &str) -> Option<bool> {
         .map(|(_, _, sensitive)| *sensitive)
 }
 
-pub fn source_label(key: &str) -> &'static str {
+pub fn source_label_key(key: &str) -> &'static str {
     SOURCES
         .iter()
         .find(|(k, _, _)| *k == key)
@@ -112,26 +112,26 @@ pub fn source_label(key: &str) -> &'static str {
         .unwrap_or("?")
 }
 
-/// (anahtar, ekran etiketi) — ADR-012 sabit donusum listesi.
+/// (anahtar, i18n etiket anahtari) — ADR-012 sabit donusum listesi.
 pub const TRANSFORMS: &[(&str, &str)] = &[
-    ("none", "yok"),
-    ("lower", "küçük harf"),
-    ("ascii", "ascii"),
-    ("phone_e164", "telefon: E.164"),
-    ("phone_e164_no_plus", "telefon: E.164, artı işaretsiz"),
-    ("phone_national", "telefon: ulusal"),
+    ("none", "maptrf.none"),
+    ("lower", "maptrf.lower"),
+    ("ascii", "maptrf.ascii"),
+    ("phone_e164", "maptrf.phone_e164"),
+    ("phone_e164_no_plus", "maptrf.phone_e164_no_plus"),
+    ("phone_national", "maptrf.phone_national"),
     (
         "phone_international_spaced",
-        "telefon: uluslararası boşluklu",
+        "maptrf.phone_international_spaced",
     ),
-    ("date_iso", "tarih: ISO 8601"),
+    ("date_iso", "maptrf.date_iso"),
 ];
 
 pub fn transform_known(key: &str) -> bool {
     TRANSFORMS.iter().any(|(k, _)| *k == key)
 }
 
-pub fn transform_label(key: &str) -> &'static str {
+pub fn transform_label_key(key: &str) -> &'static str {
     TRANSFORMS
         .iter()
         .find(|(k, _)| *k == key)
@@ -227,7 +227,7 @@ mod tests {
         assert_eq!(source_is_sensitive("mobile_phone"), Some(true));
         assert_eq!(source_is_sensitive("given_name"), Some(false));
         assert_eq!(source_is_sensitive("password"), None);
-        assert_eq!(source_label("title"), "Birincil rol unvanı");
+        assert_eq!(source_label_key("title"), "mapsrc.title");
     }
 
     #[test]
@@ -254,6 +254,6 @@ mod tests {
         );
         assert_eq!(apply_transform("date_iso", "2026-10-01"), "2026-10-01");
         assert!(transform_known("lower") && !transform_known("upper"));
-        assert_eq!(transform_label("ascii"), "ascii");
+        assert_eq!(transform_label_key("ascii"), "maptrf.ascii");
     }
 }

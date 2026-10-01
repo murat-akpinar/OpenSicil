@@ -7,112 +7,112 @@
     <p class="muted text-sm">{{ page.person.role }}{% if !page.person.department.is_empty() %} · {{ page.person.department }}{% endif %}</p>
   </div>
   <div class="flex items-center gap-2">
-    <span class="badge badge-{{ page.person.state_kind }}">{{ page.person.state }}</span>
-    {% if can_edit_names %}<a class="btn btn-sm" href="/identities/{{ page.person.id }}/edit">Kimliği düzenle</a>{% endif %}
+    <span class="badge badge-{{ page.state_kind }}">{{ lang.key("state", page.state) }}</span>
+    {% if can_edit_names %}<a class="btn btn-sm" href="/identities/{{ page.person.id }}/edit">{{ lang.t("form.edit_title") }}</a>{% endif %}
   </div>
 </div>
 
 <div class="card mb-6">
   <dl class="kv">
-    <div><dt>Sicil no</dt><dd>{{ page.person.employee_number }}</dd></div>
-    <div><dt>Kimlik no</dt><dd>{{ page.person.national_id_masked }}</dd></div>
-    <div><dt>Departman</dt><dd>{{ page.person.department }}</dd></div>
-    <div><dt>Birincil rol</dt><dd>{{ page.person.role }}</dd></div>
-    <div><dt>Yönetici</dt><dd>{{ page.person.manager }}{% if !page.lifecycle.manager_note.is_empty() %} <span class="warn">{{ page.lifecycle.manager_note }}</span>{% endif %}</dd></div>
-    <div><dt>Çalışma tipi</dt><dd>{{ page.person.employment_type }}</dd></div>
-    <div><dt>Başlangıç</dt><dd>{{ page.person.start_date }}</dd></div>
-    <div><dt>Bitiş anı</dt><dd>{{ page.person.end_at }}</dd></div>
-    <div><dt>Cep telefonu</dt><dd>{{ page.person.mobile_phone }}</dd></div>
-    <div><dt>Kullanıcı adı</dt><dd>{{ page.person.username }}</dd></div>
-    <div><dt>E-posta</dt><dd>{{ page.person.email }}</dd></div>
+    <div><dt>{{ lang.t("field.employee_number") }}</dt><dd>{{ page.person.employee_number }}</dd></div>
+    <div><dt>{{ lang.t("field.national_id") }}</dt><dd>{{ page.person.national_id_masked }}</dd></div>
+    <div><dt>{{ lang.t("field.department") }}</dt><dd>{{ page.person.department }}</dd></div>
+    <div><dt>{{ lang.t("field.primary_role") }}</dt><dd>{{ page.person.role }}</dd></div>
+    <div><dt>{{ lang.t("field.manager") }}</dt><dd>{{ page.person.manager }}{% if page.lifecycle.manager_departed %} <span class="warn">{% if page.lifecycle.handover_name.is_empty() %}{{ lang.t("person.manager_no_effective") }}{% else %}{{ lang.t1("person.manager_handover", page.lifecycle.handover_name) }}{% endif %}</span>{% endif %}</dd></div>
+    <div><dt>{{ lang.t("field.employment_type") }}</dt><dd>{{ lang.key("employment", page.person.employment_type) }}</dd></div>
+    <div><dt>{{ lang.t("person.start") }}</dt><dd>{{ page.person.start_date }}</dd></div>
+    <div><dt>{{ lang.t("person.end_at") }}</dt><dd>{{ page.person.end_at }}</dd></div>
+    <div><dt>{{ lang.t("field.mobile_phone") }}</dt><dd>{{ page.person.mobile_phone }}</dd></div>
+    <div><dt>{{ lang.t("field.username") }}</dt><dd>{{ page.person.username }}</dd></div>
+    <div><dt>{{ lang.t("field.email") }}</dt><dd>{{ page.person.email }}</dd></div>
     <div><dt>UPN</dt><dd>{{ page.person.upn }}</dd></div>
     {% if page.lifecycle.subordinates > 0 %}
-    <div class="sm:col-span-2"><dt>Astlar</dt><dd>{{ page.lifecycle.subordinates }} kişi{% if page.lifecycle.orphaned_subordinates %} <span class="err">— etkin yöneticileri boş kaldı: devir yöneticisi girin (ADR-041)</span>{% endif %}</dd></div>
+    <div class="sm:col-span-2"><dt>{{ lang.t("person.subordinates") }}</dt><dd>{{ lang.t1("person.people_count", page.lifecycle.subordinates) }}{% if page.lifecycle.orphaned_subordinates %} <span class="err">{{ lang.t("person.orphaned_subordinates") }}</span>{% endif %}</dd></div>
     {% endif %}
     {% if !page.person.requested_username.is_empty() %}
-    <div class="sm:col-span-2"><dt>İstenen kullanıcı adı</dt><dd>{{ page.person.requested_username }}{% if page.person.name_conflict_override %} <span class="muted">(farklı kişi, sıradaki ad verilir)</span>{% endif %}</dd></div>
+    <div class="sm:col-span-2"><dt>{{ lang.t("person.requested_username") }}</dt><dd>{{ page.person.requested_username }}{% if page.person.name_conflict_override %} <span class="muted">{{ lang.t("person.override_note") }}</span>{% endif %}</dd></div>
     {% endif %}
   </dl>
 </div>
 
 {% if page.name_intervention %}
 <div class="panel panel-warn mb-6">
-  <h2 class="h2 mb-1">Kullanıcı adı müdahalesi</h2>
-  <p class="text-sm mb-2">İş kullanıcı adı yüzünden bekliyor. Seçenekler (ADR-022/042): farklı bir ad girin; aynı ad başka birine aitse "farklı kişi, sıradaki adı ver" deyin; kullanılmış ad kaydındaysa Sistem yöneticisi <a class="link" href="/used-names">serbest bırakır</a>. Kaydet, müdahaledeki işleri yeniden dener.</p>
+  <h2 class="h2 mb-1">{{ lang.t("person.name_intervention") }}</h2>
+  <p class="text-sm mb-2">{{ lang.t("person.name_intervention_help") }} <a class="link" href="/used-names">{{ lang.t("nav.used_names") }}</a></p>
   {% if can_edit_names %}
   <form method="post" action="/identities/{{ page.person.id }}/names" class="flex gap-3 items-end">
     <div class="grow">
-      <label class="label" for="requested_username">Kullanıcı adı</label>
+      <label class="label" for="requested_username">{{ lang.t("field.username") }}</label>
       <input class="input" type="text" id="requested_username" name="requested_username" value="{{ page.person.requested_username }}" maxlength="20" autocomplete="off">
     </div>
-    <label class="check"><input type="checkbox" name="name_conflict_override" value="1"{% if page.person.name_conflict_override %} checked{% endif %}> Farklı kişi, sıradaki adı ver</label>
-    <button class="btn btn-primary" type="submit">Kaydet ve tekrar dene</button>
+    <label class="check"><input type="checkbox" name="name_conflict_override" value="1"{% if page.person.name_conflict_override %} checked{% endif %}> {{ lang.t("person.override_label") }}</label>
+    <button class="btn btn-primary" type="submit">{{ lang.t("person.save_and_retry") }}</button>
   </form>
   {% endif %}
 </div>
 {% endif %}
 
 {% if can_edit_names && !page.lifecycle.deleted %}
-<h2 class="h2">Yaşam döngüsü</h2>
+<h2 class="h2">{{ lang.t("lifecycle.title") }}</h2>
 <div class="mb-6 grid gap-4 text-sm md:grid-cols-2">
   {% if !page.lifecycle.departed %}
   <form method="post" action="/identities/{{ page.person.id }}/departure" class="card-tight space-y-2">
-    <p class="h2">Planlı ayrılış</p>
-    <label class="block">Son çalışma günü <input class="input" type="date" name="end_date" value="{{ page.lifecycle.end_date }}" required></label>
-    <label class="block">Astların devir yöneticisi (kimlik no) <input class="input" type="text" name="handover_manager_id" value="{{ page.lifecycle.handover_manager_id }}"></label>
-    <button class="btn btn-primary" type="submit">Kaydet</button>
+    <p class="h2">{{ lang.t("lifecycle.planned_departure") }}</p>
+    <label class="block">{{ lang.t("lifecycle.last_working_day") }} <input class="input" type="date" name="end_date" value="{{ page.lifecycle.end_date }}" required></label>
+    <label class="block">{{ lang.t("lifecycle.handover_manager") }} <input class="input" type="text" name="handover_manager_id" value="{{ page.lifecycle.handover_manager_id }}"></label>
+    <button class="btn btn-primary" type="submit">{{ lang.t("common.save") }}</button>
   </form>
   <form method="post" action="/identities/{{ page.person.id }}/emergency" class="panel panel-err space-y-2">
-    <p class="err font-bold">Acil ayrılış</p>
-    <label class="block">Gerekçe <input class="input" type="text" name="reason" required></label>
-    <label class="block">Astların devir yöneticisi (kimlik no) <input class="input" type="text" name="handover_manager_id" value="{{ page.lifecycle.handover_manager_id }}"></label>
-    <p class="text-xs muted">Hesap hemen pasifleşir ve parola sıfırlanır; açık Kerberos biletleri ve çevrimdışı cihaz önbelleği bundan etkilenmez (docs/05).</p>
-    <button class="btn btn-danger" type="submit">Acil ayrılış</button>
+    <p class="err font-bold">{{ lang.t("lifecycle.emergency") }}</p>
+    <label class="block">{{ lang.t("lifecycle.reason") }} <input class="input" type="text" name="reason" required></label>
+    <label class="block">{{ lang.t("lifecycle.handover_manager") }} <input class="input" type="text" name="handover_manager_id" value="{{ page.lifecycle.handover_manager_id }}"></label>
+    <p class="text-xs muted">{{ lang.t("lifecycle.emergency_note") }}</p>
+    <button class="btn btn-danger" type="submit">{{ lang.t("lifecycle.emergency") }}</button>
   </form>
   {% else %}
   <form method="post" action="/identities/{{ page.person.id }}/revert" class="card-tight space-y-2">
-    <p class="h2">Ayrılışı geri al (yıkıcı işlem, ADR-030)</p>
-    <label class="block">Dönüş günü (boşsa hemen) <input class="input" type="date" name="return_day"></label>
-    <button class="btn btn-primary" type="submit">Geri al</button>
+    <p class="h2">{{ lang.t("lifecycle.revert_title") }}</p>
+    <label class="block">{{ lang.t("lifecycle.return_day") }} <input class="input" type="date" name="return_day"></label>
+    <button class="btn btn-primary" type="submit">{{ lang.t("lifecycle.revert_button") }}</button>
   </form>
   {% endif %}
   {% if page.lifecycle.suspension_start.is_empty() %}
   <form method="post" action="/identities/{{ page.person.id }}/suspension" class="card-tight space-y-2">
-    <p class="h2">Askıya al (ADR-053)</p>
-    <label class="block">İlk gün <input class="input" type="date" name="suspension_start" required></label>
-    <label class="block">İznin son günü (boşsa elle kaldırılır) <input class="input" type="date" name="suspension_end"></label>
-    <button class="btn btn-primary" type="submit">Askıya al</button>
+    <p class="h2">{{ lang.t("lifecycle.suspend_title") }}</p>
+    <label class="block">{{ lang.t("lifecycle.first_day") }} <input class="input" type="date" name="suspension_start" required></label>
+    <label class="block">{{ lang.t("lifecycle.leave_last_day") }} <input class="input" type="date" name="suspension_end"></label>
+    <button class="btn btn-primary" type="submit">{{ lang.t("lifecycle.suspend_button") }}</button>
   </form>
   {% else %}
   <form method="post" action="/identities/{{ page.person.id }}/suspension/lift" class="card-tight space-y-2">
-    <p class="h2">Askı: {{ page.lifecycle.suspension_start }} – {% if page.lifecycle.suspension_end.is_empty() %}açık uçlu{% else %}{{ page.lifecycle.suspension_end }} (hesaplar {{ page.lifecycle.return_day }} 00:00'da açılır){% endif %}</p>
-    <button class="btn btn-primary" type="submit">Askıyı kaldır</button>
+    <p class="h2">{{ lang.t("lifecycle.suspension") }}: {{ page.lifecycle.suspension_start }} – {% if page.lifecycle.suspension_end.is_empty() %}{{ lang.t("lifecycle.open_ended") }}{% else %}{{ page.lifecycle.suspension_end }} ({{ lang.t1("lifecycle.accounts_open_at", page.lifecycle.return_day) }}){% endif %}</p>
+    <button class="btn btn-primary" type="submit">{{ lang.t("lifecycle.lift_button") }}</button>
   </form>
   {% endif %}
   {% if page.lifecycle.can_cancel && !page.lifecycle.cancelled %}
   <form method="post" action="/identities/{{ page.person.id }}/cancel" class="card-tight space-y-2">
-    <p class="h2">Kayıt iptali (ADR-048)</p>
-    <p class="text-xs muted">Yazım hatası ya da hiç gelmeyen kişi için. Worker hesabın hiç kullanılmadığını doğrular; kullanılmışsa ayrılış olarak uygulanır. Ad yakılmaz.</p>
-    <button class="btn btn-warn" type="submit">Kaydı iptal et</button>
+    <p class="h2">{{ lang.t("lifecycle.cancel_title") }}</p>
+    <p class="text-xs muted">{{ lang.t("lifecycle.cancel_note") }}</p>
+    <button class="btn btn-warn" type="submit">{{ lang.t("lifecycle.cancel_button") }}</button>
   </form>
   {% endif %}
-  {% if page.lifecycle.cancelled %}<p class="warn">Kayıt iptali istendi; worker hedefte doğruluyor.</p>{% endif %}
-  {% if page.lifecycle.emergency %}<p class="err">Acil ayrılış.</p>{% endif %}
+  {% if page.lifecycle.cancelled %}<p class="warn">{{ lang.t("lifecycle.cancel_requested") }}</p>{% endif %}
+  {% if page.lifecycle.emergency %}<p class="err">{{ lang.t("lifecycle.emergency") }}.</p>{% endif %}
 </div>
 {% endif %}
 
-<h2 class="h2">Ek roller</h2>
+<h2 class="h2">{{ lang.t("person.additional_roles") }}</h2>
 {% if page.additional_roles.is_empty() %}
-<p class="text-sm mb-2 muted">Ek rol yok.</p>
+<p class="text-sm mb-2 muted">{{ lang.t("person.no_additional_roles") }}</p>
 {% else %}
 <table class="tbl mb-2">
-  <thead><tr><th>Rol</th><th>Bitiş (iznin son günü gibi, ADR-020)</th><th></th></tr></thead>
+  <thead><tr><th>{{ lang.t("field.role") }}</th><th>{{ lang.t("person.role_end") }}</th><th></th></tr></thead>
   <tbody>
   {% for r in page.additional_roles %}
     <tr>
       <td>{{ r.name }}</td>
       <td>{{ r.ends_on }}</td>
-      <td>{% if can_edit_names %}<form method="post" action="/identities/{{ page.person.id }}/roles/{{ r.role_id }}/delete"><button class="btn btn-sm" type="submit">Kaldır</button></form>{% endif %}</td>
+      <td>{% if can_edit_names %}<form method="post" action="/identities/{{ page.person.id }}/roles/{{ r.role_id }}/delete"><button class="btn btn-sm" type="submit">{{ lang.t("common.remove") }}</button></form>{% endif %}</td>
     </tr>
   {% endfor %}
   </tbody>
@@ -121,44 +121,44 @@
 {% if can_edit_names %}
 <form method="post" action="/identities/{{ page.person.id }}/roles" class="flex gap-2 items-end mb-6">
   <div class="grow">
-    <label class="label" for="role_id">Ek rol</label>
+    <label class="label" for="role_id">{{ lang.t("person.additional_role") }}</label>
     <select class="input" id="role_id" name="role_id" required>
       {% for c in page.role_options %}<option value="{{ c.id }}">{{ c.label }}</option>{% endfor %}
     </select>
   </div>
   <div>
-    <label class="label" for="ends_on">Bitiş (isteğe bağlı)</label>
+    <label class="label" for="ends_on">{{ lang.t("person.end_optional") }}</label>
     <input class="input" type="date" id="ends_on" name="ends_on">
   </div>
-  <button class="btn btn-primary" type="submit">Ekle</button>
+  <button class="btn btn-primary" type="submit">{{ lang.t("common.add") }}</button>
 </form>
 {% endif %}
 
 <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
-  <h2 class="h2 mb-0">Hesaplar ve hedefteki fark</h2>
+  <h2 class="h2 mb-0">{{ lang.t("person.accounts") }}</h2>
   {% if can_first_password && !page.lifecycle.deleted %}
   <form method="post" action="/identities/{{ page.person.id }}/first-password">
-    <button class="btn btn-ok btn-sm" type="submit" title="Yalnızca kullanılmamış hesaba verilir (ADR-046); bir kez gösterilir (ADR-036)">İlk parolayı ver</button>
+    <button class="btn btn-ok btn-sm" type="submit" title="{{ lang.t("person.first_password_title") }}">{{ lang.t("person.first_password") }}</button>
   </form>
   {% endif %}
 </div>
 <table class="tbl mb-6">
-  <thead><tr><th>Hedef</th><th>Hesap</th><th>Köken / mod</th><th>Uygulanan</th><th>Fark</th><th></th></tr></thead>
+  <thead><tr><th>{{ lang.t("field.target") }}</th><th>{{ lang.t("field.account") }}</th><th>{{ lang.t("person.origin_mode") }}</th><th>{{ lang.t("person.applied") }}</th><th>{{ lang.t("person.diff") }}</th><th></th></tr></thead>
   <tbody>
   {% for a in page.accounts %}
     <tr>
       <td>{{ a.target }}</td>
       <td>{{ a.external_id }}</td>
-      <td>{{ a.origin }} {{ a.mode }}</td>
-      <td>{{ a.applied_state }}</td>
+      <td>{% if !a.origin.is_empty() %}{{ lang.key("link", a.origin) }}{% endif %} {% if !a.mode.is_empty() %}{{ lang.key("link", a.mode) }}{% endif %}</td>
+      <td>{% if !a.applied_state.is_empty() %}{{ lang.key("state", a.applied_state) }}{% endif %}</td>
       <td>{{ a.diff }}</td>
       <td>
         {# ADR-018/087: gozlem modunda fark yukaridadir; onay yonetime alir #}
         {% if a.observed %}
-          {% if a.manage_requested %}<span class="warn">yönetime alma istendi</span>
+          {% if a.manage_requested %}<span class="warn">{{ lang.t("person.manage_requested") }}</span>
           {% else if can_edit_names %}
           <form method="post" action="/identities/{{ page.person.id }}/accounts/{{ a.target_id }}/manage">
-            <button class="btn btn-sm" type="submit" title="Bağlantı yönetilen moda geçer, motor yukarıdaki farkı uygular (ADR-018)">Yönetime al</button>
+            <button class="btn btn-sm" type="submit" title="{{ lang.t("person.take_over_title") }}">{{ lang.t("person.take_over") }}</button>
           </form>
           {% endif %}
         {% endif %}
@@ -168,27 +168,27 @@
   </tbody>
 </table>
 
-<h2 class="h2">İşler</h2>
+<h2 class="h2">{{ lang.t("person.jobs") }}</h2>
 {% if page.jobs.is_empty() %}
-<p class="mb-6 muted">İş yok.</p>
+<p class="mb-6 muted">{{ lang.t("person.no_jobs") }}</p>
 {% else %}
 <table class="tbl mb-6">
-  <thead><tr><th>Hedef</th><th>Durum</th><th>Deneme</th><th>Sonraki deneme</th><th>Açıklama</th><th></th></tr></thead>
+  <thead><tr><th>{{ lang.t("field.target") }}</th><th>{{ lang.t("field.state") }}</th><th>{{ lang.t("person.attempts") }}</th><th>{{ lang.t("person.next_attempt") }}</th><th>{{ lang.t("person.description") }}</th><th></th></tr></thead>
   <tbody>
   {% for j in page.jobs %}
     <tr>
       <td>{{ j.target }}</td>
-      <td><span class="badge badge-{{ j.status_kind }}">{{ j.status }}</span></td>
+      <td><span class="badge badge-{{ j.status_kind }}">{{ lang.key("job", j.status) }}</span></td>
       <td>{{ j.attempts }}</td>
       <td>{{ j.next_attempt_at }}</td>
       <td>
         {% if !j.summary.is_empty() %}<span class="err">{{ j.summary }}</span>{% endif %}
-        {% if !j.detail.is_empty() %}<details><summary class="text-xs muted">teknik ayrıntı</summary><code class="text-xs">{{ j.detail }}</code></details>{% endif %}
+        {% if !j.detail.is_empty() %}<details><summary class="text-xs muted">{{ lang.t("person.technical_detail") }}</summary><code class="text-xs">{{ j.detail }}</code></details>{% endif %}
         {% if !j.result.is_empty() %}<span class="ok">{{ j.result }}</span>{% endif %}
       </td>
       <td>
         {% if can_retry && j.retryable %}
-        <form method="post" action="/identities/{{ page.person.id }}/jobs/{{ j.id }}/retry"><button class="btn btn-sm" type="submit">Tekrar dene</button></form>
+        <form method="post" action="/identities/{{ page.person.id }}/jobs/{{ j.id }}/retry"><button class="btn btn-sm" type="submit">{{ lang.t("person.retry") }}</button></form>
         {% endif %}
       </td>
     </tr>
@@ -197,12 +197,12 @@
 </table>
 {% endif %}
 
-<h2 class="h2">Son olaylar</h2>
+<h2 class="h2">{{ lang.t("person.events") }}</h2>
 {% if page.events.is_empty() %}
-<p class="muted">Olay yok.</p>
+<p class="muted">{{ lang.t("person.no_events") }}</p>
 {% else %}
 <table class="tbl">
-  <thead><tr><th>Zaman</th><th>Olay</th><th>Sonuç</th><th>Kim</th></tr></thead>
+  <thead><tr><th>{{ lang.t("person.time") }}</th><th>{{ lang.t("field.event") }}</th><th>{{ lang.t("person.outcome") }}</th><th>{{ lang.t("person.who") }}</th></tr></thead>
   <tbody>
   {% for e in page.events %}
     <tr><td>{{ e.at }}</td><td>{{ e.event_type }}</td><td>{{ e.outcome }}</td><td>{{ e.actor }}</td></tr>

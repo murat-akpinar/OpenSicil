@@ -1,13 +1,16 @@
 {% extends "base.html" %}
-{% block title %}Yapılandırma — OpenSicil{% endblock %}
-{# Bootstrap hesabı yalnızca bu sayfayı görür (ADR-068): gezinme çubuğu yok #}
+{% block title %}{{ lang.t("config.title") }} — OpenSicil{% endblock %}
+{# Bootstrap hesabı yalnızca bu sayfayı görür (ADR-068): gezinme çubuğu yok.
+   Dil seçicisi de yok (ADR-089): operatör oturumu olmadan tercih saklanmaz,
+   dil tarayıcının Accept-Language başlığından gelir. #}
 {% block nav %}{% endblock %}
+{% block lang_switch %}{% endblock %}
 {% block page_class %}page-narrow{% endblock %}
 {% block content %}
 <div class="page-head">
   <div>
-    <h1 class="h1">Yapılandırma</h1>
-    <p class="muted text-sm">Bağlantı ayarları; parolalar şifreli saklanır, ekranda gösterilmez.</p>
+    <h1 class="h1">{{ lang.t("config.title") }}</h1>
+    <p class="muted text-sm">{{ lang.t("config.subtitle") }}</p>
   </div>
 </div>
 <form method="post" action="/config" class="stack">
@@ -23,8 +26,8 @@
     </div>
     <div class="field">
       <label class="label" for="ad_service_password">
-        Servis hesabı parolası
-        {% if ad_service_password_set %}<span class="muted">(kayıtlı — değiştirmek için doldurun)</span>{% endif %}
+        {{ lang.t("config.service_password") }}
+        {% if ad_service_password_set %}<span class="muted">{{ lang.t("config.stored_hint") }}</span>{% endif %}
       </label>
       <input class="input" type="password" id="ad_service_password" name="ad_service_password" autocomplete="new-password">
     </div>
@@ -37,8 +40,8 @@
     </div>
     <div class="field">
       <label class="label" for="zimbra_admin_password">
-        Admin parolası
-        {% if zimbra_admin_password_set %}<span class="muted">(kayıtlı — değiştirmek için doldurun)</span>{% endif %}
+        {{ lang.t("config.admin_password") }}
+        {% if zimbra_admin_password_set %}<span class="muted">{{ lang.t("config.stored_hint") }}</span>{% endif %}
       </label>
       <input class="input" type="password" id="zimbra_admin_password" name="zimbra_admin_password" autocomplete="new-password">
     </div>
@@ -56,11 +59,11 @@
     <div class="field">
       <label class="label" for="oidc_client_secret">
         Client secret
-        {% if oidc_client_secret_set %}<span class="muted">(kayıtlı — değiştirmek için doldurun)</span>{% endif %}
+        {% if oidc_client_secret_set %}<span class="muted">{{ lang.t("config.stored_hint") }}</span>{% endif %}
       </label>
       <input class="input" type="password" id="oidc_client_secret" name="oidc_client_secret" autocomplete="new-password">
     </div>
   </fieldset>
-  <button class="btn btn-primary w-full" type="submit">Kaydet</button>
+  <button class="btn btn-primary w-full" type="submit">{{ lang.t("common.save") }}</button>
 </form>
 {% endblock %}

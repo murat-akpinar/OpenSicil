@@ -1,16 +1,16 @@
 {% extends "base.html" %}
-{% block title %}Roller — OpenSicil{% endblock %}
+{% block title %}{{ lang.t("nav.roles") }} — OpenSicil{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1 class="h1">Roller</h1>
+  <h1 class="h1">{{ lang.t("nav.roles") }}</h1>
 </div>
 {% if !error.is_empty() %}<p class="alert alert-err">{{ error }}</p>{% endif %}
 <table class="tbl mb-6">
-  <thead><tr><th>Tür</th><th>Ad</th><th>Unvan</th><th>Öğe</th></tr></thead>
+  <thead><tr><th>{{ lang.t("field.kind") }}</th><th>{{ lang.t("field.name") }}</th><th>{{ lang.t("field.title") }}</th><th>{{ lang.t("field.items") }}</th></tr></thead>
   <tbody>
   {% for r in roles %}
     <tr>
-      <td>{{ r.kind_label }}</td>
+      <td>{{ lang.key("rolekind", r.kind) }}</td>
       <td><a class="link" href="/roles/{{ r.id }}">{{ r.name }}</a></td>
       <td>{{ r.title }}</td>
       <td>{{ r.entitlements }}</td>
@@ -19,23 +19,23 @@
   </tbody>
 </table>
 {% if can_edit %}
-<h2 class="h2">Yeni rol</h2>
+<h2 class="h2">{{ lang.t("roles.new") }}</h2>
 <form method="post" action="/roles" class="card grid items-end gap-3 sm:grid-cols-3">
   <div>
-    <label class="label" for="kind">Tür</label>
+    <label class="label" for="kind">{{ lang.t("field.kind") }}</label>
     <select class="input" id="kind" name="kind">
-      {% for k in kinds %}<option value="{{ k.0 }}">{{ k.1 }}</option>{% endfor %}
+      {% for k in kinds %}<option value="{{ k }}">{{ lang.key("rolekind", k) }}</option>{% endfor %}
     </select>
   </div>
   <div>
-    <label class="label" for="name">Ad</label>
+    <label class="label" for="name">{{ lang.t("field.name") }}</label>
     <input class="input" type="text" id="name" name="name" required>
   </div>
   <div>
-    <label class="label" for="title">Unvan (birincil)</label>
+    <label class="label" for="title">{{ lang.t("roles.title_primary_only") }}</label>
     <input class="input" type="text" id="title" name="title">
   </div>
-  <button class="btn btn-primary col-span-3" type="submit">Kaydet</button>
+  <button class="btn btn-primary col-span-3" type="submit">{{ lang.t("common.save") }}</button>
 </form>
 {% endif %}
 {% endblock %}

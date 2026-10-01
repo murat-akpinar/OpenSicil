@@ -164,7 +164,7 @@ pub async fn rejection_response(
             header::SET_COOKIE,
             clear_cookie_header(OPERATOR_SESSION_COOKIE_NAME),
         )],
-        "Erişim reddedildi: kimlik kaydınız ayrılmış ya da askıda.",
+        operator.lang.t("err.access_denied_departed"),
     )
         .into_response()
 }
