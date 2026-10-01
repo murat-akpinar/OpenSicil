@@ -27,6 +27,8 @@ struct ReportsTemplate {
     lang: Lang,
     shell: Shell,
     targets: Vec<TargetLink>,
+    /// ADR-024: silinmesi onay bekleyen hesap sayisi, listeye giden satirin rozeti
+    awaiting_deletions: i64,
 }
 
 pub fn routes() -> Router<AppState> {
@@ -34,8 +36,12 @@ pub fn routes() -> Router<AppState> {
 }
 
 async fn page(OperatorSession(op): OperatorSession, State(state): State<AppState>) -> Response {
-    match crate::org::list_targets(&state.pool).await {
-        Ok(rows) => render(&ReportsTemplate {
+    let loaded = tokio::try_join!(
+        crate::org::list_targets(&state.pool),
+        crate::deletions::awaiting_count(&state.pool),
+    );
+    match loaded {
+        Ok((rows, awaiting_deletions)) => render(&ReportsTemplate {
             lang: op.lang,
             shell: Shell::of(&op),
             targets: rows
@@ -45,6 +51,7 @@ async fn page(OperatorSession(op): OperatorSession, State(state): State<AppState
                     name: t.name,
                 })
                 .collect(),
+            awaiting_deletions,
         }),
         Err(e) => internal("raporlar sayfası okunamadı", e),
     }

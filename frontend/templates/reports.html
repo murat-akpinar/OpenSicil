@@ -41,6 +41,10 @@
         <span class="ico-tile ico-tile-info"><i class="ico ico-tag" aria-hidden="true"></i></span>{{ lang.t("nav.used_names") }}
         <i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i>
       </a>
+      <a class="qa-row" href="/deletions">
+        <span class="ico-tile ico-tile-warn"><i class="ico ico-trash" aria-hidden="true"></i></span>{{ lang.t("nav.deletions") }}{% if awaiting_deletions > 0 %} <span class="badge badge-warn">{{ awaiting_deletions }}</span>{% endif %}
+        <i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i>
+      </a>
       <a class="qa-row" href="/interventions">
         <span class="ico-tile ico-tile-err"><i class="ico ico-inbox" aria-hidden="true"></i></span>{{ lang.t("nav.interventions") }}
         <i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i>

@@ -31,6 +31,8 @@ pub const FIRST_PASSWORD_REQUESTED: &str = "first_password.requested";
 pub const FIRST_PASSWORD_SHOWN: &str = "first_password.shown";
 /// F-13: mutabakat bulgusundan "yeniden uygula" — kimlik icin is acildi
 pub const RECONCILE_REAPPLY: &str = "reconcile.reapply";
+/// ADR-024: saklamasi dolan hesabin silinmesi operator tarafindan onaylandi
+pub const ACCOUNT_DELETION_APPROVED: &str = "account.deletion_approved";
 
 pub struct Actor<'a> {
     pub subject: Option<&'a str>,

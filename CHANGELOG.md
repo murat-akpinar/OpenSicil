@@ -124,4 +124,5 @@
 - Rol ve departman adresleri okunur ada döndü, sayısal adres 301 (ADR-107)
 - Mutabakat gece koşusu ve bulgudan yeniden uygula (F-13)
 - Panelde tarih aralığı filtresi ve rol kırılımı halkası (ADR-076)
+- Silinmeyi bekleyenler listesi ve silme onayı (ADR-024)
 

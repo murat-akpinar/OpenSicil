@@ -281,6 +281,9 @@
   .ico-check::before {
     content: "\f00c";
   }
+  .ico-trash::before {
+    content: "\f1f8";
+  }
 
   /* Yuvarlak köşeli ikon karesi: kart başlığı, liste satırı, boş durum */
   /* Açık temada soluk mavi zemin + mavi glyph, koyuda palet "Primary Light"

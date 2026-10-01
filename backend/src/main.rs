@@ -10,6 +10,7 @@ mod cookie;
 mod crypto;
 mod dashboard;
 mod db;
+mod deletions;
 // Ikiz dosya (worker ile birebir ayni); backend durum turetme ve etki onizlemesi
 // icin cagirir, motora ozel alanlari kullanmaz (ADR-038).
 #[allow(dead_code)]

@@ -183,6 +183,10 @@ mod tests {
         ),
         ("readjob", &["queued", "running", "succeeded", "failed"]),
         ("readjobkind", &["queued", "running", "succeeded", "failed"]),
+        (
+            "deletionstatus",
+            &["awaiting_approval", "approved", "scheduled", "in_retention"],
+        ),
     ];
 
     fn keys(lang: Lang) -> Vec<&'static str> {

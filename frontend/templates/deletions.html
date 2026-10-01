@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}{{ lang.t("nav.deletions") }} — OpenSicil{% endblock %}
+{% block content %}
+{# ADR-024: saklama suresi dolan hesaplar; onay isteyen hedefte silme burada onaylanir #}
+<div class="page-head">
+  <div>
+    <h1 class="h1">{{ lang.t("nav.deletions") }}</h1>
+    <p class="sub">{{ lang.t("deletions.sub") }}</p>
+  </div>
+</div>
+
+{% if !notice.info.is_empty() %}<div class="alert alert-info mb-4">{{ notice.info }}</div>{% endif %}
+{% if !notice.error.is_empty() %}<div class="alert alert-warn mb-4">{{ notice.error }}</div>{% endif %}
+
+{% if rows.is_empty() %}
+<div class="empty">
+  <span class="ico-tile ico-tile-lg"><i class="ico ico-check" aria-hidden="true"></i></span>
+  <p class="empty-hint">{{ lang.t("deletions.empty") }}</p>
+</div>
+{% else %}
+<form method="post" action="/deletions">
+  <p class="sub mb-3">{{ lang.t("deletions.hint") }}</p>
+  <div class="card overflow-x-auto p-0 mb-4">
+    <table class="tbl">
+      <thead><tr>
+        {% if can_approve %}<th class="w-8"><input type="checkbox" data-select-all="link" aria-label="{{ lang.t("adopt.select_all") }}" title="{{ lang.t("adopt.select_all") }}"></th>{% endif %}
+        <th>{{ lang.t("field.person") }}</th>
+        <th>{{ lang.t("field.target") }}</th>
+        <th>{{ lang.t("deletions.departed_on") }}</th>
+        <th>{{ lang.t("deletions.retention_ends") }}</th>
+        <th>{{ lang.t("deletions.status") }}</th>
+      </tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          {% if can_approve %}<td>{% if r.awaiting() %}<input type="checkbox" name="link" value="{{ r.key() }}" aria-label="{{ r.person }}">{% endif %}</td>{% endif %}
+          <td><a class="link" href="/identities/{{ r.identity_id }}">{{ r.person }}</a></td>
+          <td>{{ r.target }}</td>
+          <td class="whitespace-nowrap">{{ r.departed_on }}</td>
+          <td class="whitespace-nowrap">{{ r.retention_ends }}</td>
+          <td><span class="badge badge-{% if r.status == "awaiting_approval" %}warn{% else if r.status == "in_retention" %}info{% else %}ok{% endif %}">{{ lang.key("deletionstatus", r.status) }}</span></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if can_approve %}
+  <button class="btn btn-primary" type="submit"><i class="ico ico-check" aria-hidden="true"></i>{{ lang.t("deletions.approve_selected") }}</button>
+  {% endif %}
+</form>
+{% endif %}
+{% endblock %}
