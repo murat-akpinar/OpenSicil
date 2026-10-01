@@ -6,6 +6,7 @@
   <a class="link text-sm" href="/departments">{{ lang.t("nav.departments") }}</a>
 </div>
 {% if !error.is_empty() %}<p class="alert alert-err">{{ error }}</p>{% endif %}
+{% if !info.is_empty() %}<p class="alert alert-info">{{ info }}</p>{% endif %}
 {% let show_settings = true %}
 <form method="post" action="/departments/{{ dept.def.id }}" class="space-y-6">
   <div class="grid gap-4 sm:grid-cols-3">

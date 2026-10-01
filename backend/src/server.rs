@@ -32,6 +32,7 @@ struct Config {
     blind_index_key: [u8; crate::crypto::KEY_LEN],
     public_url: String,
     time_zone: String,
+    change_set_threshold: usize,
 }
 
 // Butun ortam degiskenleri acilista dogrulanir: eksik anahtar ya da bozuk ortak
@@ -49,6 +50,7 @@ fn load_config() -> Result<Config, String> {
         blind_index_key,
         public_url,
         time_zone: common.time_zone,
+        change_set_threshold: crate::change_set::threshold_from_env()?,
     })
 }
 
@@ -56,36 +58,28 @@ fn env_required(var: &str) -> Result<String, String> {
     std::env::var(var).map_err(|_| format!("{var} ortam değişkeni eksik"))
 }
 
-pub async fn run() -> ExitCode {
-    let Config {
-        database_url,
-        aead_key,
-        blind_index_key,
-        public_url,
-        time_zone,
-    } = match load_config() {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("backend: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-
-    let pool = match prepare_pool(&database_url, &time_zone).await {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("backend: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-
-    let app = build_router(AppState {
+// Ayar okuma + havuz; run()'u <= 50 satir tutar (security.md).
+async fn startup() -> Result<AppState, String> {
+    let c = load_config()?;
+    let pool = prepare_pool(&c.database_url, &c.time_zone).await?;
+    Ok(AppState {
         pool,
-        aead_key,
-        blind_index_key,
-        public_url,
-        time_zone,
-    });
+        aead_key: c.aead_key,
+        blind_index_key: c.blind_index_key,
+        public_url: c.public_url,
+        time_zone: c.time_zone,
+        change_set_threshold: c.change_set_threshold,
+    })
+}
+
+pub async fn run() -> ExitCode {
+    let app = match startup().await {
+        Ok(state) => build_router(state),
+        Err(e) => {
+            eprintln!("backend: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
 
     let listener = match tokio::net::TcpListener::bind("0.0.0.0:8000").await {
         Ok(l) => l,
@@ -156,6 +150,7 @@ mod tests {
             blind_index_key: [0u8; crate::crypto::KEY_LEN],
             public_url: "https://localhost".to_string(),
             time_zone: "Europe/Istanbul".to_string(),
+            change_set_threshold: crate::change_set::DEFAULT_THRESHOLD,
         }
     }
 

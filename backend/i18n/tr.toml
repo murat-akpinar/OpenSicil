@@ -145,6 +145,15 @@ targets.password_reset_delay = "Ayrılışta parola sıfırlama gecikmesi (gün,
 targets.delete_requires_approval = "Silme onay gerektirir"
 catalog.missing = " (kayıp)"
 
+# --- degisiklik seti ve etki onizlemesi (ADR-031/037/043) ---
+changeset.none = "Bu değişiklik hiçbir kimlikte fark üretmiyor"
+changeset.applies = "{} kimlik etkilendi"
+changeset.added = "{} eklendi ({} kimlik)"
+changeset.removed = "{} çıkarıldı ({} kimlik)"
+changeset.accounts = "{} kimlikte hesap durumu ya da OU değişti"
+changeset.observed = "gözlemde {} kimlik (hedefte işlem üretmez, eşiğe girmez)"
+changeset.over_threshold = "değişiklik seti eşiği aşıldı ({} > {})"
+
 # --- oznitelik eslemesi (ADR-012/029/034) ---
 mappings.title = "öznitelik eşlemesi"
 mappings.intro = 'Hedef öznitelik kodda sabit izinli listeden seçilir (ADR-029); listede olmayan satırı worker reddeder. "Sadece boşsa yaz" hedefteki dolu değeri korur (ADR-034). Hassas kaynak (kimlik no, cep) yalnızca Sistem yöneticisi ve açık onayla; worker ayarı kapalıysa yine reddeder.'

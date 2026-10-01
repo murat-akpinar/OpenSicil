@@ -9,6 +9,7 @@ use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::Router;
 
+use crate::change_set::{self, Draft, Impact};
 use crate::i18n::Lang;
 use crate::identity_web::{allowed, audit_operator, forbidden, internal, OperatorSession};
 use crate::operator_session::Operator;
@@ -16,6 +17,29 @@ use crate::org::{self, CatalogOptions, Definition, Owner, SaveError, TargetSetti
 use crate::web::{render, AppState};
 
 const WRITE_AUTHORITIES: &[&str] = &["role_admin", "admin"];
+
+// Ekranda iki satirdan biri dolu olur: hata ya da kayit sonrasi etki ozeti.
+#[derive(Default)]
+struct Notice {
+    error: String,
+    info: String,
+}
+
+impl Notice {
+    fn err(text: String) -> Notice {
+        Notice {
+            error: text,
+            ..Notice::default()
+        }
+    }
+
+    fn info(text: String) -> Notice {
+        Notice {
+            info: text,
+            ..Notice::default()
+        }
+    }
+}
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -136,6 +160,14 @@ fn target_views(def: &Definition, options: &CatalogOptions, lang: Lang) -> Vec<T
         .collect()
 }
 
+fn definition_edit(f: &Fields, def: &Definition) -> org::DefinitionEdit {
+    org::DefinitionEdit {
+        name: f.get("name").to_string(),
+        entitlement_ids: f.all_i64("entitlement"),
+        settings: f.settings(&def.settings),
+    }
+}
+
 fn settings_json(settings: &[TargetSetting]) -> serde_json::Value {
     settings
         .iter()
@@ -177,6 +209,7 @@ struct RoleTemplate {
     targets: Vec<TargetView>,
     show_settings: bool,
     error: String,
+    info: String,
     can_edit: bool,
 }
 
@@ -197,6 +230,7 @@ struct DepartmentTemplate {
     parents: Vec<ItemView>,
     targets: Vec<TargetView>,
     error: String,
+    info: String,
     can_edit: bool,
 }
 
@@ -268,7 +302,7 @@ async fn create_role(
     }
 }
 
-async fn render_role(state: &AppState, op: &Operator, id: i64, error: String) -> Response {
+async fn render_role(state: &AppState, op: &Operator, id: i64, notice: Notice) -> Response {
     let (role, options) = match (
         org::load_role(&state.pool, id).await,
         org::catalog_options(&state.pool).await,
@@ -284,7 +318,8 @@ async fn render_role(state: &AppState, op: &Operator, id: i64, error: String) ->
         targets: target_views(&role.def, &options, op.lang),
         show_settings: role.kind == "primary",
         role,
-        error,
+        error: notice.error,
+        info: notice.info,
         can_edit: allowed(op, WRITE_AUTHORITIES),
     })
 }
@@ -294,7 +329,7 @@ async fn role_page(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Response {
-    render_role(&state, &op, id, String::new()).await
+    render_role(&state, &op, id, Notice::default()).await
 }
 
 async fn save_role(
@@ -314,24 +349,75 @@ async fn save_role(
         Err(e) => return internal("rol okunamadı", e),
     };
     let f = Fields(form);
-    let edit = org::DefinitionEdit {
-        name: f.get("name").to_string(),
-        entitlement_ids: f.all_i64("entitlement"),
-        settings: f.settings(&current.def.settings),
+    let edit = definition_edit(&f, &current.def);
+    let draft = Draft {
+        owner: Owner::Role,
+        id,
+        edit: &edit,
+        with_settings: current.kind == "primary",
     };
+    let (impact, info) = impact_notice(&state, op.lang, &draft).await;
     if let Err(e) = org::save_role(&state.pool, id, f.get("title"), &edit).await {
         return match save_error(e, "rol kaydedilemedi") {
-            Ok(key) => render_role(&state, &op, id, op.lang.t(key).to_string()).await,
+            Ok(key) => render_role(&state, &op, id, Notice::err(op.lang.t(key).into())).await,
             Err(response) => *response,
         };
     }
     let detail = serde_json::json!({
         "action": "saved", "role_id": id, "name": edit.name,
         "entitlement_ids": edit.entitlement_ids, "settings": settings_json(&edit.settings),
+        "impact": impact.applies, "observed": impact.observed,
     });
     audit_operator(&state, &op, crate::audit::ROLE_CHANGED, None, detail).await;
     enqueue_affected(&state, Owner::Role, id).await;
-    Redirect::to(&format!("/roles/{id}")).into_response()
+    render_role(&state, &op, id, Notice::info(info)).await
+}
+
+// ADR-031/037/043: etki onizlemesi kayitla birlikte hesaplanir (taslak = gonderilen
+// form, yayimlanmis = veritabanindaki tanim) ve ekranda ozetlenir. Esigi asan setin
+// onaya dusmesi sonraki kutucuktur; burada sayi raporlanir.
+async fn impact_notice(state: &AppState, lang: Lang, draft: &Draft<'_>) -> (Impact, String) {
+    match change_set::preview(&state.pool, &state.time_zone, draft).await {
+        Ok(impact) => {
+            let text = impact_text(lang, &impact, state.change_set_threshold);
+            (impact, text)
+        }
+        Err(e) => {
+            eprintln!("web: etki önizlemesi hesaplanamadı: {e}");
+            (Impact::default(), String::new())
+        }
+    }
+}
+
+fn impact_text(lang: Lang, impact: &Impact, threshold: usize) -> String {
+    if impact.applies == 0 && impact.observed == 0 {
+        return lang.t("changeset.none").to_string();
+    }
+    let mut parts = vec![lang.t1("changeset.applies", impact.applies)];
+    for item in &impact.items {
+        if item.added > 0 {
+            parts.push(lang.tn("changeset.added", &[&item.name, &item.added.to_string()]));
+        }
+        if item.removed > 0 {
+            parts.push(lang.tn(
+                "changeset.removed",
+                &[&item.name, &item.removed.to_string()],
+            ));
+        }
+    }
+    if impact.account_changes > 0 {
+        parts.push(lang.t1("changeset.accounts", impact.account_changes));
+    }
+    if impact.observed > 0 {
+        parts.push(lang.t1("changeset.observed", impact.observed));
+    }
+    if impact.exceeds(threshold) {
+        parts.push(lang.tn(
+            "changeset.over_threshold",
+            &[&impact.applies.to_string(), &threshold.to_string()],
+        ));
+    }
+    parts.join("; ")
 }
 
 // Is acilamazsa model yine kaydedilmistir; log'a duser, zamanlayici farki yakalar.
@@ -385,7 +471,7 @@ async fn create_department(
     }
 }
 
-async fn render_department(state: &AppState, op: &Operator, id: i64, error: String) -> Response {
+async fn render_department(state: &AppState, op: &Operator, id: i64, notice: Notice) -> Response {
     let dept = match org::load_department(&state.pool, id).await {
         Ok(Some(d)) => d,
         Ok(None) => {
@@ -405,7 +491,8 @@ async fn render_department(state: &AppState, op: &Operator, id: i64, error: Stri
         targets: target_views(&dept.def, &options, op.lang),
         parents: parent_options(&dept, &departments),
         dept,
-        error,
+        error: notice.error,
+        info: notice.info,
         can_edit: allowed(op, WRITE_AUTHORITIES),
     })
 }
@@ -415,7 +502,7 @@ async fn department_page(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Response {
-    render_department(&state, &op, id, String::new()).await
+    render_department(&state, &op, id, Notice::default()).await
 }
 
 async fn save_department(
@@ -436,14 +523,17 @@ async fn save_department(
     };
     let f = Fields(form);
     let parent = f.opt_i64("parent_id");
-    let edit = org::DefinitionEdit {
-        name: f.get("name").to_string(),
-        entitlement_ids: f.all_i64("entitlement"),
-        settings: f.settings(&current.def.settings),
+    let edit = definition_edit(&f, &current.def);
+    let draft = Draft {
+        owner: Owner::Department,
+        id,
+        edit: &edit,
+        with_settings: true,
     };
+    let (impact, info) = impact_notice(&state, op.lang, &draft).await;
     if let Err(e) = org::save_department(&state.pool, id, f.get("code"), parent, &edit).await {
         return match save_error(e, "departman kaydedilemedi") {
-            Ok(key) => render_department(&state, &op, id, op.lang.t(key).to_string()).await,
+            Ok(key) => render_department(&state, &op, id, Notice::err(op.lang.t(key).into())).await,
             Err(response) => *response,
         };
     }
@@ -451,10 +541,11 @@ async fn save_department(
         "action": "saved", "department_id": id, "name": edit.name, "code": f.get("code"),
         "parent_id": parent, "entitlement_ids": edit.entitlement_ids,
         "settings": settings_json(&edit.settings),
+        "impact": impact.applies, "observed": impact.observed,
     });
     audit_operator(&state, &op, crate::audit::DEPARTMENT_CHANGED, None, detail).await;
     enqueue_affected(&state, Owner::Department, id).await;
-    Redirect::to(&format!("/departments/{id}")).into_response()
+    render_department(&state, &op, id, Notice::info(info)).await
 }
 
 async fn render_targets(state: &AppState, op: &Operator, error: String) -> Response {
@@ -632,8 +723,10 @@ mod tests {
             "name=Uzman&title=Uzman&entitlement={}&entitlement={}&pa.{}=true&ct.{}={}&ed.{}=example.com&us.{}=",
             catalog.gg_vpn, catalog.gg_nobet, catalog.ad, catalog.ad, catalog.sistem_uzmanlari_ou, catalog.ad, catalog.ad
         );
-        let r = send("POST", role_url.clone(), body, admin.clone()).await;
-        assert_eq!(r.status(), StatusCode::SEE_OTHER, "{}", location(&r));
+        // Kayit sonrasi sayfa etki ozetiyle doner (ADR-031/037): iki kimlik, iki ekleme.
+        let page = body_string(send("POST", role_url.clone(), body, admin.clone()).await).await;
+        assert!(page.contains("1 kimlik etkilendi"), "{page}");
+        assert!(page.contains("GG-VPN eklendi (1 kimlik)"), "{page}");
         let page =
             body_string(send("GET", role_url.clone(), String::new(), admin.clone()).await).await;
         assert!(

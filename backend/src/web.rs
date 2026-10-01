@@ -27,6 +27,8 @@ pub struct AppState {
     pub public_url: String,
     // kurulum saat dilimi (ADR-039); operator reddi kimlik durumunu bununla turetir
     pub time_zone: String,
+    // degisiklik seti esigi (ADR-031): backend'in kendi ortam degiskeni
+    pub change_set_threshold: usize,
 }
 
 // --- START FEATURE: bootstrap-admin ---
@@ -615,6 +617,7 @@ pub(crate) fn test_state(pool: PgPool, public_url: &str) -> AppState {
         blind_index_key: [4u8; crate::crypto::KEY_LEN],
         public_url: public_url.to_string(),
         time_zone: "Europe/Istanbul".to_string(),
+        change_set_threshold: crate::change_set::DEFAULT_THRESHOLD,
     }
 }
 

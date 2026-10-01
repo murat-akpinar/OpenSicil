@@ -77,4 +77,5 @@
 - Arayüz kabuğu — derlenmiş Tailwind CSS, Catppuccin teması, self-host font (ADR-088)
 - TR/EN dil seçimi — gömülü TOML, lang.t(), tercih oturumda (ADR-089)
 - Saatlik fren sayaçları ve acil kota worker'da (ADR-091)
+- Etki önizlemesi ve değişiklik seti eşiği (ADR-092)
 

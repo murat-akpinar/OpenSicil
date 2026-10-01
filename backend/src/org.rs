@@ -122,7 +122,7 @@ pub struct DepartmentDetail {
 }
 
 // Hangi tablonun sahibi: rol ya da departman; SQL metinleri sabit (parametreli).
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Owner {
     Role,
     Department,
@@ -467,9 +467,12 @@ async fn validate_parent(pool: &PgPool, id: i64, parent_id: Option<i64>) -> Resu
 }
 
 // Tanim degisince etkilenen kimlikler: rol → birincil/ek rolu o olanlar, temel rol →
-// herkes; departman → alt agac. ponytail: kimlik basina hedef sayisi kadar INSERT;
-// 3f degisiklik seti bunu taslak/esik yoluna tasir.
-pub async fn enqueue_affected(pool: &PgPool, owner: Owner, id: i64) -> Result<usize, sqlx::Error> {
+// herkes; departman → alt agac. Etki onizlemesi (change_set) ayni kumeyi okur.
+pub async fn affected_identities(
+    pool: &PgPool,
+    owner: Owner,
+    id: i64,
+) -> Result<Vec<i64>, sqlx::Error> {
     let sql = match owner {
         Owner::Role => {
             "SELECT DISTINCT i.id FROM identities i \
@@ -485,7 +488,12 @@ pub async fn enqueue_affected(pool: &PgPool, owner: Owner, id: i64) -> Result<us
                AND i.department_id IN (SELECT id FROM down)"
         }
     };
-    let ids: Vec<i64> = sqlx::query_scalar(sql).bind(id).fetch_all(pool).await?;
+    sqlx::query_scalar(sql).bind(id).fetch_all(pool).await
+}
+
+// ponytail: kimlik basina hedef sayisi kadar INSERT; taslak/onay yolu sonraki kutucukta.
+pub async fn enqueue_affected(pool: &PgPool, owner: Owner, id: i64) -> Result<usize, sqlx::Error> {
+    let ids = affected_identities(pool, owner, id).await?;
     for identity in &ids {
         crate::identity::enqueue_all_targets(pool, *identity, Priority::Bulk).await?;
     }

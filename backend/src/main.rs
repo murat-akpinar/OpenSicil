@@ -2,11 +2,13 @@ mod assets;
 mod audit;
 mod auth;
 mod bootstrap_account;
+mod change_set;
 mod common_settings;
 mod cookie;
 mod crypto;
 mod db;
-// 3a motoru ve 3f onizlemesi tuketene kadar yalnizca durum turetme kullanilir (ADR-038).
+// Ikiz dosya (worker ile birebir ayni); backend durum turetme ve etki onizlemesi
+// icin cagirir, motora ozel alanlari kullanmaz (ADR-038).
 #[allow(dead_code)]
 mod desired_state;
 mod first_password;

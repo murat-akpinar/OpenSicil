@@ -145,6 +145,15 @@ targets.password_reset_delay = "Password reset delay after departure (days, ADR-
 targets.delete_requires_approval = "Deletion requires approval"
 catalog.missing = " (missing)"
 
+# --- change set and impact preview (ADR-031/037/043) ---
+changeset.none = "This change makes no difference for any identity"
+changeset.applies = "{} identities affected"
+changeset.added = "{} added ({} identities)"
+changeset.removed = "{} removed ({} identities)"
+changeset.accounts = "account state or OU changed for {} identities"
+changeset.observed = "{} identities in observation (no target operation, not counted)"
+changeset.over_threshold = "change set threshold exceeded ({} > {})"
+
 # --- attribute mapping (ADR-012/029/034) ---
 mappings.title = "attribute mapping"
 mappings.intro = 'Target attributes come from an allow list fixed in code (ADR-029); the worker rejects any row outside it. "Write only if empty" keeps a value that already exists on the target (ADR-034). A sensitive source (national ID, mobile) needs a system administrator and an explicit acknowledgement; the worker still rejects it when the setting is off.'
