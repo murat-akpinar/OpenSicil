@@ -93,6 +93,7 @@
           <th>{{ lang.t("field.full_name") }}</th>
           <th>{{ lang.t("field.employee_number") }}</th>
           <th>{{ lang.t("field.department") }}</th>
+          <th>{{ lang.t("adopt.when_created") }}</th>
           <th>{{ lang.t("field.email") }}</th>
           <th>{{ lang.t("field.mobile_phone") }}</th>
         </tr></thead>
@@ -109,6 +110,8 @@
               <span class="badge badge-warn">{{ lang.t("adopt.no_department_match") }}</span>
               {% endmatch %}
             </td>
+            {# ADR-103 madde 6: acilis gunu baslangic tarihi olur; bos ise formdaki tarih #}
+            <td class="muted">{% if c.when_created.is_empty() %}—{% else %}{{ c.when_created }}{% endif %}</td>
             {# AD'deki e-posta yalnizca gosterilir: adi ve e-postayi worker uretir (ADR-015) #}
             <td class="muted">{% if c.mail.is_empty() %}—{% else %}{{ c.mail }}{% endif %}</td>
             <td class="muted">

@@ -41,6 +41,9 @@ pub struct Finding {
     pub mail: Option<String>,
     pub mobile: Option<String>,
     pub telephone: Option<String>,
+    /// Hesabin acilis gunu `YYYY-MM-DD` (ADR-103 madde 6); toplu sahiplenmenin
+    /// baslangic tarihi, bossa formdaki tarih
+    pub when_created: Option<String>,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -90,6 +93,7 @@ pub fn compare(accounts: &[DirectoryAccount], links: &[Link]) -> Vec<Finding> {
                 mail: account.mail.clone(),
                 mobile: account.mobile.clone(),
                 telephone: account.telephone.clone(),
+                when_created: account.when_created.clone(),
             }
         })
         .collect();
@@ -117,6 +121,7 @@ fn missing_finding(link: &Link) -> Finding {
         mail: None,
         mobile: None,
         telephone: None,
+        when_created: None,
     }
 }
 
@@ -158,8 +163,9 @@ pub async fn store(
             "INSERT INTO reconcile_findings (target_system_id, read_job_id, kind, \
              external_id, account_name, display_name, container, enabled, identity_id, \
              given_name, surname, employee_number, department_name, mail, mobile, \
-             telephone_number) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)",
+             telephone_number, when_created) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, \
+             $17::date)",
         )
         .bind(target)
         .bind(read_job_id)
@@ -177,6 +183,7 @@ pub async fn store(
         .bind(&finding.mail)
         .bind(&finding.mobile)
         .bind(&finding.telephone)
+        .bind(&finding.when_created)
         .execute(&mut *tx)
         .await?;
     }
@@ -204,6 +211,7 @@ mod tests {
             mail: Some(format!("{sam}@hogwarts.local")),
             mobile: None,
             telephone: Some("01632 960001".to_string()),
+            when_created: Some("2024-09-01".to_string()),
         }
     }
 

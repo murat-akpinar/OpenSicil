@@ -565,9 +565,12 @@ pub struct DirectoryAccount {
     /// yalnizca cep bosken yedege gecer ve bicim kontrolunden gecmek zorunda.
     pub mobile: Option<String>,
     pub telephone: Option<String>,
+    /// Hesabin acilis gunu (`whenCreated`, `YYYY-MM-DD`): toplu sahiplenmede
+    /// baslangic tarihi (ADR-103 madde 6). Bicimi bozuksa yok sayilir.
+    pub when_created: Option<String>,
 }
 
-const ACCOUNT_ATTRS: [&str; 13] = [
+const ACCOUNT_ATTRS: [&str; 14] = [
     "objectGUID",
     "sAMAccountName",
     "displayName",
@@ -584,10 +587,26 @@ const ACCOUNT_ATTRS: [&str; 13] = [
     "mail",
     "mobile",
     "telephoneNumber",
+    "whenCreated",
 ];
 
 // userAccountControl ACCOUNTDISABLE biti (docs/05); UAC 514 = 512 | 2 = pasif.
 const ACCOUNTDISABLE: u32 = 0x2;
+
+/// LDAP GeneralizedTime (`20260914081500.0Z`) → `2026-09-14`. Yalnizca gun:
+/// saat ve dilim atilir, sekiz rakamdan azi ya da rakam olmayani yok sayilir.
+fn generalized_time_date(raw: &str) -> Option<String> {
+    let digits = raw.trim().get(..8)?;
+    if !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    Some(format!(
+        "{}-{}-{}",
+        &digits[..4],
+        &digits[4..6],
+        &digits[6..8]
+    ))
+}
 
 /// Hesabin bulundugu konteyner: `CN=Harry Potter,OU=Users,…` -> `OU=Users,…`.
 /// `split_dn` ile ayni kacis kuralini kullanmak gerekmez, yalnizca ilk kacisliz
@@ -627,6 +646,7 @@ fn to_account(entry: &SearchEntry) -> Option<DirectoryAccount> {
         mail: text_attr(entry, "mail"),
         mobile: text_attr(entry, "mobile"),
         telephone: text_attr(entry, "telephoneNumber"),
+        when_created: text_attr(entry, "whenCreated").and_then(|v| generalized_time_date(&v)),
     })
 }
 
@@ -750,6 +770,12 @@ mod tests {
         assert_eq!(contact.mail.as_deref(), Some("hpotter@hogwarts.local"));
         assert_eq!(contact.telephone.as_deref(), Some("01632 960001"));
         assert_eq!(contact.mobile, None);
+
+        // ADR-103 madde 6: `whenCreated` gun olarak okunur, bozuk deger yok sayilir
+        let created = with(&[("whenCreated", "20250914081500.0Z")]);
+        assert_eq!(created.when_created.as_deref(), Some("2025-09-14"));
+        assert_eq!(with(&[("whenCreated", "dun")]).when_created, None);
+        assert_eq!(with(&[]).when_created, None);
     }
 
     #[test]
@@ -869,6 +895,9 @@ mod tests {
             seeded.dn
         );
         assert_eq!(seeded.container, "OU=Personel,DC=opensicil,DC=lab");
+        // ADR-103 madde 6: dizin her hesabin acilis gununu verir
+        let created = seeded.when_created.as_deref().expect("whenCreated boş");
+        assert_eq!(created.len(), 10, "YYYY-MM-DD bekleniyor: {created}");
         // Kapsam disindaki OU'dan hesap gelmemeli (ADR-014)
         assert!(
             accounts.iter().all(|a| under_any(&a.dn, &scope.user_ous)),

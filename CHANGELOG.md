@@ -117,4 +117,5 @@
 - Rol ve departman detayında gruplanmış üyelikler ve miras satırı
 - Toplu sahiplenmede tümünü seç kutusu (ADR-103 madde 3)
 - Tanımsız yer tutucu rol — rolü atanmamış sayacı, liste filtresi ve yönetime alma kapısı (ADR-103 madde 4/5)
+- Toplu sahiplenmede başlangıç tarihi AD whenCreated'dan gelir (ADR-103 madde 6)
 

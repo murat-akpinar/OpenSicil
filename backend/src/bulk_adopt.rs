@@ -45,6 +45,9 @@ pub struct Candidate {
     /// Cep (`mobile`) ve sabit hat (`telephoneNumber`) ham degerleri
     pub mobile: String,
     pub telephone: String,
+    /// Hesabin AD'de acilis gunu (`whenCreated`, `YYYY-MM-DD`); doluysa
+    /// kimligin baslangic tarihi budur, bossa formdaki tarih (ADR-103 madde 6)
+    pub when_created: String,
 }
 
 impl Candidate {
@@ -93,13 +96,15 @@ pub async fn candidates(pool: &PgPool, target: i64) -> Result<Vec<Candidate>, sq
         String,
         String,
         String,
+        String,
     );
     let rows: Vec<Row> = sqlx::query_as(
         "SELECT f.id, f.account_name, COALESCE(f.display_name, ''), \
                 COALESCE(f.given_name, ''), COALESCE(f.surname, ''), \
                 COALESCE(f.employee_number, ''), COALESCE(f.department_name, ''), d.id, \
                 COALESCE(f.mail, ''), COALESCE(f.mobile, ''), \
-                COALESCE(f.telephone_number, '') \
+                COALESCE(f.telephone_number, ''), \
+                COALESCE(to_char(f.when_created, 'YYYY-MM-DD'), '') \
          FROM reconcile_findings f \
          LEFT JOIN departments d ON lower(d.name) = lower(f.department_name) \
          WHERE f.target_system_id = $1 AND f.kind = 'unmanaged' \
@@ -122,6 +127,7 @@ pub async fn candidates(pool: &PgPool, target: i64) -> Result<Vec<Candidate>, sq
             mail: r.8,
             mobile: r.9,
             telephone: r.10,
+            when_created: r.11,
         })
         .collect())
 }
@@ -215,7 +221,12 @@ async fn create_one(
         department_id: department.to_string(),
         primary_role_id: batch.primary_role_id.to_string(),
         employment_type: batch.employment_type.clone(),
-        start_date: batch.start_date.clone(),
+        // Baslangic uydurulmaz: AD'deki acilis gunu varsa o, yoksa formdaki
+        // tarih (ADR-103 madde 6)
+        start_date: match candidate.when_created.is_empty() {
+            true => batch.start_date.clone(),
+            false => candidate.when_created.clone(),
+        },
         // Sahiplenmenin kendisi: worker hesabi bu adla bulur ve baglar,
         // yeni hesap **acmaz** (ADR-086).
         existing_ad_account_hint: candidate.account_name.clone(),
@@ -250,6 +261,7 @@ mod tests {
             mail: String::new(),
             mobile: String::new(),
             telephone: String::new(),
+            when_created: String::new(),
         }
     }
 
@@ -329,8 +341,9 @@ mod tests {
         .unwrap();
         // Uc bulgu: AD alanlari dolu, yalnizca displayName'i olan, ve soyadsiz.
         // Telefon ikisinde farkli: Harry'de Hogwarts'in sabit hatti (E.164
-        // degil), Ron'da gercek bir cep — ADR-106.
-        for (guid, sam, display, given, sn, dept, mail, mobile, phone) in [
+        // degil), Ron'da gercek bir cep — ADR-106. Acilis gunu yalnizca
+        // Harry'de: baslangic ondan, Ron'da formdan (ADR-103 madde 6).
+        for (guid, sam, display, given, sn, dept, mail, mobile, phone, created) in [
             (
                 "g1",
                 "harry.potter",
@@ -341,6 +354,7 @@ mod tests {
                 "harry.potter@hogwarts.local",
                 "",
                 "01632 960001",
+                Some("2024-03-05"),
             ),
             (
                 "g2",
@@ -352,15 +366,17 @@ mod tests {
                 "",
                 "+905321234567",
                 "",
+                None,
             ),
-            ("g3", "hagrid", "Hagrid", "", "", "", "", "", ""),
+            ("g3", "hagrid", "Hagrid", "", "", "", "", "", "", None),
         ] {
             sqlx::query(
                 "INSERT INTO reconcile_findings (target_system_id, read_job_id, kind, \
                  external_id, account_name, display_name, container, enabled, \
-                 given_name, surname, department_name, mail, mobile, telephone_number) \
+                 given_name, surname, department_name, mail, mobile, telephone_number, \
+                 when_created) \
                  VALUES ($1, $2, 'unmanaged', $3, $4, $5, 'OU=Users', true, $6, $7, $8, \
-                 $9, $10, $11)",
+                 $9, $10, $11, $12::date)",
             )
             .bind(target)
             .bind(read_job)
@@ -373,6 +389,7 @@ mod tests {
             .bind(mail)
             .bind(mobile)
             .bind(phone)
+            .bind(created)
             .execute(&pool)
             .await
             .unwrap();
@@ -455,6 +472,17 @@ mod tests {
         // displayName'den bolunen ad
         assert_eq!(hints[1].0, "Ron");
         assert_eq!(hints[1].1, "Billius Weasley");
+
+        // ADR-103 madde 6: baslangic AD'deki acilis gununden, yoksa formdan
+        let starts: Vec<(String, String)> = sqlx::query_as(
+            "SELECT existing_ad_account_hint, to_char(start_date, 'YYYY-MM-DD') \
+             FROM identities WHERE existing_ad_account_hint IS NOT NULL ORDER BY id",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(starts[0], ("harry.potter".into(), "2024-03-05".into()));
+        assert_eq!(starts[1], ("ron.weasley".into(), "2026-10-01".into()));
 
         // ADR-106: AD'nin telefonu kimlige yazildi ama yalnizca E.164 olani.
         // Harry'nin sabit hatti bos gecti (uydurma numara yok), Ron'un cebi
