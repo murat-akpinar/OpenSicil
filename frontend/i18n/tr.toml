@@ -11,6 +11,7 @@ nav.departments = "Departmanlar"
 nav.reports = "Raporlar"
 nav.targets = "Uygulamalar"
 nav.used_names = "Kullanılmış adlar"
+nav.interventions = "Müdahale bekleyen işler"
 nav.settings = "Ayarlar"
 shell.language = "Dil"
 shell.theme = "Temayı değiştir"
@@ -32,6 +33,12 @@ reports.reconcile = "Mutabakat"
 reports.reconcile_hint = "Hedef sistemdeki hesapların OpenSicil'deki karşılığıyla karşılaştırılmış hali."
 reports.lists = "Listeler"
 reports.lists_hint = "Tarihe bağlı işler ve ad kayıtları."
+
+# --- müdahale bekleyen işler ---
+interventions.sub = "Hedefe uygulanamamış işler: neyin beklediği, neden beklediği ve ne yapılması gerektiği."
+interventions.empty = "Müdahale bekleyen iş yok."
+interventions.name_pending = "Kullanıcı adı henüz üretilmedi — kişi sayfasındaki ad bölümünden karar verin."
+interventions.retry_requested = "tekrar denenecek"
 
 # --- ortak ---
 common.save = "Kaydet"
@@ -451,6 +458,7 @@ dash.departments = "Departman bazlı dağılım"
 dash.departments_empty = "Departmanlara atanmış kimlik yok."
 dash.quick = "Hızlı işlemler"
 dash.needs_intervention = "{} iş müdahale bekliyor."
+dash.needs_intervention_cta = "İşlere git"
 dash.pending_approvals = "{} tanım taslağı onay bekliyor."
 
 # --- devreye alma kartı (kurulum adımları) ---

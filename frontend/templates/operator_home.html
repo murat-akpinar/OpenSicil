@@ -54,8 +54,10 @@
   {% endif %}
 
   {# Isletme uyarilari yalnizca sifir degilken; temiz kurulumda ekran susmali #}
+  {# Serit kisa yoldur: tek is kisi sayfasina, birden fazlasi mudahale listesine #}
   {% if dash.totals.needs_intervention > 0 %}
-  <p class="alert alert-warn">{{ lang.t1("dash.needs_intervention", dash.totals.needs_intervention) }}</p>
+  <p class="alert alert-warn">{{ lang.t1("dash.needs_intervention", dash.totals.needs_intervention) }}
+    <a class="link" href="{{ dash.totals.intervention_href() }}">{{ lang.t("dash.needs_intervention_cta") }}</a></p>
   {% endif %}
   {% if dash.totals.pending_approvals > 0 %}
   <p class="alert alert-info">{{ lang.t1("dash.pending_approvals", dash.totals.pending_approvals) }}</p>

@@ -20,6 +20,7 @@ mod health;
 mod i18n;
 mod identity;
 mod identity_web;
+mod interventions;
 mod jobs;
 mod logging;
 // Ikiz dosya (worker ile birebir ayni); donusumler yalnizca worker'da calisir.

@@ -18,7 +18,7 @@ const PERMANENT: &str = "permanent";
 const E164_MIN_DIGITS: usize = 8;
 const E164_MAX_DIGITS: usize = 15;
 const INTERVENTION_PREFIX: &str = "müdahale gerekiyor: ";
-const INTERVENTION_STATUS: &str = "needs_intervention";
+pub(crate) const INTERVENTION_STATUS: &str = "needs_intervention";
 const RECENT_LIMIT: i64 = 50;
 /// Ana sayfadaki "son kimlikler" kutusu: panelin bir karti, liste degil.
 /// Tam liste `/identities`te ve sayfali — panel 50 satirla uzayip gidiyordu.

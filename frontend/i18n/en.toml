@@ -11,6 +11,7 @@ nav.departments = "Departments"
 nav.reports = "Reports"
 nav.targets = "Applications"
 nav.used_names = "Used names"
+nav.interventions = "Jobs needing intervention"
 nav.settings = "Settings"
 shell.language = "Language"
 shell.theme = "Switch theme"
@@ -32,6 +33,12 @@ reports.reconcile = "Reconciliation"
 reports.reconcile_hint = "Accounts in the target system compared with their OpenSicil counterparts."
 reports.lists = "Lists"
 reports.lists_hint = "Date-driven work and name records."
+
+# --- jobs needing intervention ---
+interventions.sub = "Jobs that could not be applied to the target: what is waiting, why, and what to do."
+interventions.empty = "No job needs intervention."
+interventions.name_pending = "No username generated yet — decide in the name section of the person page."
+interventions.retry_requested = "retry queued"
 
 # --- common ---
 common.save = "Save"
@@ -451,6 +458,7 @@ dash.departments = "Breakdown by department"
 dash.departments_empty = "No identities assigned to departments."
 dash.quick = "Quick actions"
 dash.needs_intervention = "{} jobs need intervention."
+dash.needs_intervention_cta = "Go to the jobs"
 dash.pending_approvals = "{} definition drafts await approval."
 
 # --- setup card (onboarding steps) ---

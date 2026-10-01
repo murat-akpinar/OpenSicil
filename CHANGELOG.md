@@ -107,4 +107,5 @@
 - Devreye alma kartı — kurulumun dört adımı panelde
 - Hata sayfaları ve nginx istek sertleştirmesi
 - AD bind giriş kapısı — yetkiler AD gruplarından okunuyor
+- Müdahale bekleyen işler listesi ve panel şeridinde kısa yol
 

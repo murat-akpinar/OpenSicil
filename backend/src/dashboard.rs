@@ -103,8 +103,22 @@ pub struct Totals {
     pub changed: i64,
     /// Hedefe uygulanamamis is: ADR-076'nin "ayrilmis ama kapatilamamis" kutusu
     pub needs_intervention: i64,
+    /// Mudahaledeki islerden birinin kimligi; serit tek isi dogrudan acar
+    intervention_identity: Option<i64>,
     /// Onay bekleyen rol/departman taslagi (ADR-031)
     pub pending_approvals: i64,
+}
+
+impl Totals {
+    /// Seridin kisa yolu: tek is varsa dogrudan o kisinin sayfasi, birden
+    /// fazlaysa mudahale listesi. Operator "1 is bekliyor" deyip neyin
+    /// beklediğini aramak zorunda kalmasin.
+    pub fn intervention_href(&self) -> String {
+        match (self.needs_intervention, self.intervention_identity) {
+            (1, Some(id)) => format!("/identities/{id}"),
+            _ => "/interventions".to_string(),
+        }
+    }
 }
 
 pub struct Event {
@@ -242,10 +256,10 @@ fn link(key: &'static str, href: &str) -> SetupLink {
     }
 }
 
-/// Alti sayi ve bugunun tarihi tek sorguda: panel acilirken yedi ayri gidis
-/// donus olmasin.
+/// Alti sayi, serit kisa yolunun kimligi ve bugunun tarihi tek sorguda: panel
+/// acilirken sekiz ayri gidis donus olmasin.
 async fn totals(pool: &PgPool, time_zone: &str) -> Result<(Totals, String), sqlx::Error> {
-    let row: (i64, i64, i64, i64, i64, i64, String) = sqlx::query_as(
+    let row: (i64, i64, i64, i64, i64, Option<i64>, i64, String) = sqlx::query_as(
         "SELECT \
            (SELECT count(*) FROM identities WHERE deleted_at IS NULL), \
            (SELECT count(*) FROM identities WHERE deleted_at IS NULL \
@@ -255,7 +269,8 @@ async fn totals(pool: &PgPool, time_zone: &str) -> Result<(Totals, String), sqlx
               AND end_at > now() - make_interval(days => $2)), \
            (SELECT count(DISTINCT identity_id) FROM audit_log \
               WHERE event_type = $3 AND occurred_at > now() - make_interval(days => $2)), \
-           (SELECT count(*) FROM jobs WHERE status = 'needs_intervention'), \
+           (SELECT count(*) FROM jobs WHERE status = $4), \
+           (SELECT min(identity_id) FROM jobs WHERE status = $4), \
            (SELECT count(*) FROM roles WHERE pending_definition IS NOT NULL) \
            + (SELECT count(*) FROM departments WHERE pending_definition IS NOT NULL), \
            to_char(now() AT TIME ZONE $1, 'DD.MM.YYYY')",
@@ -263,6 +278,7 @@ async fn totals(pool: &PgPool, time_zone: &str) -> Result<(Totals, String), sqlx
     .bind(time_zone)
     .bind(WINDOW_DAYS)
     .bind(audit::IDENTITY_CHANGED)
+    .bind(crate::identity::INTERVENTION_STATUS)
     .fetch_one(pool)
     .await?;
     Ok((
@@ -272,9 +288,10 @@ async fn totals(pool: &PgPool, time_zone: &str) -> Result<(Totals, String), sqlx
             departed: row.2,
             changed: row.3,
             needs_intervention: row.4,
-            pending_approvals: row.5,
+            intervention_identity: row.5,
+            pending_approvals: row.6,
         },
-        row.6,
+        row.7,
     ))
 }
 

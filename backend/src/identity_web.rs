@@ -20,7 +20,7 @@ use crate::shell::Shell;
 use crate::web::{render, AppState};
 
 const REGISTER_AUTHORITIES: &[&str] = &["hr", "admin"];
-const RETRY_AUTHORITIES: &[&str] = &["hr", "admin"];
+pub(crate) const RETRY_AUTHORITIES: &[&str] = &["hr", "admin"];
 
 pub struct OperatorSession(pub Operator);
 
