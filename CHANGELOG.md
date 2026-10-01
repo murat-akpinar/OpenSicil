@@ -42,6 +42,7 @@
 - Fren ve onay fazı kapanışı — güvenlik ve test
 - Gerçek Windows AD doğrulaması — üç ⊞ sorusu cevaplandı
 - Mutabakat gerçek Windows AD'ye karşı doğrulandı (29 Hogwarts hesabı)
+- Hogwarts test AD'si için departman ve rol modeli seed'i
 
 ### Yeniden düzenleme
 
