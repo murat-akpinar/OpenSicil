@@ -406,6 +406,19 @@ Kurallar:
   - Kabul: yeni tablo/migration yok; sorgu `jobs` + `identities` + `target_systems`, mevcut yardımcılar (`identity::load_jobs`, `jobs::request_retry`) kullanılır ve `/reports` kapağına bağlanır
   - Kabul: ad üretimi yüzünden bekleyen iş için satır, kişi sayfasındaki ad müdahale bloğuna işaret eder (ADR-022/042/081) — operatör "ne yapmam gerekiyor" sorusunu listede cevaplayabilsin
 
+## Sahiplenmede AD'den gelen kişi alanları
+
+> Fazlar arası iş, "Faz" olarak numaralanmaz. Kullanıcı isteği (2026-10-01): "AD'ki kullanıcıları kontrol eder misin, telefon e-posta TC gibi bilgiler gelmemiş gibi." Çalışan yığında ölçüldü, **üç ayrı sebep** çıktı:
+> 1. **Kullanıcı adı / e-posta / UPN boş çünkü sahiplenme işi uygulanmadı.** Yığında `DRY_RUN=true` (ADR-054'ün ilk kurulum varsayılanı) ve kuru modda sahiplenme bilerek reddediliyor (ADR-086): iş 1 `needs_intervention`, hatası "kuru çalıştırma açık: sahiplenme uygulanmadı, DRY_RUN kapanınca tekrar deneyin". `account_links` **0 satır**. Bu bir hata değil ayar: `DRY_RUN=false` + "tekrar dene" deyince worker bağlantıyı `observed` modunda kurar ve adları AD'den (yalnızca boşsa) doldurur.
+> 2. **Cep telefonu AD'den hiç okunmuyor.** Mutabakat taraması (`0019`) yalnızca `givenName`, `sn`, `employeeID`, `department` okuyor (ADR-102); `mobile`/`telephoneNumber`/`mail` kapsamda değil. Bu kutucuğun işi.
+> 3. **TC kimlik no AD'de yok.** Standart AD şemasında ulusal kimlik numarası alanı yoktur; kurum koyduysa `employeeID` ya da bir `extensionAttribute`'tadır ve bu dizinde `employeeID` **29 hesabın 0'ında** dolu. OpenSicil TC'yi şifreli + blind index'li tutar (ADR-010), yani AD'den gelse bile elle doğrulanması gerekir — kapsam kararı bu kutucukta verilir.
+
+- [ ] Sahiplenme AD'den cep telefonu ve e-posta da alır
+  - Kabul: mutabakat taraması `mail`, `mobile` ve `telephoneNumber`'ı da okur ve bulguya yazar (migration `0020`, `ad::ACCOUNT_ATTRS` + `reconcile::Finding`); ekranda hangi hesapta hangi alanın geldiği görünür
+  - Kabul: toplu sahiplenme bu değerleri kimliğe yazar — cep `+90…` E.164 biçimine uymuyorsa **boş bırakılır ve satırda "biçim uymadı" rozeti çıkar** (uydurma yok, `identity::validate` kuralı gevşetilmez); e-posta yine worker'ın işi (ADR-015), backend yalnızca `mail`'i ipucu olarak taşır
+  - Kabul: TC kimlik no için karar notu yazılır: hangi öznitelikten okunacağı kurulum ayarı mı olacak, yoksa v1'de hiç okunmayacak mı ([ADR-010](decisions/010-kisisel-veri-kimlik-no-telefon.md) şifreleme kuralı değişmez)
+  - Kabul: gerçek Hogwarts AD'sinde ölçülür — 29 hesapta `mail`/`mobile`/`telephoneNumber` kaçında dolu, nota yazılır
+
 ## Faz 4: İşletme
 
 > Zimbra v1'den sonra geldiği için ([ADR-090](decisions/090-zimbra-v1-sonrasina-alindi.md)) mutabakat raporu ve metrik ucu v1'de yalnızca AD'yi kapsar; eksik kapsam ekranda/raporda belirtilir.
