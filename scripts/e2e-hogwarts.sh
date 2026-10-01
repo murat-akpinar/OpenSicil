@@ -107,6 +107,7 @@ psql -d "$DB" -c "SELECT 'toplam          ' || count(*) FROM reconcile_findings 
   UNION ALL SELECT 'telephoneNumber ' || count(*) FROM reconcile_findings WHERE telephone_number <> '' \
   UNION ALL SELECT 'sicil           ' || count(*) FROM reconcile_findings WHERE employee_number <> '' \
   UNION ALL SELECT 'whenCreated     ' || count(*) FROM reconcile_findings WHERE when_created IS NOT NULL \
+  UNION ALL SELECT 'TC (sifreli)    ' || count(*) FROM reconcile_findings WHERE national_id_enc IS NOT NULL \
   UNION ALL SELECT 'departman       ' || count(*) FROM reconcile_findings WHERE department_name <> ''"
 
 echo

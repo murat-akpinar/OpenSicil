@@ -209,7 +209,9 @@ async fn run_reconcile(
     read_job_id: i64,
 ) -> Result<String, String> {
     let (mut ldap, scope, _checks) = open_ad(pool, env).await?;
-    let accounts = ad::read_accounts(&mut ldap, &scope)
+    // ADR-106 madde 5: TC kimlik no yalnizca Yapilandirma'da oznitelik verildiyse okunur
+    let national_id_attr = ad::national_id_attribute(pool).await?;
+    let accounts = ad::read_accounts(&mut ldap, &scope, national_id_attr.as_deref())
         .await
         .map_err(|e| e.to_string())?;
     ldap.unbind().await.ok();
@@ -218,7 +220,7 @@ async fn run_reconcile(
         .await
         .map_err(|e| format!("hesap bağlantıları okunamadı: {e}"))?;
     let findings = reconcile::compare(&accounts, &links);
-    let counts = reconcile::store(pool, target, read_job_id, &findings)
+    let counts = reconcile::store(pool, target, read_job_id, &findings, &env.aead_key)
         .await
         .map_err(|e| format!("mutabakat bulguları yazılamadı: {e}"))?;
     Ok(format!(

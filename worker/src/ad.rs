@@ -568,6 +568,10 @@ pub struct DirectoryAccount {
     /// Hesabin acilis gunu (`whenCreated`, `YYYY-MM-DD`): toplu sahiplenmede
     /// baslangic tarihi (ADR-103 madde 6). Bicimi bozuksa yok sayilir.
     pub when_created: Option<String>,
+    /// Yapilandirma'daki "TC kimlik no ozniteligi"nin ham degeri (ADR-106 madde 5);
+    /// ayar bossa hic okunmaz. Yalnizca bellekte duz: bulguya sifreli yazilir,
+    /// log'a ve is sonucuna girmez (ADR-010).
+    pub national_id: Option<String>,
 }
 
 const ACCOUNT_ATTRS: [&str; 14] = [
@@ -624,7 +628,17 @@ fn container_of(dn: &str) -> String {
     String::new()
 }
 
-fn to_account(entry: &SearchEntry) -> Option<DirectoryAccount> {
+/// Yapilandirma'daki "TC kimlik no ozniteligi" (ADR-106 madde 5); bos = okunmaz.
+pub async fn national_id_attribute(pool: &PgPool) -> Result<Option<String>, String> {
+    let name: String =
+        sqlx::query_scalar("SELECT ad_national_id_attribute FROM app_settings WHERE id = TRUE")
+            .fetch_one(pool)
+            .await
+            .map_err(|e| format!("AD ayarları okunamadı: {e}"))?;
+    Ok(Some(name.trim().to_string()).filter(|n| !n.is_empty()))
+}
+
+fn to_account(entry: &SearchEntry, national_id_attr: Option<&str>) -> Option<DirectoryAccount> {
     let uac = text_attr(entry, "userAccountControl")
         .and_then(|v| v.trim().parse::<u32>().ok())
         .unwrap_or(0);
@@ -647,6 +661,7 @@ fn to_account(entry: &SearchEntry) -> Option<DirectoryAccount> {
         mobile: text_attr(entry, "mobile"),
         telephone: text_attr(entry, "telephoneNumber"),
         when_created: text_attr(entry, "whenCreated").and_then(|v| generalized_time_date(&v)),
+        national_id: national_id_attr.and_then(|attr| text_attr(entry, attr)),
     })
 }
 
@@ -656,7 +671,11 @@ fn to_account(entry: &SearchEntry) -> Option<DirectoryAccount> {
 pub async fn read_accounts(
     ldap: &mut Ldap,
     scope: &ManagedScope,
+    national_id_attr: Option<&str>,
 ) -> Result<Vec<DirectoryAccount>, WriteError> {
+    // Sabit liste + (ayarlanmissa) TC kimlik no ozniteligi (ADR-106 madde 5)
+    let mut attrs: Vec<&str> = ACCOUNT_ATTRS.to_vec();
+    attrs.extend(national_id_attr);
     let mut accounts: Vec<DirectoryAccount> = Vec::new();
     for ou in &scope.user_ous {
         let entries = search(
@@ -664,10 +683,13 @@ pub async fn read_accounts(
             ou,
             Scope::Subtree,
             "(&(objectCategory=person)(objectClass=user))",
-            &ACCOUNT_ATTRS,
+            &attrs,
         )
         .await?;
-        for account in entries.iter().filter_map(to_account) {
+        for account in entries
+            .iter()
+            .filter_map(|e| to_account(e, national_id_attr))
+        {
             // Ic ice kapsam verilmisse ayni hesap iki aramadan da gelebilir.
             if !accounts.iter().any(|a| a.guid == account.guid) {
                 accounts.push(account);
@@ -750,7 +772,7 @@ mod tests {
         let with = |extra: &[(&str, &str)]| {
             let mut attrs = base.to_vec();
             attrs.extend_from_slice(extra);
-            to_account(&entry(&attrs)).unwrap()
+            to_account(&entry(&attrs), None).unwrap()
         };
 
         // Standart oznitelik doluysa o kullanilir
@@ -776,6 +798,25 @@ mod tests {
         assert_eq!(created.when_created.as_deref(), Some("2025-09-14"));
         assert_eq!(with(&[("whenCreated", "dun")]).when_created, None);
         assert_eq!(with(&[]).when_created, None);
+
+        // ADR-106 madde 5: TC kimlik no yalnizca ayar doluyken, ayardaki oznitelikten
+        let tc = [("extensionAttribute5", "10000000146")];
+        let mut attrs = base.to_vec();
+        attrs.extend_from_slice(&tc);
+        let read = to_account(&entry(&attrs), Some("extensionAttribute5")).unwrap();
+        assert_eq!(read.national_id.as_deref(), Some("10000000146"));
+        assert_eq!(
+            to_account(&entry(&attrs), None).unwrap().national_id,
+            None,
+            "ayar boşsa okunmaz"
+        );
+        assert_eq!(
+            to_account(&entry(&attrs), Some("extensionAttribute7"))
+                .unwrap()
+                .national_id,
+            None,
+            "başka öznitelik boş"
+        );
     }
 
     #[test]
@@ -881,7 +922,7 @@ mod tests {
             "çözülemeyen kapsam DN'i connector'ı başlatmaz"
         );
         // ADR-099: kapsamdaki hesaplar; katalog gruplari okur, bu hesaplari.
-        let accounts = read_accounts(&mut ldap, &scope)
+        let accounts = read_accounts(&mut ldap, &scope, None)
             .await
             .expect("hesaplar okunamadı");
         let seeded = accounts

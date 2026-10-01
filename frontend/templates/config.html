@@ -28,6 +28,12 @@
       </label>
       <input class="input" type="password" id="ad_service_password" name="ad_service_password" autocomplete="new-password">
     </div>
+    {# ADR-106 madde 5: TC kimlik no AD semasinda yok; kurum koyduysa oznitelik adi buradan. Bos = okunmaz #}
+    <div class="field">
+      <label class="label" for="ad_national_id_attribute">{{ lang.t("config.national_id_attribute") }}</label>
+      <input class="input" type="text" id="ad_national_id_attribute" name="ad_national_id_attribute" value="{{ ad_national_id_attribute }}" placeholder="extensionAttribute5">
+      <span class="hint">{{ lang.t("config.national_id_attribute_hint") }}</span>
+    </div>
   </fieldset>
   <fieldset class="box">
     <legend>Zimbra</legend>

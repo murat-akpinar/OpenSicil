@@ -92,6 +92,7 @@
           <th>{{ lang.t("reconcile.account") }}</th>
           <th>{{ lang.t("field.full_name") }}</th>
           <th>{{ lang.t("field.employee_number") }}</th>
+          <th>{{ lang.t("adopt.national_id") }}</th>
           <th>{{ lang.t("field.department") }}</th>
           <th>{{ lang.t("adopt.when_created") }}</th>
           <th>{{ lang.t("field.email") }}</th>
@@ -104,6 +105,12 @@
             <td>{{ c.account_name }}</td>
             <td>{% if c.display_name.is_empty() %}—{% else %}{{ c.display_name }}{% endif %}</td>
             <td class="muted">{% if c.employee_number.is_empty() %}—{% else %}{{ c.employee_number }}{% endif %}</td>
+            {# ADR-010: ekranda maskeli; dogrulamadan gecmeyen deger kimlige yazilmaz, rozet cikar #}
+            <td class="muted">
+              {% if c.national_id.is_empty() %}—{% else %}{{ c.national_id_masked() }}
+              {% if !c.national_id_ok() %}<span class="badge badge-warn">{{ lang.t("adopt.format_mismatch") }}</span>{% endif %}
+              {% endif %}
+            </td>
             <td class="muted">
               {% if c.department_name.is_empty() %}—{% else %}{{ c.department_name }}{% endif %}
               {% match c.department_id %}{% when Some with (_d) %}{% when None %}
@@ -117,7 +124,7 @@
             <td class="muted">
               {% if c.ad_phone().is_empty() %}—{% else %}{{ c.ad_phone() }}{% endif %}
               {% if !c.ad_phone().is_empty() && !c.phone_ok() %}
-              <span class="badge badge-warn">{{ lang.t("adopt.phone_format") }}</span>
+              <span class="badge badge-warn">{{ lang.t("adopt.format_mismatch") }}</span>
               {% endif %}
             </td>
           </tr>

@@ -44,6 +44,9 @@ pub struct Finding {
     /// Hesabin acilis gunu `YYYY-MM-DD` (ADR-103 madde 6); toplu sahiplenmenin
     /// baslangic tarihi, bossa formdaki tarih
     pub when_created: Option<String>,
+    /// AD'den okunan TC kimlik no (ayar doluysa, ADR-106 madde 5). Yalnizca
+    /// bellekte duz; `store` AEAD ile sifreleyip yazar (ADR-010)
+    pub national_id: Option<String>,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -94,6 +97,7 @@ pub fn compare(accounts: &[DirectoryAccount], links: &[Link]) -> Vec<Finding> {
                 mobile: account.mobile.clone(),
                 telephone: account.telephone.clone(),
                 when_created: account.when_created.clone(),
+                national_id: account.national_id.clone(),
             }
         })
         .collect();
@@ -122,6 +126,7 @@ fn missing_finding(link: &Link) -> Finding {
         mobile: None,
         telephone: None,
         when_created: None,
+        national_id: None,
     }
 }
 
@@ -147,11 +152,14 @@ pub async fn load_links(pool: &PgPool, target: i64) -> Result<Vec<Link>, sqlx::E
 
 /// Anlik goruntu: hedefin onceki bulgulari silinir, yenileri tek transaction'da
 /// yazilir (ADR-099 madde 3). Yarim kalmis bir tarama ekrani bosaltmaz.
+/// Anlik goruntuyu tek transaction'da degistirir. TC kimlik no sifreli yazilir
+/// (`crypto::encrypt_versioned`, backend `national_id::decrypt` ile ayni bicim).
 pub async fn store(
     pool: &PgPool,
     target: i64,
     read_job_id: i64,
     findings: &[Finding],
+    aead_key: &[u8; crate::crypto::KEY_LEN],
 ) -> Result<Counts, sqlx::Error> {
     let mut tx: Transaction<'_, Postgres> = pool.begin().await?;
     sqlx::query("DELETE FROM reconcile_findings WHERE target_system_id = $1")
@@ -159,13 +167,17 @@ pub async fn store(
         .execute(&mut *tx)
         .await?;
     for finding in findings {
+        let national_id_enc = finding
+            .national_id
+            .as_deref()
+            .map(|v| crate::crypto::encrypt_versioned(aead_key, v.as_bytes()));
         sqlx::query(
             "INSERT INTO reconcile_findings (target_system_id, read_job_id, kind, \
              external_id, account_name, display_name, container, enabled, identity_id, \
              given_name, surname, employee_number, department_name, mail, mobile, \
-             telephone_number, when_created) \
+             telephone_number, when_created, national_id_enc) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, \
-             $17::date)",
+             $17::date, $18)",
         )
         .bind(target)
         .bind(read_job_id)
@@ -184,6 +196,7 @@ pub async fn store(
         .bind(&finding.mobile)
         .bind(&finding.telephone)
         .bind(&finding.when_created)
+        .bind(national_id_enc)
         .execute(&mut *tx)
         .await?;
     }
@@ -212,7 +225,54 @@ mod tests {
             mobile: None,
             telephone: Some("01632 960001".to_string()),
             when_created: Some("2024-09-01".to_string()),
+            national_id: None,
         }
+    }
+
+    /// ADR-010/106: TC kimlik no bulguya yalnizca sifreli girer; ayni anahtar
+    /// surum bayti biciminde cozulur, bos olan satirda kolon NULL kalir.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn the_national_id_is_stored_encrypted_or_not_at_all() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        let target: i64 = sqlx::query_scalar("SELECT id FROM target_systems WHERE kind = 'ad'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let read_job: i64 = sqlx::query_scalar(
+            "INSERT INTO read_jobs (kind, target_system_id, requested_by) \
+             VALUES ('reconcile', $1, 'test') RETURNING id",
+        )
+        .bind(target)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let key = [5u8; crate::crypto::KEY_LEN];
+        let mut with_id = account("g-1", "hpotter", true);
+        with_id.national_id = Some("10000000146".to_string());
+        let findings = compare(&[with_id, account("g-2", "hgranger", true)], &[]);
+        store(&pool, target, read_job, &findings, &key)
+            .await
+            .unwrap();
+
+        let rows: Vec<(String, Option<Vec<u8>>)> = sqlx::query_as(
+            "SELECT account_name, national_id_enc FROM reconcile_findings ORDER BY account_name",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(rows[0].0, "hgranger");
+        assert_eq!(rows[0].1, None, "değer yoksa kolon boş");
+        let enc = rows[1]
+            .1
+            .as_deref()
+            .expect("hpotter şifreli değer taşımalı");
+        assert_ne!(enc, b"10000000146", "düz metin yazılmaz");
+        let plain = crate::crypto::decrypt_versioned(&key, enc).unwrap();
+        assert_eq!(plain, b"10000000146");
+
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
     }
 
     fn link(guid: &str, mode: &str, identity_id: i64, username: &str) -> Link {

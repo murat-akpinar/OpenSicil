@@ -68,6 +68,7 @@ pub fn settings_change_detail(
         serde_json::json!({
             "ad_host": s.ad_host,
             "ad_bind_dn": s.ad_bind_dn,
+            "ad_national_id_attribute": s.ad_national_id_attribute,
             "zimbra_url": s.zimbra_url,
             "oidc_issuer": s.oidc_issuer,
             "oidc_client_id": s.oidc_client_id,
@@ -90,6 +91,7 @@ mod tests {
             ad_host: host.to_string(),
             ad_bind_dn: "CN=svc,DC=example,DC=local".to_string(),
             ad_service_password_set: secret_set,
+            ad_national_id_attribute: String::new(),
             zimbra_url: String::new(),
             zimbra_admin_password_set: false,
             oidc_issuer: String::new(),

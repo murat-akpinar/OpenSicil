@@ -179,7 +179,7 @@ async fn render_page(
 ) -> Response {
     let loaded = tokio::try_join!(
         load(&state.pool, target, &state.time_zone),
-        crate::bulk_adopt::candidates(&state.pool, target),
+        crate::bulk_adopt::candidates(&state.pool, &state.aead_key, target),
         crate::identity::form_options(&state.pool),
         crate::identity::today(&state.pool, &state.time_zone),
         crate::identity::placeholder_role_id(&state.pool),

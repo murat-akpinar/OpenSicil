@@ -86,8 +86,8 @@ const SERVICE_GRANTS: &str = "\
 GRANT SELECT ON _sqlx_migrations TO {backend}, {worker};
 GRANT SELECT, INSERT, UPDATE, DELETE ON bootstrap_account, app_settings, \
 oidc_auth_requests, operator_sessions TO {backend};
-GRANT SELECT (id, ad_host, ad_bind_dn, ad_service_password_enc, zimbra_url, \
-zimbra_admin_password_enc) ON app_settings TO {worker};
+GRANT SELECT (id, ad_host, ad_bind_dn, ad_service_password_enc, ad_national_id_attribute, \
+zimbra_url, zimbra_admin_password_enc) ON app_settings TO {worker};
 GRANT SELECT ON audit_log, hourly_counter_usage TO {backend}, {worker};
 GRANT INSERT (event_type, detail, actor_subject, actor_username, identity_id, target_system_id) \
 ON audit_log TO {backend};

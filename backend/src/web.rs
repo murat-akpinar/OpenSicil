@@ -96,6 +96,7 @@ struct ConfigTemplate {
     ad_host: String,
     ad_bind_dn: String,
     ad_service_password_set: bool,
+    ad_national_id_attribute: String,
     zimbra_url: String,
     zimbra_admin_password_set: bool,
     oidc_issuer: String,
@@ -523,6 +524,7 @@ async fn config_form(
             ad_host: s.ad_host,
             ad_bind_dn: s.ad_bind_dn,
             ad_service_password_set: s.ad_service_password_set,
+            ad_national_id_attribute: s.ad_national_id_attribute,
             zimbra_url: s.zimbra_url,
             zimbra_admin_password_set: s.zimbra_admin_password_set,
             oidc_issuer: s.oidc_issuer,
@@ -541,6 +543,9 @@ struct ConfigForm {
     ad_host: String,
     ad_bind_dn: String,
     ad_service_password: String,
+    /// ADR-106 madde 5; bos = TC kimlik no okunmaz (varsayilan)
+    #[serde(default)]
+    ad_national_id_attribute: String,
     zimbra_url: String,
     zimbra_admin_password: String,
     oidc_issuer: String,
@@ -554,6 +559,7 @@ impl From<ConfigForm> for crate::settings::AppSettingsInput {
             ad_host: form.ad_host,
             ad_bind_dn: form.ad_bind_dn,
             ad_service_password: form.ad_service_password,
+            ad_national_id_attribute: form.ad_national_id_attribute,
             zimbra_url: form.zimbra_url,
             zimbra_admin_password: form.zimbra_admin_password,
             oidc_issuer: form.oidc_issuer,
@@ -561,6 +567,15 @@ impl From<ConfigForm> for crate::settings::AppSettingsInput {
             oidc_client_secret: form.oidc_client_secret,
         }
     }
+}
+
+/// LDAP oznitelik adi (AttributeDescription): harfle baslar, harf/rakam/tire.
+/// Bos = okunmaz (varsayilan). Bozuk ad taramayi LDAP hatasiyla dusururdu;
+/// burada reddedilir.
+fn valid_attribute_name(name: &str) -> bool {
+    name.is_empty()
+        || (name.starts_with(|c: char| c.is_ascii_alphabetic())
+            && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
 }
 
 /// Denetim satirina yalnizca hangi sirrin guncellendigi girer, degeri degil.
@@ -583,6 +598,10 @@ async fn config_submit(
 ) -> Response {
     if !allowed(&operator, CONFIG_AUTHORITIES) {
         return forbidden(operator.lang);
+    }
+    if !valid_attribute_name(form.ad_national_id_attribute.trim()) {
+        let text = operator.lang.t("err.ldap_attribute_shape").to_string();
+        return (StatusCode::BAD_REQUEST, text).into_response();
     }
     let secrets_updated = updated_secret_names(&form);
     let before = match crate::settings::load(&state.pool).await {
@@ -1036,6 +1055,7 @@ mod tests {
 
         // Ayarlari sirlarla kaydet.
         let form = "ad_host=dc1.example.org&ad_bind_dn=CN%3Dsvc&ad_service_password=cok-gizli-ad&\
+                     ad_national_id_attribute=extensionAttribute5&\
                      zimbra_url=https%3A%2F%2Fzimbra.example.org&zimbra_admin_password=cok-gizli-zimbra&\
                      oidc_issuer=https%3A%2F%2Fidp.example.org&oidc_client_id=opensicil&oidc_client_secret=cok-gizli-oidc";
         let response = app
@@ -1046,6 +1066,15 @@ mod tests {
         assert_eq!(response.status(), StatusCode::SEE_OTHER);
         assert_eq!(location_of(&response), "/config");
 
+        // ADR-106 madde 5: bozuk oznitelik adi kaydedilmez (LDAP filtreye girer)
+        let bad = form.replace("extensionAttribute5", "ext%20attr;5");
+        let response = app
+            .clone()
+            .oneshot(form_request("POST", "/config", &bad, Some(&cookie)))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
         // Yeniden yuklenince degerler gorunur ama sirlar duz metin geri gelmez.
         let response = app
             .clone()
@@ -1054,6 +1083,7 @@ mod tests {
             .unwrap();
         let body = body_string(response).await;
         assert!(body.contains("dc1.example.org"));
+        assert!(body.contains(r#"value="extensionAttribute5""#));
         assert!(body.contains("kayıtlı"));
         assert!(!body.contains("cok-gizli-ad"));
         assert!(!body.contains("cok-gizli-zimbra"));
@@ -1190,6 +1220,7 @@ mod tests {
                 ad_host: String::new(),
                 ad_bind_dn: String::new(),
                 ad_service_password: String::new(),
+                ad_national_id_attribute: String::new(),
                 zimbra_url: String::new(),
                 zimbra_admin_password: String::new(),
                 oidc_issuer: issuer,
@@ -1371,6 +1402,7 @@ mod tests {
                 ad_host: var("AD_LAB_URL"),
                 ad_bind_dn: var("AD_LAB_BIND_DN"),
                 ad_service_password: var("AD_LAB_PASSWORD"),
+                ad_national_id_attribute: String::new(),
                 zimbra_url: String::new(),
                 zimbra_admin_password: String::new(),
                 oidc_issuer: String::new(),

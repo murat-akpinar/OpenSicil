@@ -130,6 +130,9 @@ config.subtitle = "Bağlantı ayarları; parolalar şifreli saklanır, ekranda g
 config.service_password = "Servis hesabı parolası"
 config.admin_password = "Admin parolası"
 config.stored_hint = "(kayıtlı — değiştirmek için doldurun)"
+config.national_id_attribute = "TC kimlik no özniteliği"
+config.national_id_attribute_hint = "Boş bırakılırsa TC kimlik no AD'den hiç okunmaz. Dolduğunda mutabakat taraması bu özniteliği okur ve şifreli saklar; toplu sahiplenme yalnızca doğrulamadan geçen değeri kimliğe yazar."
+err.ldap_attribute_shape = "Öznitelik adı harfle başlamalı ve yalnızca harf, rakam ve tire içermeli (örn. extensionAttribute5)."
 
 # --- operator ana sayfasi ---
 home.new_identity = "Yeni kimlik"
@@ -565,7 +568,8 @@ adopt.fallback_department_hint = "AD'deki departman adı ağaçta bulunamazsa bu
 adopt.start_date = "Başlangıç tarihi (AD'de açılış günü yoksa)"
 adopt.when_created = "AD'de açılış"
 adopt.no_department_match = "eşleşmedi"
-adopt.phone_format = "biçim uymadı"
+adopt.format_mismatch = "biçim uymadı"
+adopt.national_id = "TC kimlik no"
 adopt.submit = "Seçilenleri sahiplen"
 adopt.select_all = "Bu sayfadakilerin tümünü seç"
 adopt.pending = "{} hesabın OpenSicil kaydı yok."

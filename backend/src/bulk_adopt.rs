@@ -14,7 +14,7 @@
 use sqlx::PgPool;
 
 use crate::identity::{self, IdentityForm};
-use crate::national_id::Keys;
+use crate::national_id::{self, Keys};
 
 /// Toplu sahiplenme yetkisi: kimlik acan islem, kayit yetkisiyle ayni kapi.
 pub const AUTHORITIES: &[&str] = &["hr", "admin"];
@@ -48,9 +48,23 @@ pub struct Candidate {
     /// Hesabin AD'de acilis gunu (`whenCreated`, `YYYY-MM-DD`); doluysa
     /// kimligin baslangic tarihi budur, bossa formdaki tarih (ADR-103 madde 6)
     pub when_created: String,
+    /// Taramanin AD'den okudugu TC kimlik no (Yapilandirma'daki oznitelik,
+    /// ADR-106 madde 5). Bulguda AEAD ile sifreli durur, burada cozulmus;
+    /// ekrana yalnizca maskeli cikar, kimlige dogrulamadan gecerse yazilir
+    pub national_id: String,
 }
 
 impl Candidate {
+    /// TR kontrol hanelerinden gecer mi; gecmeyen deger kimlige yazilmaz, rozet cikar.
+    pub fn national_id_ok(&self) -> bool {
+        !self.national_id.is_empty() && national_id::parse("TR", &self.national_id).is_ok()
+    }
+
+    /// ADR-010: ekranda maskeli (`12*******34`)
+    pub fn national_id_masked(&self) -> String {
+        national_id::mask(&self.national_id)
+    }
+
     /// AD'de duran telefon: once cep, cep bossa sabit hat. Ham deger.
     pub fn ad_phone(&self) -> &str {
         match self.mobile.is_empty() {
@@ -82,8 +96,13 @@ impl Candidate {
 }
 
 /// Son taramadaki yonetilmeyen hesaplar; AD'deki departman adi departman
-/// agaciyla adina gore (buyuk/kucuk harf duyarsiz) eslenir.
-pub async fn candidates(pool: &PgPool, target: i64) -> Result<Vec<Candidate>, sqlx::Error> {
+/// agaciyla adina gore (buyuk/kucuk harf duyarsiz) eslenir. Sifreli TC kimlik
+/// no burada cozulur; cozulemeyen (anahtar donmus) deger bos sayilir.
+pub async fn candidates(
+    pool: &PgPool,
+    aead_key: &[u8; crate::crypto::KEY_LEN],
+    target: i64,
+) -> Result<Vec<Candidate>, sqlx::Error> {
     type Row = (
         i64,
         String,
@@ -97,6 +116,7 @@ pub async fn candidates(pool: &PgPool, target: i64) -> Result<Vec<Candidate>, sq
         String,
         String,
         String,
+        Option<Vec<u8>>,
     );
     let rows: Vec<Row> = sqlx::query_as(
         "SELECT f.id, f.account_name, COALESCE(f.display_name, ''), \
@@ -104,7 +124,7 @@ pub async fn candidates(pool: &PgPool, target: i64) -> Result<Vec<Candidate>, sq
                 COALESCE(f.employee_number, ''), COALESCE(f.department_name, ''), d.id, \
                 COALESCE(f.mail, ''), COALESCE(f.mobile, ''), \
                 COALESCE(f.telephone_number, ''), \
-                COALESCE(to_char(f.when_created, 'YYYY-MM-DD'), '') \
+                COALESCE(to_char(f.when_created, 'YYYY-MM-DD'), ''), f.national_id_enc \
          FROM reconcile_findings f \
          LEFT JOIN departments d ON lower(d.name) = lower(f.department_name) \
          WHERE f.target_system_id = $1 AND f.kind = 'unmanaged' \
@@ -128,6 +148,17 @@ pub async fn candidates(pool: &PgPool, target: i64) -> Result<Vec<Candidate>, sq
             mobile: r.9,
             telephone: r.10,
             when_created: r.11,
+            national_id: r
+                .12
+                .as_deref()
+                .and_then(|enc| match national_id::decrypt(aead_key, enc) {
+                    Ok(value) => Some(value),
+                    Err(e) => {
+                        eprintln!("bulk_adopt: bulgudaki kimlik numarası çözülemedi: {e}");
+                        None
+                    }
+                })
+                .unwrap_or_default(),
         })
         .collect())
 }
@@ -181,7 +212,7 @@ pub async fn adopt(
     if selected.len() > MAX_BATCH {
         return Err(AdoptError::Invalid("err.bulk_adopt_too_many"));
     }
-    let all = candidates(pool, target).await?;
+    let all = candidates(pool, keys.aead, target).await?;
     let mut outcome = Outcome::default();
     for candidate in all.iter().filter(|c| selected.contains(&c.id)) {
         match create_one(pool, keys, time_zone, candidate, batch).await {
@@ -216,6 +247,14 @@ async fn create_one(
         // bos kalir, ekrandaki rozet operatore soyler (ADR-106).
         mobile_phone: match candidate.phone_ok() {
             true => candidate.ad_phone().to_string(),
+            false => String::new(),
+        },
+        // ADR-106 madde 5: dogrulamadan gecen TC kimlik no sifreli + blind
+        // index'li yazilir (`identity::create`); gecmeyen bos kalir, blind index
+        // cakismasi (ayni numara baska kimlikte) hesabi atlatir
+        national_id_country: "TR".to_string(),
+        national_id: match candidate.national_id_ok() {
+            true => candidate.national_id.clone(),
             false => String::new(),
         },
         department_id: department.to_string(),
@@ -262,7 +301,23 @@ mod tests {
             mobile: String::new(),
             telephone: String::new(),
             when_created: String::new(),
+            national_id: String::new(),
         }
+    }
+
+    /// ADR-106 madde 5: yalnizca TR kontrol hanelerinden gecen deger yazilir,
+    /// ekranda hep maskeli.
+    #[test]
+    fn only_a_valid_tr_national_id_passes_and_the_screen_sees_a_mask() {
+        let with = |value: &str| Candidate {
+            national_id: value.to_string(),
+            ..candidate("Harry", "Potter", "Harry Potter")
+        };
+        assert!(with("10000000146").national_id_ok());
+        assert_eq!(with("10000000146").national_id_masked(), "10*******46");
+        assert!(!with("10000000147").national_id_ok(), "kontrol hanesi");
+        assert!(!with("123").national_id_ok());
+        assert!(!with("").national_id_ok());
     }
 
     /// ADR-106: kimlikteki alan E.164 **cep**tir. Cep varsa cep, yoksa sabit
@@ -339,11 +394,18 @@ mod tests {
         .fetch_one(&pool)
         .await
         .unwrap();
-        // Uc bulgu: AD alanlari dolu, yalnizca displayName'i olan, ve soyadsiz.
-        // Telefon ikisinde farkli: Harry'de Hogwarts'in sabit hatti (E.164
-        // degil), Ron'da gercek bir cep — ADR-106. Acilis gunu yalnizca
-        // Harry'de: baslangic ondan, Ron'da formdan (ADR-103 madde 6).
-        for (guid, sam, display, given, sn, dept, mail, mobile, phone, created) in [
+        let keys = Keys {
+            aead: &[7u8; crate::crypto::KEY_LEN],
+            blind_index: &[9u8; crate::crypto::KEY_LEN],
+        };
+        // Taramanin yazdigi bicim: AEAD + surum bayti (worker `encrypt_versioned`)
+        let encrypted = |value: &str| crate::crypto::encrypt_versioned(keys.aead, value.as_bytes());
+        // Dort bulgu: AD alanlari dolu, yalnizca displayName'i olan, soyadsiz, ve
+        // Harry'nin TC'sini tasiyan mukerrer. Telefon ikisinde farkli: Harry'de
+        // Hogwarts'in sabit hatti (E.164 degil), Ron'da gercek bir cep — ADR-106.
+        // Acilis gunu yalnizca Harry'de: baslangic ondan, Ron'da formdan (ADR-103
+        // madde 6). TC: Harry'de gecerli, Ron'da bozuk, zz.dup'ta Harry'ninki.
+        for (guid, sam, display, given, sn, dept, mail, mobile, phone, created, tc) in [
             (
                 "g1",
                 "harry.potter",
@@ -355,6 +417,7 @@ mod tests {
                 "",
                 "01632 960001",
                 Some("2024-03-05"),
+                Some("10000000146"),
             ),
             (
                 "g2",
@@ -367,16 +430,30 @@ mod tests {
                 "+905321234567",
                 "",
                 None,
+                Some("123"),
             ),
-            ("g3", "hagrid", "Hagrid", "", "", "", "", "", "", None),
+            ("g3", "hagrid", "Hagrid", "", "", "", "", "", "", None, None),
+            (
+                "g4",
+                "zz.dup",
+                "Zz Dup",
+                "Zz",
+                "Dup",
+                "Test Birimi",
+                "",
+                "",
+                "",
+                None,
+                Some("10000000146"),
+            ),
         ] {
             sqlx::query(
                 "INSERT INTO reconcile_findings (target_system_id, read_job_id, kind, \
                  external_id, account_name, display_name, container, enabled, \
                  given_name, surname, department_name, mail, mobile, telephone_number, \
-                 when_created) \
+                 when_created, national_id_enc) \
                  VALUES ($1, $2, 'unmanaged', $3, $4, $5, 'OU=Users', true, $6, $7, $8, \
-                 $9, $10, $11, $12::date)",
+                 $9, $10, $11, $12::date, $13)",
             )
             .bind(target)
             .bind(read_job)
@@ -390,13 +467,14 @@ mod tests {
             .bind(mobile)
             .bind(phone)
             .bind(created)
+            .bind(tc.map(encrypted))
             .execute(&pool)
             .await
             .unwrap();
         }
 
-        let found = candidates(&pool, target).await.unwrap();
-        assert_eq!(found.len(), 3);
+        let found = candidates(&pool, keys.aead, target).await.unwrap();
+        assert_eq!(found.len(), 4);
         // AD'deki "Test Birimi" departman agacinda var, "Bilinmeyen" yok
         let harry = found
             .iter()
@@ -411,11 +489,12 @@ mod tests {
             ron.department_id, None,
             "eşleşmeyen departman formdan gelir"
         );
+        // ADR-106 madde 5: sifreli deger cozuldu, ekrana maskeli; bozuk olan gecmez
+        assert_eq!(harry.national_id, "10000000146");
+        assert!(harry.national_id_ok());
+        assert_eq!(ron.national_id, "123");
+        assert!(!ron.national_id_ok());
 
-        let keys = Keys {
-            aead: &[7u8; crate::crypto::KEY_LEN],
-            blind_index: &[9u8; crate::crypto::KEY_LEN],
-        };
         // Departman bos birakilabilir: eslesmeyen hesap uydurma departmanla
         // acilmaktansa atlanir, eslesenler icin alan hic gerekmez
         let no_fallback = Batch {
@@ -451,10 +530,28 @@ mod tests {
             .await
             .unwrap_or_else(|_| panic!("toplu sahiplenme başarısız"));
 
-        // Soyadi cozulemeyen hesap atlandi, oburu ikisi acildi
+        // Soyadi cozulemeyen hesap ve Harry'nin TC'sini tasiyan mukerrer atlandi
+        // (blind index cakismasi, ADR-010), oburu ikisi acildi
         assert_eq!(outcome.created.len(), 2);
-        assert_eq!(outcome.skipped.len(), 1);
-        assert_eq!(outcome.skipped[0].0, "hagrid");
+        assert_eq!(
+            outcome.skipped,
+            vec![
+                ("hagrid".to_string(), "err.given_name_blank"),
+                ("zz.dup".to_string(), "err.duplicate_national_id"),
+            ]
+        );
+        // Gecerli TC sifreli + blind index'li yazildi, bozuk olan bos kaldi
+        let national_ids: Vec<(String, bool)> = sqlx::query_as(
+            "SELECT existing_ad_account_hint, national_id_bidx IS NOT NULL FROM identities \
+             WHERE existing_ad_account_hint IS NOT NULL ORDER BY id",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            national_ids,
+            vec![("harry.potter".into(), true), ("ron.weasley".into(), false)]
+        );
 
         // Ipucu yazildi: hesabi worker baglayacak, backend AD'ye dokunmadi
         let hints: Vec<(String, String, String, Option<i64>)> = sqlx::query_as(

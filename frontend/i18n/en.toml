@@ -130,6 +130,9 @@ config.subtitle = "Connection settings; passwords are stored encrypted and never
 config.service_password = "Service account password"
 config.admin_password = "Admin password"
 config.stored_hint = "(stored — fill in to change)"
+config.national_id_attribute = "National ID attribute"
+config.national_id_attribute_hint = "Leave empty and the national ID is never read from AD. When set, the reconciliation scan reads this attribute and stores it encrypted; bulk adoption writes only values that pass validation to the identity."
+err.ldap_attribute_shape = "The attribute name must start with a letter and contain only letters, digits and hyphens (e.g. extensionAttribute5)."
 
 # --- operator home ---
 home.new_identity = "New identity"
@@ -565,7 +568,8 @@ adopt.fallback_department_hint = "Used when the AD department name is not found 
 adopt.start_date = "Start date (when AD has no creation day)"
 adopt.when_created = "Created in AD"
 adopt.no_department_match = "no match"
-adopt.phone_format = "format mismatch"
+adopt.format_mismatch = "format mismatch"
+adopt.national_id = "National ID"
 adopt.submit = "Adopt selected"
 adopt.select_all = "Select all on this page"
 adopt.pending = "{} accounts have no OpenSicil record."
