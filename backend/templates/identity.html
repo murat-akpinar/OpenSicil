@@ -182,6 +182,7 @@
       <td>{{ j.attempts }}</td>
       <td>{{ j.next_attempt_at }}</td>
       <td>
+        {% if !j.waiting.is_empty() %}<span class="warn">{{ j.waiting }}</span>{% endif %}
         {% if !j.summary.is_empty() %}<span class="err">{{ j.summary }}</span>{% endif %}
         {% if !j.detail.is_empty() %}<details><summary class="text-xs muted">{{ lang.t("person.technical_detail") }}</summary><code class="text-xs">{{ j.detail }}</code></details>{% endif %}
         {% if !j.result.is_empty() %}<span class="ok">{{ j.result }}</span>{% endif %}

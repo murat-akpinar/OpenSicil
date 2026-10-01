@@ -31,6 +31,15 @@ const GROUP_AUTHORITIES: &[(&str, &str)] = &[
 
 pub const ADMIN_AUTHORITY: &str = "admin";
 
+/// Bir yetkinin IdP'deki grup adi; ekranda "onayı kim verir" bunu yazar (F-12).
+pub fn group_for(authority: &str) -> &'static str {
+    GROUP_AUTHORITIES
+        .iter()
+        .find(|(_, a)| *a == authority)
+        .map(|(group, _)| *group)
+        .unwrap_or("?")
+}
+
 // Bilinmeyen grup adi yok sayilir; grup adlari kurulum ayari yapmak (ADR-005'in
 // dedigi gibi) bu kutucugun kapsami disinda, sabit liste yeterli (kapsam disi
 // onerisi ozette).

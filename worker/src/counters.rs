@@ -83,6 +83,20 @@ impl std::fmt::Display for Blocked {
     }
 }
 
+impl Blocked {
+    /// Is satirina yazilan makine okunur neden: backend bunu ayristirip operatorun
+    /// dilinde "bekleme sebebi" olarak gosterir (F-12, ADR-089 — worker metni
+    /// cevirmez). Bicim: `throttle:<sinif>:<kullanilan>/<sinir>`.
+    pub fn job_error(&self) -> String {
+        format!(
+            "throttle:{}:{}/{}",
+            self.class.as_str(),
+            self.used,
+            self.limit
+        )
+    }
+}
+
 /// Isin uretecegi sayac siniflari; oznitelik islemleri listeye girmez.
 pub fn needed_classes(grant: bool, destructive: bool, first_password: bool) -> Vec<OperationClass> {
     let mut classes = Vec::new();
@@ -187,6 +201,21 @@ mod tests {
         .to_string();
         assert!(text.contains("verme sınırı dolu (50/50)"), "{text}");
         assert!(text.contains("11 dk"), "{text}");
+    }
+
+    // Is satirina makine okunur neden yazilir; backend operatorun dilinde gosterir (F-12).
+    #[test]
+    fn job_error_is_machine_readable() {
+        assert_eq!(
+            Blocked {
+                class: OperationClass::Destructive,
+                used: 12,
+                limit: 10,
+                retry_after_seconds: 60,
+            }
+            .job_error(),
+            "throttle:destructive:12/10"
+        );
     }
 
     async fn check(pool: &PgPool, identity: i64, emergency: bool) -> Option<Blocked> {

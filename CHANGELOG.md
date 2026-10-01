@@ -80,4 +80,5 @@
 - Etki önizlemesi ve değişiklik seti eşiği (ADR-092)
 - Eşiği aşan değişiklik seti taslak olarak bekler, ikinci yönetici onaylar (ADR-093)
 - Onay anında etki önizlemesi yeniden hesaplanır (ADR-055)
+- Bekleme sebebi, kalan süre ve onaylayacak grup ekranda (F-12)
 

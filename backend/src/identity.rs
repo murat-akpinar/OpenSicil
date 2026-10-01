@@ -499,6 +499,8 @@ pub struct Job {
     pub next_attempt_at: String,
     pub summary: String,
     pub detail: String,
+    /// ADR-050 freni: hata degil bekleme; operator dilinde sebep (F-12)
+    pub waiting: String,
     pub result: String,
     pub retryable: bool,
 }
@@ -811,7 +813,7 @@ pub async fn load_page(
         return Ok(None);
     };
     let person = load_person(pool, time_zone, aead_key, id, lang).await?;
-    let jobs = load_jobs(pool, time_zone, id).await?;
+    let jobs = load_jobs(pool, lang, time_zone, id).await?;
     let name_intervention =
         person.username.is_empty() && jobs.iter().any(|j| j.status == INTERVENTION_STATUS);
     Ok(Some(PersonPage {
@@ -1155,6 +1157,15 @@ fn status_kind(status: &str) -> &'static str {
     }
 }
 
+/// ADR-050/091 freni is satirina `throttle:<sinif>:<kullanilan>/<sinir>` yazar;
+/// bu bir hata degil beklemedir ve operatorun dilinde gosterilir (F-12).
+pub fn throttle_reason(lang: Lang, last_error: &str) -> Option<String> {
+    let rest = last_error.strip_prefix("throttle:")?;
+    let (class, usage) = rest.split_once(':')?;
+    let (used, limit) = usage.split_once('/')?;
+    Some(lang.tn("wait.counter", &[lang.key("counter", class), used, limit]))
+}
+
 // Worker hata metni "sebep: teknik ayrinti" sozlesmesindedir (ADR-078 madde 6).
 pub fn split_error(last_error: &str) -> (String, String) {
     let text = last_error
@@ -1168,6 +1179,7 @@ pub fn split_error(last_error: &str) -> (String, String) {
 
 pub(crate) async fn load_jobs(
     pool: &PgPool,
+    lang: Lang,
     time_zone: &str,
     id: i64,
 ) -> Result<Vec<Job>, sqlx::Error> {
@@ -1196,7 +1208,14 @@ pub(crate) async fn load_jobs(
         .into_iter()
         .map(
             |(id, target, status, attempts, next, error, result, retry)| {
-                let (summary, detail) = error.as_deref().map(split_error).unwrap_or_default();
+                let waiting = error
+                    .as_deref()
+                    .and_then(|e| throttle_reason(lang, e))
+                    .unwrap_or_default();
+                let (summary, detail) = match waiting.is_empty() {
+                    true => error.as_deref().map(split_error).unwrap_or_default(),
+                    false => (String::new(), String::new()),
+                };
                 Job {
                     id,
                     target,
@@ -1205,6 +1224,7 @@ pub(crate) async fn load_jobs(
                     next_attempt_at: next,
                     summary,
                     detail,
+                    waiting,
                     result: result.unwrap_or_default(),
                     retryable: status == INTERVENTION_STATUS && !retry,
                     status,
@@ -1350,6 +1370,18 @@ mod tests {
         assert!(valid_account_hint("ayşe yılmaz").is_err());
         assert!(valid_account_hint("a*b").is_err());
         assert!(valid_account_hint("abcdefghijklmnopqrstu").is_err());
+    }
+
+    // ADR-050/091: fren is satirina makine okunur neden yazar; ekran operatorun
+    // dilinde "bekleme" gosterir, hata degil (F-12).
+    #[test]
+    fn throttle_reason_is_shown_as_a_wait_in_the_operator_language() {
+        let tr = throttle_reason(Lang::Tr, "throttle:grant:50/50").expect("fren nedeni");
+        assert!(tr.contains("verme") && tr.contains("50/50"), "{tr}");
+        let en = throttle_reason(Lang::En, "throttle:destructive:12/10").expect("fren nedeni");
+        assert!(en.contains("destructive") && en.contains("12/10"), "{en}");
+        assert_eq!(throttle_reason(Lang::Tr, "hesap açılamadı: LDAP"), None);
+        assert_eq!(throttle_reason(Lang::Tr, "throttle:bozuk"), None);
     }
 
     #[test]

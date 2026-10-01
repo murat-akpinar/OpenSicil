@@ -322,7 +322,13 @@ fn pending_note(lang: Lang, pending: &Pending, timelock_hours: u32, approvable: 
     }
     match pending.timelock_remaining(timelock_hours) {
         Some(left) => format!("{who}; {}", lang.t1("changeset.timelock", left / 3600 + 1)),
-        None => format!("{who}; {}", lang.t("changeset.other_admin")),
+        None => format!(
+            "{who}; {}",
+            lang.t1(
+                "changeset.approver_group",
+                crate::oidc::group_for(APPROVE_AUTHORITIES[0])
+            )
+        ),
     }
 }
 
@@ -1149,6 +1155,9 @@ mod tests {
                 .unwrap();
         assert_eq!(published, 0, "ADR-031: taslak modele yazılmaz");
         assert!(page.contains("Onay bekleyen taslak"), "{page}");
+
+        // F-12: panel kimin onaylayacagini soyler (grup adi, ADR-005).
+        assert!(page.contains("OpenSicil-Admins"), "{page}");
 
         // Baslatan kendi setini onaylayamaz (kilit kapali).
         let page = body_string(send(format!("{url}/approve"), String::new(), author).await).await;

@@ -306,7 +306,7 @@ async fn process_job(pool: &PgPool, job: &queue::ClaimedJob, worker_id: &str, en
             println!("worker: iş {} fren nedeniyle bekliyor: {blocked}", job.id);
             let retry = blocked.retry_after_seconds;
             (
-                queue::defer(pool, job, worker_id, &blocked.to_string(), retry).await,
+                queue::defer(pool, job, worker_id, &blocked.job_error(), retry).await,
                 false,
             )
         }

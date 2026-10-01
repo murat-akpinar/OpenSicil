@@ -173,7 +173,9 @@ async fn show(
     match status {
         Status::Pending => {
             page.pending = true;
-            page.jobs = match crate::identity::load_jobs(&state.pool, &state.time_zone, id).await {
+            page.jobs = match crate::identity::load_jobs(&state.pool, op.lang, &state.time_zone, id)
+                .await
+            {
                 Ok(jobs) => jobs,
                 Err(e) => return internal("işler okunamadı", e),
             };
