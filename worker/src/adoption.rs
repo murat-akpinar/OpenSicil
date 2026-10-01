@@ -24,8 +24,40 @@ pub struct Candidate {
     pub surname: Option<String>,
     /// Sicil no'nun eslendigi ozniteligin hedefteki degeri (eslenmemisse None)
     pub employee_value: Option<String>,
+    /// Kimlige yazilacak sicil: `employeeID`, bossa `employeeNumber` — ikisi AD'de
+    /// ayri ozniteliktir ve kurumlar birini ya da otekini doldurur (ADR-106 madde 2).
+    pub employee_number: Option<String>,
+    /// Kimlige yazilacak telefon adayi: cep (`mobile`), cep bossa sabit hat
+    /// (`telephoneNumber`) — mutabakat taramasiyla ayni sira (ADR-106 madde 3).
+    pub phone: Option<String>,
     pub admin_count: bool,
     pub member_of: Vec<String>,
+}
+
+// E.164: '+' ve 8-15 rakam, ilk rakam 0 degil (docs/03 cep telefonu). Kural
+// backend'deki `identity::valid_e164` ile ayni; tek fonksiyon icin ikiz dosya
+// acilmadi (ADR-070 ikizleri modul boyu paylasim icin), kopya bu uc satirdir.
+const E164_MIN_DIGITS: usize = 8;
+const E164_MAX_DIGITS: usize = 15;
+
+fn valid_e164(value: &str) -> bool {
+    let digits = value.strip_prefix('+').unwrap_or("");
+    (E164_MIN_DIGITS..=E164_MAX_DIGITS).contains(&digits.len())
+        && digits.bytes().all(|b| b.is_ascii_digit())
+        && !digits.starts_with('0')
+}
+
+impl Candidate {
+    /// Kimligin cep alanina yazilabilecek numara. Kimlikteki alan E.164 ceptir
+    /// (docs/03); sabit hat biciminde bir deger ("01632 960001") oraya yazilmaz
+    /// ve uydurulmaz — bos kalir, is sonucuna uyari girer (ADR-106 madde 3).
+    pub fn writable_phone(&self) -> Option<&str> {
+        self.phone.as_deref().filter(|p| valid_e164(p))
+    }
+
+    pub fn phone_rejected(&self) -> bool {
+        self.phone.is_some() && self.writable_phone().is_none()
+    }
 }
 
 pub async fn find_by_sam(
@@ -42,14 +74,25 @@ pub async fn find_by_sam(
         "sn",
         "adminCount",
         "memberOf",
+        "employeeID",
+        "employeeNumber",
+        "mobile",
+        "telephoneNumber",
     ];
-    attrs.extend(employee_attr);
+    attrs.extend(employee_attr.filter(|a| !attrs.contains(a)));
     let filter = format!("(&(objectClass=user)(sAMAccountName={}))", ldap_escape(sam));
     let found = ad::search(ldap, base, Scope::Subtree, &filter, &attrs).await?;
     let Some(entry) = found.into_iter().next() else {
         return Ok(None);
     };
-    let text = |name: &str| entry.attrs.get(name).and_then(|v| v.first()).cloned();
+    let text = |name: &str| {
+        entry
+            .attrs
+            .get(name)
+            .and_then(|v| v.first())
+            .filter(|v| !v.trim().is_empty())
+            .cloned()
+    };
     let guid = ad_account::guid_by_dn(ldap, &entry.dn).await?;
     Ok(Some(Candidate {
         guid,
@@ -59,6 +102,8 @@ pub async fn find_by_sam(
         given_name: text("givenName"),
         surname: text("sn"),
         employee_value: employee_attr.and_then(text),
+        employee_number: text("employeeID").or_else(|| text("employeeNumber")),
+        phone: text("mobile").or_else(|| text("telephoneNumber")),
         admin_count: text("adminCount").is_some_and(|v| v.trim() != "0"),
         member_of: entry.attrs.get("memberOf").cloned().unwrap_or_default(),
         dn: entry.dn,
@@ -120,17 +165,7 @@ pub async fn link_observed(
     .execute(&mut *tx)
     .await
     .map_err(|e| format!("bağlantı yazılamadı: {e}"))?;
-    sqlx::query(
-        "UPDATE identities SET username = COALESCE(username, $2), email = COALESCE(email, $3), \
-         upn = COALESCE(upn, $4) WHERE id = $1",
-    )
-    .bind(identity_id)
-    .bind(&cand.sam)
-    .bind(&cand.mail)
-    .bind(&cand.upn)
-    .execute(&mut *tx)
-    .await
-    .map_err(|e| format!("kimlik adları yazılamadı: {e}"))?;
+    fill_person_fields(&mut tx, identity_id, cand).await?;
     sqlx::query(
         "INSERT INTO audit_log (event_type, identity_id, target_system_id, detail) \
          VALUES ($1, $2, $3, $4::jsonb)",
@@ -146,6 +181,35 @@ pub async fn link_observed(
     .await
     .map_err(|e| format!("denetim satırı yazılamadı: {e}"))?;
     tx.commit().await.map_err(|e| e.to_string())
+}
+
+// Ad, e-posta, UPN, sicil ve cep: hepsi yalnizca kimlikte bosken yazilir, dolu
+// alana dokunulmaz (ADR-034/086/106). Sicil tekil kolondur: ayni deger baska bir
+// kimlikte duruyorsa yazilmaz — yoksa tek mukerrer numara butun sahiplenmeyi
+// (baglanti + denetim satiri) geri alirdi.
+async fn fill_person_fields(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    identity_id: i64,
+    cand: &Candidate,
+) -> Result<(), String> {
+    sqlx::query(
+        "UPDATE identities SET username = COALESCE(username, $2), email = COALESCE(email, $3), \
+         upn = COALESCE(upn, $4), mobile_phone = COALESCE(mobile_phone, $5), \
+         employee_number = COALESCE(employee_number, \
+           (SELECT $6::text WHERE NOT EXISTS \
+              (SELECT 1 FROM identities o WHERE o.employee_number = $6))) \
+         WHERE id = $1",
+    )
+    .bind(identity_id)
+    .bind(&cand.sam)
+    .bind(&cand.mail)
+    .bind(&cand.upn)
+    .bind(cand.writable_phone())
+    .bind(&cand.employee_number)
+    .execute(&mut **tx)
+    .await
+    .map(|_| ())
+    .map_err(|e| format!("kimlik alanları yazılamadı: {e}"))
 }
 
 // ADR-018/087 yonetime alma: operator farki gorup onaylayinca backend yalnizca
@@ -234,6 +298,92 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(events, 1);
+
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
+    fn candidate(employee: Option<&str>, phone: Option<&str>) -> Candidate {
+        Candidate {
+            dn: "CN=Ali Kaya,OU=Personel,DC=opensicil,DC=lab".to_string(),
+            guid: "guid-1".to_string(),
+            sam: "ali.kaya".to_string(),
+            upn: Some("ali.kaya@opensicil.lab".to_string()),
+            mail: Some("ali.kaya@opensicil.lab".to_string()),
+            given_name: Some("Ali".to_string()),
+            surname: Some("Kaya".to_string()),
+            employee_value: None,
+            employee_number: employee.map(str::to_string),
+            phone: phone.map(str::to_string),
+            admin_count: false,
+            member_of: Vec::new(),
+        }
+    }
+
+    // ADR-106 madde 3: sabit hat bicimi kimligin cep alanina yazilmaz, uydurulmaz.
+    #[test]
+    fn only_an_e164_number_reaches_the_identity() {
+        let ok = candidate(None, Some("+905321234567"));
+        assert_eq!(ok.writable_phone(), Some("+905321234567"));
+        assert!(!ok.phone_rejected());
+        for bad in ["01632 960001", "+0532123456", "+90532", "905321234567"] {
+            let c = candidate(None, Some(bad));
+            assert_eq!(c.writable_phone(), None, "{bad}");
+            assert!(c.phone_rejected(), "{bad}");
+        }
+        let none = candidate(None, None);
+        assert_eq!(none.writable_phone(), None);
+        assert!(!none.phone_rejected(), "AD'de telefon yoksa uyarı da yok");
+    }
+
+    // ADR-086/106: bos alan dolar, dolu alan ezilmez, baskasinin sicili yazilmaz.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn adoption_fills_only_the_empty_person_fields() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        let seed = crate::test_support::seed_example_model(&pool).await;
+        let fields = |id: i64| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_as::<_, (Option<String>, Option<String>)>(
+                    "SELECT employee_number, mobile_phone FROM identities WHERE id = $1",
+                )
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+            }
+        };
+
+        let cand = candidate(Some("7788"), Some("+905321234567"));
+        link_observed(&pool, seed.identity, seed.ad, &cand, false)
+            .await
+            .unwrap();
+        assert_eq!(
+            fields(seed.identity).await,
+            (Some("7788".into()), Some("+905321234567".into()))
+        );
+
+        // ikinci kimligin cebi dolu, sicili bos ama ayni sicil birincide duruyor
+        sqlx::query("UPDATE identities SET mobile_phone = '+905000000000' WHERE id = $1")
+            .bind(seed.other_identity)
+            .execute(&pool)
+            .await
+            .unwrap();
+        // ayri hesap: sAMAccountName AD'de tekildir, iki aday ayni adi tasiyamaz
+        let mut other = candidate(Some("7788"), Some("+905321234567"));
+        other.guid = "guid-2".to_string();
+        other.sam = "veli.demir".to_string();
+        other.upn = Some("veli.demir@opensicil.lab".to_string());
+        other.mail = Some("veli.demir@opensicil.lab".to_string());
+        link_observed(&pool, seed.other_identity, seed.ad, &other, false)
+            .await
+            .unwrap();
+        assert_eq!(
+            fields(seed.other_identity).await,
+            (None, Some("+905000000000".into())),
+            "mükerrer sicil yazılmaz, dolu cep ezilmez"
+        );
 
         drop(pool);
         crate::test_support::drop_temp_db(&admin_pool, &db_name).await;

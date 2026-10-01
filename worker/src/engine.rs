@@ -593,6 +593,12 @@ async fn adopted_result(
     } else {
         ""
     };
+    // Numara uydurulmaz: E.164 olmayan deger kimlige yazilmaz, operator duzeltir (ADR-106).
+    let phone_warning = if cand.phone_rejected() {
+        "; uyarı: hedefteki telefon E.164 biçiminde değil, kimliğe yazılmadı (ADR-106)"
+    } else {
+        ""
+    };
     let link = LinkRow {
         external_id: cand.guid.clone(),
         applied_state: None,
@@ -603,7 +609,7 @@ async fn adopted_result(
     };
     let diff = observe(c, ldap, &link).await?;
     Ok(format!(
-        "sahiplenildi (gözlem modu): {}{warning}; {diff}",
+        "sahiplenildi (gözlem modu): {}{warning}{phone_warning}; {diff}",
         cand.dn
     ))
 }
@@ -1422,6 +1428,7 @@ mod tests {
         // onceki yarim kalan calismanin izleri
         let _ = membership(&mut ldap, &domain_admins, &existing.dn, false).await;
         let _ = set_attr(&mut ldap, &existing.dn, "employeeID", None).await;
+        let _ = set_attr(&mut ldap, &existing.dn, "telephoneNumber", None).await;
         let _ = set_attr(&mut ldap, &existing.dn, "adminCount", None).await;
 
         let set_hint = |hint: &'static str, identity: i64| {
@@ -1506,6 +1513,15 @@ mod tests {
         set_attr(&mut ldap, &existing.dn, "employeeID", Some("0123"))
             .await
             .unwrap();
+        // sabit hat E.164 degil: kimlige yazilmaz, uyari is sonucuna girer (ADR-106)
+        set_attr(
+            &mut ldap,
+            &existing.dn,
+            "telephoneNumber",
+            Some("01632 960001"),
+        )
+        .await
+        .unwrap();
 
         let adopted = run_job(&pool, &job, &env(true, false)).await.unwrap();
         assert!(
@@ -1541,6 +1557,18 @@ mod tests {
         assert!(
             upn.is_some_and(|u| u.contains('@')),
             "UPN hedeften okunur (ADR-034)"
+        );
+        assert!(adopted.contains("E.164 biçiminde değil"), "{adopted}");
+        let (sicil, cep): (Option<String>, Option<String>) =
+            sqlx::query_as("SELECT employee_number, mobile_phone FROM identities WHERE id = $1")
+                .bind(seed.identity)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            (sicil.as_deref(), cep),
+            (Some("123"), None),
+            "dolu sicil ezilmez, sabit hat cep alanına yazılmaz"
         );
 
         // gozlem: sonraki is hicbir sey yazmaz
@@ -1597,6 +1625,15 @@ mod tests {
                 b"userAccountControl".to_vec(),
                 std::collections::HashSet::from([b"512".to_vec()]),
             ),
+            // Sicil `employeeNumber`da: `employeeID` bos kalinca oraya duser (ADR-106 madde 2)
+            (
+                b"employeeNumber".to_vec(),
+                std::collections::HashSet::from([b"7788".to_vec()]),
+            ),
+            (
+                b"mobile".to_vec(),
+                std::collections::HashSet::from([b"+905321234567".to_vec()]),
+            ),
             (
                 b"unicodePwd".to_vec(),
                 // kimsenin bilmesi gerekmeyen parola: sahiplenme bu hesapla bind etmez
@@ -1615,6 +1652,17 @@ mod tests {
         assert!(
             adopted.starts_with("sahiplenildi (gözlem modu)"),
             "{adopted}"
+        );
+        // bos kimlik: sicil `employeeNumber`dan, cep `mobile`dan dolar (ADR-106)
+        let (sicil, cep): (Option<String>, Option<String>) =
+            sqlx::query_as("SELECT employee_number, mobile_phone FROM identities WHERE id = $1")
+                .bind(seed.other_identity)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            (sicil.as_deref(), cep.as_deref()),
+            (Some("7788"), Some("+905321234567"))
         );
 
         let diff = run_job(&pool, &other, &env(true, false)).await.unwrap();
@@ -1687,6 +1735,9 @@ mod tests {
         ldap.delete(&moved_dn).await.unwrap().success().unwrap();
 
         set_attr(&mut ldap, &existing.dn, "employeeID", None)
+            .await
+            .unwrap();
+        set_attr(&mut ldap, &existing.dn, "telephoneNumber", None)
             .await
             .unwrap();
         ldap.unbind().await.unwrap();

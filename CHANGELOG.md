@@ -110,4 +110,5 @@
 - AD bind giriş kapısı — yetkiler AD gruplarından okunuyor
 - Müdahale bekleyen işler listesi ve panel şeridinde kısa yol
 - Sahiplenmede AD'den e-posta, telefon ve sicil alanları
+- Tekil sahiplenmede sicil ve telefon AD'den gelir
 
