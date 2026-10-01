@@ -186,7 +186,7 @@ Karar listesi tek yerde tutulur: [PROJECT.md → Kararlar](PROJECT.md#kararlar).
 ### 🟡 Kurulumda kararlaştırılacak
 
 - [x] Frontend yaklaşımı: derleme adımsız statik değil, htmx + Tailwind + backend şablonları ([ADR-064](decisions/064-frontend-htmx-tailwind.md))
-- [x] Ekran dili: TR ve EN seçimi baştan var; renk teması Catppuccin, arayüz fontu CaskaydiaMono Nerd Font ([ADR-067](decisions/067-arayuz-dili-tema-font.md))
+- [x] Ekran dili: TR ve EN seçimi baştan var; renk teması açık/koyu ([ADR-100](decisions/100-renk-paleti-catppuccin-yerine-slate-blue.md)), arayüz fontu CaskaydiaMono Nerd Font ([ADR-067](decisions/067-arayuz-dili-tema-font.md))
 - [x] OIDC akışı: backend'de yürütülür, oturum PostgreSQL'de ([ADR-065](decisions/065-oidc-akisi-backend.md))
 - [x] TLS: `compose.yaml` referansında nginx'te sonlanır, dış proxy/Ingress'te düz HTTP moduna alınabilir ([ADR-066](decisions/066-tls-nginxte-sonlanir.md))
 - [x] `ldap3`/`sqlx` TLS özelliği: rustls + `ring` arka ucu, ikisinde de aynı yığın ([ADR-069](decisions/069-kurulum-crate-ve-arac-secimleri.md))

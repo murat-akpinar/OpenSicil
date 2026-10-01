@@ -14,6 +14,7 @@
 </div>
 
 {% if !notice.info.is_empty() %}<div class="alert alert-info mb-4">{{ notice.info }}</div>{% endif %}
+{% if !notice.error.is_empty() %}<div class="alert alert-warn mb-4">{{ notice.error }}</div>{% endif %}
 
 <div class="card mb-6 space-y-2">
   <div class="card-head">
@@ -42,6 +43,80 @@
   </div>
   {% endfor %}
 </div>
+
+{# Toplu sahiplenme: yonetilmeyen hesaplar secilip kimlige cevrilir.
+   Hedefe yazma yok — baglantiyi worker `observed` modunda kurar. #}
+{% if can_adopt && !candidates.is_empty() %}
+<section class="card mb-6">
+  <div class="card-head">
+    <i class="ico ico-user-plus card-icon" aria-hidden="true"></i>
+    <h2 class="h2">{{ lang.t("adopt.title") }}</h2>
+  </div>
+  <p class="sub mt-0 mb-4">{{ lang.t("adopt.hint") }}</p>
+  <form method="post" action="/targets/{{ target_id }}/reconcile/adopt">
+    <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div class="field">
+        <label class="label" for="adopt-role">{{ lang.t("field.primary_role") }}</label>
+        <select class="input" id="adopt-role" name="primary_role_id" required>
+          <option value="">{{ lang.t("common.select") }}</option>
+          {% for r in roles %}<option value="{{ r.id }}">{{ r.label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label class="label" for="adopt-dept">{{ lang.t("adopt.fallback_department") }}</label>
+        <select class="input" id="adopt-dept" name="department_id" required>
+          <option value="">{{ lang.t("common.select") }}</option>
+          {% for d in departments %}<option value="{{ d.id }}">{{ d.label }}</option>{% endfor %}
+        </select>
+        <span class="hint">{{ lang.t("adopt.fallback_department_hint") }}</span>
+      </div>
+      <div class="field">
+        <label class="label" for="adopt-employment">{{ lang.t("field.employment_type") }}</label>
+        <select class="input" id="adopt-employment" name="employment_type" required>
+          <option value="permanent">{{ lang.key("employment", "permanent") }}</option>
+          <option value="contract">{{ lang.key("employment", "contract") }}</option>
+          <option value="intern">{{ lang.key("employment", "intern") }}</option>
+          <option value="outsourced">{{ lang.key("employment", "outsourced") }}</option>
+        </select>
+      </div>
+      <div class="field">
+        <label class="label" for="adopt-start">{{ lang.t("adopt.start_date") }}</label>
+        <input class="input" id="adopt-start" type="date" name="start_date" value="{{ today }}" required>
+      </div>
+    </div>
+
+    <div class="card-tight mb-4 max-h-96 overflow-y-auto">
+      <table class="tbl">
+        <thead><tr>
+          <th class="w-8"></th>
+          <th>{{ lang.t("reconcile.account") }}</th>
+          <th>{{ lang.t("field.full_name") }}</th>
+          <th>{{ lang.t("field.employee_number") }}</th>
+          <th>{{ lang.t("field.department") }}</th>
+        </tr></thead>
+        <tbody>
+        {% for c in candidates %}
+          <tr>
+            <td><input type="checkbox" name="finding" value="{{ c.id }}" aria-label="{{ c.account_name }}"></td>
+            <td>{{ c.account_name }}</td>
+            <td>{% if c.display_name.is_empty() %}—{% else %}{{ c.display_name }}{% endif %}</td>
+            <td class="muted">{% if c.employee_number.is_empty() %}—{% else %}{{ c.employee_number }}{% endif %}</td>
+            <td class="muted">
+              {% if c.department_name.is_empty() %}—{% else %}{{ c.department_name }}{% endif %}
+              {% match c.department_id %}{% when Some with (_d) %}{% when None %}
+              <span class="badge badge-warn">{{ lang.t("adopt.no_department_match") }}</span>
+              {% endmatch %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <button class="btn btn-primary" type="submit"><i class="ico ico-user-plus" aria-hidden="true"></i>{{ lang.t("adopt.submit") }}</button>
+  </form>
+</section>
+{% endif %}
 
 {% if v.rows.is_empty() %}
 <div class="empty">

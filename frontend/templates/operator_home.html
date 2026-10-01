@@ -1,8 +1,10 @@
 {% extends "base.html" %}
 {% block title %}OpenSicil{% endblock %}
 {% block content %}
-{# ADR-096 madde 3: ana sayfa gosterge paneli. Grafikler native CSS (ADR-076);
-   yuzde `.v-NN` sinifiyla gelir, satir ici `style` yok (CSP). #}
+{# ADR-096 madde 3: ana sayfa gosterge paneli. Duzen mockup'taki uc sutun:
+   etkinlik akisi | dagilimlar | hizli islemler. Grafikler native CSS ve SVG
+   (ADR-076); satir ici `style` yok (CSP) — yuzde `.v-NN` sinifiyla, halka
+   dilimi SVG sunum oznitelikleriyle gelir. #}
 <div class="stack">
 
   <section class="hero">
@@ -29,49 +31,51 @@
     <div class="stat">
       <div class="stat-head">
         <span class="ico-tile"><i class="ico ico-users" aria-hidden="true"></i></span>
-        <div class="min-w-0">
+        <div class="min-w-0 flex-1">
           <p class="stat-label">{{ lang.t("dash.total_identities") }}</p>
           <p class="stat-value">{{ dash.totals.identities }}</p>
+          <p class="stat-foot">{{ lang.t("dash.all_time") }}</p>
         </div>
       </div>
-      <p class="stat-foot">{{ lang.t("dash.all_time") }}</p>
     </div>
     <div class="stat">
       <div class="stat-head">
         <span class="ico-tile"><i class="ico ico-user-plus" aria-hidden="true"></i></span>
-        <div class="min-w-0">
+        <div class="min-w-0 flex-1">
           <p class="stat-label">{{ lang.t("dash.joined") }}</p>
           <p class="stat-value">{{ dash.totals.joined }}</p>
+          <p class="stat-foot">{{ lang.t("dash.window_30") }}</p>
         </div>
       </div>
-      <p class="stat-foot">{{ lang.t("dash.window_30") }}</p>
     </div>
     <div class="stat">
       <div class="stat-head">
         <span class="ico-tile"><i class="ico ico-logout" aria-hidden="true"></i></span>
-        <div class="min-w-0">
+        <div class="min-w-0 flex-1">
           <p class="stat-label">{{ lang.t("dash.departed") }}</p>
           <p class="stat-value">{{ dash.totals.departed }}</p>
+          <p class="stat-foot">{{ lang.t("dash.window_30") }}</p>
         </div>
       </div>
-      <p class="stat-foot">{{ lang.t("dash.window_30") }}</p>
     </div>
     <div class="stat">
       <div class="stat-head">
         <span class="ico-tile"><i class="ico ico-refresh" aria-hidden="true"></i></span>
-        <div class="min-w-0">
+        <div class="min-w-0 flex-1">
           <p class="stat-label">{{ lang.t("dash.changed") }}</p>
           <p class="stat-value">{{ dash.totals.changed }}</p>
+          <p class="stat-foot">{{ lang.t("dash.window_30") }}</p>
         </div>
       </div>
-      <p class="stat-foot">{{ lang.t("dash.window_30") }}</p>
     </div>
   </section>
 
-  <section class="grid gap-4 lg:grid-cols-2">
-    <div class="card">
+  {# Uc sutun: akis (5) | dagilimlar (4) | hizli islemler (3) #}
+  <section class="grid gap-4 xl:grid-cols-12">
+
+    <div class="card xl:col-span-5">
       <div class="card-head">
-        <span class="ico-tile"><i class="ico ico-bolt" aria-hidden="true"></i></span>
+        <i class="ico ico-bolt card-icon" aria-hidden="true"></i>
         <h2 class="h2">{{ lang.t("dash.activity") }}</h2>
       </div>
       {% if dash.activity.is_empty() %}
@@ -80,7 +84,7 @@
       <div class="feed">
         {% for e in dash.activity %}
         <div class="feed-row">
-          <span class="ico-tile"><i class="ico {{ e.icon }}" aria-hidden="true"></i></span>
+          <span class="ico-solid ico-solid-{{ e.tone }}"><i class="ico {{ e.icon }}" aria-hidden="true"></i></span>
           <div class="feed-main">
             <p class="feed-title">{{ lang.key("event", e.event_type) }}</p>
             <p class="feed-sub">{% if e.person != "" %}{{ e.person }} · {% endif %}{{ e.actor }}</p>
@@ -92,103 +96,154 @@
       {% endif %}
     </div>
 
-    <div class="card card-fill">
-      <div class="card-head">
-        <span class="ico-tile"><i class="ico ico-chart" aria-hidden="true"></i></span>
-        <h2 class="h2">{{ lang.t("dash.trend") }}</h2>
-        <span class="chip ml-auto text-xs">{{ lang.t("dash.window_7") }}</span>
-      </div>
-      <div class="chart">
-        {% for d in dash.trend %}
-        <div class="chart-col">
-          {# Sifir degerli gun cubuk basmaz: bos sutun "o gun hicbir sey olmadi" demek #}
-          <div class="chart-stack">
-            {% if d.joined_pct > 0 %}<span class="bar v-{{ d.joined_pct }}" title="{{ d.joined }}"></span>{% endif %}
-            {% if d.departed_pct > 0 %}<span class="bar bar-soft v-{{ d.departed_pct }}" title="{{ d.departed }}"></span>{% endif %}
-          </div>
-          <span class="chart-x">{{ d.label }}</span>
-        </div>
-        {% endfor %}
-      </div>
-      <div class="legend">
-        <span><span class="legend-dot"></span> {{ lang.t("dash.trend_joined") }}</span>
-        <span><span class="legend-dot legend-dot-soft"></span> {{ lang.t("dash.trend_departed") }}</span>
-      </div>
-    </div>
-  </section>
-
-  <section class="grid gap-4 xl:grid-cols-3">
-    <div class="card xl:col-span-2">
-      <div class="card-head">
-        <span class="ico-tile"><i class="ico ico-users" aria-hidden="true"></i></span>
-        <h2 class="h2">{{ lang.t("dash.recent") }}</h2>
-        <a class="link ml-auto text-sm" href="/identities/new">{{ lang.t("home.new_identity") }}</a>
-      </div>
-      {% if identities.is_empty() %}
-      <div class="empty border-0 shadow-none">
-        <span class="ico-tile ico-tile-lg"><i class="ico ico-users" aria-hidden="true"></i></span>
-        <p class="empty-title">{{ lang.t("home.empty_title") }}</p>
-        <p class="empty-hint">{{ lang.t("home.empty_hint") }}</p>
-        <a class="btn btn-primary" href="/identities/new"><i class="ico ico-plus" aria-hidden="true"></i>{{ lang.t("home.new_identity") }}</a>
-      </div>
-      {% else %}
-      <div class="overflow-x-auto">
-        <table class="tbl">
-          <thead><tr><th>{{ lang.t("field.full_name") }}</th><th>{{ lang.t("field.employee_number") }}</th><th>{{ lang.t("field.state") }}</th></tr></thead>
-          <tbody>
-          {% for i in identities %}
-            <tr>
-              <td>
-                <span class="flex items-center gap-2.5">
-                  <span class="avatar" aria-hidden="true">{{ i.initials }}</span>
-                  <a class="link" href="/identities/{{ i.id }}">{{ i.name }}</a>
-                </span>
-              </td>
-              <td class="muted">{{ i.employee_number }}</td>
-              <td><span class="badge badge-{{ i.state_kind }}">{{ lang.key("state", i.state) }}</span></td>
-            </tr>
-          {% endfor %}
-          </tbody>
-        </table>
-      </div>
-      <p class="meta mt-3">{{ lang.t1("home.count_note", identities.len()) }}</p>
-      {% endif %}
-    </div>
-
-    <div class="stack">
+    <div class="stack xl:col-span-4">
       <div class="card">
         <div class="card-head">
-          <span class="ico-tile"><i class="ico ico-building" aria-hidden="true"></i></span>
-          <h2 class="h2">{{ lang.t("dash.departments") }}</h2>
+          <i class="ico ico-chart card-icon" aria-hidden="true"></i>
+          <h2 class="h2">{{ lang.t("dash.employment") }}</h2>
         </div>
-        {% if dash.departments.is_empty() %}
-        <p class="muted text-sm">{{ lang.t("dash.departments_empty") }}</p>
+        {% if dash.employment.total == 0 %}
+        <p class="muted text-sm">{{ lang.t("dash.employment_empty") }}</p>
         {% else %}
-        <div class="divide-y divide-line">
-          {% for d in dash.departments %}
-          <div class="dist-row">
-            <span class="dist-name">{{ d.name }}</span>
-            <span class="meta tabular-nums">{{ d.count }}</span>
-            <span class="meter"><span class="meter-fill v-{{ d.pct }}"></span></span>
+        <div class="flex flex-wrap items-center gap-5">
+          {# Cember 100 birim (r = 15.9155): dasharray dogrudan yuzde #}
+          <span class="donut">
+            <svg class="donut-svg" viewBox="0 0 42 42" role="img" aria-label="{{ lang.t("dash.employment") }}">
+              <circle class="donut-ring" cx="21" cy="21" r="15.9155"></circle>
+              {% for s in dash.employment.slices %}
+              <circle class="donut-seg seg-{{ s.tone }}" cx="21" cy="21" r="15.9155"
+                      stroke-dasharray="{{ s.dash }}" stroke-dashoffset="{{ s.offset }}"></circle>
+              {% endfor %}
+            </svg>
+            <span class="donut-center">
+              <span class="meta block">{{ lang.t("dash.total") }}</span>
+              <span class="donut-total">{{ dash.employment.total }}</span>
+            </span>
+          </span>
+          <div class="donut-legend">
+            {% for s in dash.employment.slices %}
+            <div class="donut-legend-row">
+              <span class="dot dot-{{ s.tone }}" aria-hidden="true"></span>
+              <span class="min-w-0 flex-1 truncate">{{ lang.key("employment", s.key) }}</span>
+              <span class="tabular-nums">{{ s.count }}</span>
+              <span class="meta w-10 text-right tabular-nums">%{{ s.pct }}</span>
+            </div>
+            {% endfor %}
           </div>
-          {% endfor %}
         </div>
         {% endif %}
       </div>
 
       <div class="card">
         <div class="card-head">
-          <span class="ico-tile"><i class="ico ico-bolt" aria-hidden="true"></i></span>
+          <i class="ico ico-building card-icon" aria-hidden="true"></i>
+          <h2 class="h2">{{ lang.t("dash.departments") }}</h2>
+        </div>
+        {% if dash.departments.is_empty() %}
+        <p class="muted text-sm">{{ lang.t("dash.departments_empty") }}</p>
+        {% else %}
+        <div class="vbars">
+          {% for d in dash.departments %}
+          <div class="vbar">
+            <span class="vbar-value">{{ d.count }}</span>
+            <span class="vbar-track"><span class="vbar-fill v-{{ d.pct }}"></span></span>
+            <span class="vbar-name" title="{{ d.name }}">{{ d.name }}</span>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="stack xl:col-span-3">
+      <div class="card">
+        <div class="card-head">
+          <i class="ico ico-bolt card-icon" aria-hidden="true"></i>
           <h2 class="h2">{{ lang.t("dash.quick") }}</h2>
         </div>
         <div class="qa">
           <a class="qa-row" href="/identities/new"><span class="ico-tile"><i class="ico ico-user-plus" aria-hidden="true"></i></span>{{ lang.t("home.new_identity") }}<i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
+          <a class="qa-row" href="/identities"><span class="ico-tile"><i class="ico ico-users" aria-hidden="true"></i></span>{{ lang.t("nav.identities") }}<i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
           <a class="qa-row" href="/roles"><span class="ico-tile"><i class="ico ico-key" aria-hidden="true"></i></span>{{ lang.t("nav.roles") }}<i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
-          <a class="qa-row" href="/departments"><span class="ico-tile"><i class="ico ico-sitemap" aria-hidden="true"></i></span>{{ lang.t("nav.departments") }}<i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
-          <a class="qa-row" href="/upcoming"><span class="ico-tile"><i class="ico ico-calendar" aria-hidden="true"></i></span>{{ lang.t("nav.upcoming") }}<i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
+          <a class="qa-row" href="/reports"><span class="ico-tile"><i class="ico ico-chart" aria-hidden="true"></i></span>{{ lang.t("nav.reports") }}<i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
         </div>
       </div>
+
+      <div class="card card-fill">
+        <div class="card-head">
+          <i class="ico ico-chart card-icon" aria-hidden="true"></i>
+          <h2 class="h2">{{ lang.t("dash.trend") }}</h2>
+          <span class="chip ml-auto text-xs">{{ lang.t("dash.window_7") }}</span>
+        </div>
+        {# Zirve sifirsa cubuk da eksen de yok: bos izgara ve "0 / 0 / 0" ekseni
+           bozuk gorunuyordu, oburu kartlar gibi bir cumle yazilir #}
+        {% if dash.trend_peak == 0 %}
+        <p class="muted text-sm">{{ lang.t("dash.trend_empty") }}</p>
+        {% else %}
+        <div class="chart">
+          {# Eksen: tepe, yarisi, sifir — kilavuz cizgilerinin tam karsiligi #}
+          <div class="chart-y" aria-hidden="true">
+            <span>{{ dash.trend_peak }}</span>
+            <span>{{ dash.trend_mid }}</span>
+            <span>0</span>
+          </div>
+          <div class="chart-plot">
+            {% for d in dash.trend %}
+            {# Sifir degerli gun cubuk basmaz: bos sutun "o gun hicbir sey olmadi" demek #}
+            <div class="chart-stack">
+              {% if d.joined_pct > 0 %}<span class="bar v-{{ d.joined_pct }}" title="{{ d.joined }}"></span>{% endif %}
+              {% if d.departed_pct > 0 %}<span class="bar bar-soft v-{{ d.departed_pct }}" title="{{ d.departed }}"></span>{% endif %}
+            </div>
+            {% endfor %}
+          </div>
+          <div class="chart-axis">
+            {% for d in dash.trend %}<span class="chart-x">{{ d.label }}</span>{% endfor %}
+          </div>
+        </div>
+        <div class="legend">
+          <span><span class="legend-dot"></span> {{ lang.t("dash.trend_joined") }}</span>
+          <span><span class="legend-dot legend-dot-soft"></span> {{ lang.t("dash.trend_departed") }}</span>
+        </div>
+        {% endif %}
+      </div>
     </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <i class="ico ico-users card-icon" aria-hidden="true"></i>
+      <h2 class="h2">{{ lang.t("dash.recent") }}</h2>
+      <a class="link ml-auto text-sm" href="/identities">{{ lang.t("dash.see_all") }}</a>
+    </div>
+    {% if identities.is_empty() %}
+    <div class="empty border-0 shadow-none">
+      <span class="ico-tile ico-tile-lg"><i class="ico ico-users" aria-hidden="true"></i></span>
+      <p class="empty-title">{{ lang.t("home.empty_title") }}</p>
+      <p class="empty-hint">{{ lang.t("home.empty_hint") }}</p>
+      <a class="btn btn-primary" href="/identities/new"><i class="ico ico-plus" aria-hidden="true"></i>{{ lang.t("home.new_identity") }}</a>
+    </div>
+    {% else %}
+    <div class="overflow-x-auto">
+      <table class="tbl">
+        <thead><tr><th>{{ lang.t("field.full_name") }}</th><th>{{ lang.t("field.employee_number") }}</th><th>{{ lang.t("field.department") }}</th><th>{{ lang.t("field.state") }}</th></tr></thead>
+        <tbody>
+        {% for i in identities %}
+          <tr>
+            <td>
+              <span class="flex items-center gap-2.5">
+                <span class="avatar" aria-hidden="true">{{ i.initials }}</span>
+                <a class="link" href="/identities/{{ i.id }}">{{ i.name }}</a>
+              </span>
+            </td>
+            <td class="muted whitespace-nowrap">{{ i.employee_number }}</td>
+            <td class="muted">{% if i.department.is_empty() %}—{% else %}{{ i.department }}{% endif %}</td>
+            <td><span class="badge badge-{{ i.state_kind }}">{{ lang.key("state", i.state) }}</span></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
   </section>
 
 </div>

@@ -1,9 +1,9 @@
 /* Arayüz girdi dosyası (ADR-088). Çıktı: frontend/static/app.css — `sh scripts/build-css.sh`
    ile üretilir ve commit'lenir, include_bytes! ile binary'ye gömülür (backend/src/assets.rs).
-   Renkler Catppuccin: açık Latte, koyu Mocha (ADR-067). Şablonlarda satır içi renk yoktur;
+   Renkler ADR-100 paleti (slate + blue); token adlarındaki `ctp-` öneki tarihsel. Şablonlarda satır içi renk yoktur;
    buradaki token ve bileşen sınıfları kullanılır.
 
-   Yüzey düzeni: sayfa zemini mantle, kart/kenar çubuğu/üst bar base, satır vurgusu crust.
+   Yüzey düzeni: sayfa zemini, kart, kenar çubuğu ve üst bar ayrı token; koyu temada üçü üç ton.
    Çerçeve değil yüzey + yumuşak gölge ayırır; ikonlar CaskaydiaMono Nerd Font glyph'leri
    (yalnızca `sh scripts/check-glyphs.sh` ile varlığı doğrulanmış kod noktaları). */
 @import "tailwindcss";
@@ -13,97 +13,111 @@
 @source "../templates";
 @source "../static/app.js";
 
-/* --- Catppuccin Latte (açık, varsayılan) --- */
+/* --- Açık tema (ADR-100) --- */
 :root {
-  --ctp-bg: #e6e9ef;
-  --ctp-card: #eff1f5;
-  --ctp-bg-soft: #e6e9ef;
-  --ctp-bg-hard: #dce0e8;
-  --ctp-surface: #ccd0da;
-  --ctp-surface-2: #bcc0cc;
-  --ctp-line: #dce0e8;
-  --ctp-fg: #4c4f69;
-  --ctp-fg-dim: #5c5f77;
-  --ctp-fg-faint: #8c8fa1;
-  --ctp-accent: #1e66f5;
-  --ctp-accent-soft: #dde6fd;
-  /* Grafigin ikinci serisi: `accent-soft` zemin tonu, cubuk olarak karttan ayrilmiyor */
-  --ctp-accent-dim: #a9c5fb;
-  --ctp-ok: #40a02b;
-  --ctp-err: #d20f39;
-  --ctp-warn: #df8e1d;
-  --ctp-info: #179299;
-  --ctp-on-accent: #eff1f5;
-  --ctp-ok-soft: #e3f2dd;
-  --ctp-warn-soft: #f8ecd8;
-  --ctp-err-soft: #f9dde2;
-  --ctp-info-soft: #d9efef;
-  --ctp-shadow: 0 1px 2px rgb(76 79 105 / 0.06), 0 8px 24px rgb(76 79 105 / 0.07);
-  --ctp-shadow-sm: 0 1px 2px rgb(76 79 105 / 0.08);
+  --ctp-bg: #f8fafc;
+  --ctp-card: #ffffff;
+  --ctp-sidebar: #ffffff;
+  --ctp-topbar: #ffffff;
+  --ctp-bg-soft: #f1f5f9;
+  --ctp-bg-hard: #e2e8f0;
+  --ctp-surface: #cbd5e1;
+  --ctp-surface-2: #94a3b8;
+  --ctp-line: #e2e8f0;
+  --ctp-fg: #0f172a;
+  --ctp-fg-dim: #64748b;
+  --ctp-fg-faint: #94a3b8;
+  --ctp-accent: #3b82f6;
+  --ctp-accent-hover: #2563eb;
+  --ctp-accent-soft: #dbeafe;
+  --ctp-on-accent-soft: #3b82f6;
+  /* Grafigin ikinci serisi palette "aksan (turkuaz)" */
+  --ctp-accent-dim: #06b6d4;
+  --ctp-ok: #10b981;
+  --ctp-err: #ef4444;
+  --ctp-warn: #f59e0b;
+  --ctp-info: #8b5cf6;
+  --ctp-on-accent: #ffffff;
+  --ctp-ok-soft: #d1fae5;
+  --ctp-warn-soft: #fef3c7;
+  --ctp-err-soft: #fee2e2;
+  --ctp-info-soft: #ede9fe;
+  --ctp-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 8px 24px rgb(15 23 42 / 0.06);
+  --ctp-shadow-sm: 0 1px 2px rgb(15 23 42 / 0.06);
 }
 
 /* Sistem koyu tercihi; operatör elle "light" seçmediyse */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --ctp-bg: #181825;
-    --ctp-card: #1e1e2e;
-    --ctp-bg-soft: #181825;
-    --ctp-bg-hard: #11111b;
-    --ctp-surface: #313244;
-    --ctp-surface-2: #45475a;
-    --ctp-line: #313244;
-    --ctp-fg: #cdd6f4;
-    --ctp-fg-dim: #bac2de;
-    --ctp-fg-faint: #a6adc8;
-    --ctp-accent: #89b4fa;
-    --ctp-accent-soft: #2b3148;
-    --ctp-accent-dim: #5a6f9e;
-    --ctp-ok: #a6e3a1;
-    --ctp-err: #f38ba8;
-    --ctp-warn: #f9e2af;
-    --ctp-info: #94e2d5;
-    --ctp-on-accent: #1e1e2e;
-    --ctp-ok-soft: #2b3a2f;
-    --ctp-warn-soft: #3a382b;
-    --ctp-err-soft: #3a2b31;
-    --ctp-info-soft: #28383a;
-    --ctp-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px rgb(0 0 0 / 0.28);
-    --ctp-shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+    --ctp-bg: #0b1220;
+    --ctp-card: #1e293b;
+    --ctp-sidebar: #0f172a;
+    --ctp-topbar: #111827;
+    --ctp-bg-soft: #111827;
+    --ctp-bg-hard: #0b1220;
+    --ctp-surface: #334155;
+    --ctp-surface-2: #475569;
+    --ctp-line: #334155;
+    --ctp-fg: #f8fafc;
+    --ctp-fg-dim: #cbd5e1;
+    --ctp-fg-faint: #94a3b8;
+    --ctp-accent: #3b82f6;
+    --ctp-accent-hover: #2563eb;
+    --ctp-accent-soft: #1d4ed8;
+    --ctp-on-accent-soft: #ffffff;
+    --ctp-accent-dim: #22d3ee;
+    --ctp-ok: #10b981;
+    --ctp-err: #f87171;
+    --ctp-warn: #f59e0b;
+    --ctp-info: #8b5cf6;
+    --ctp-on-accent: #ffffff;
+    --ctp-ok-soft: #052e23;
+    --ctp-warn-soft: #3b2a06;
+    --ctp-err-soft: #3f1414;
+    --ctp-info-soft: #1e1340;
+    --ctp-shadow: 0 1px 2px rgb(0 0 0 / 0.5), 0 8px 24px rgb(0 0 0 / 0.35);
+    --ctp-shadow-sm: 0 1px 2px rgb(0 0 0 / 0.5);
   }
 }
 
 /* Elle koyu seçimi (static/app.js, localStorage) */
 :root[data-theme="dark"] {
-  --ctp-bg: #181825;
-  --ctp-card: #1e1e2e;
-  --ctp-bg-soft: #181825;
-  --ctp-bg-hard: #11111b;
-  --ctp-surface: #313244;
-  --ctp-surface-2: #45475a;
-  --ctp-line: #313244;
-  --ctp-fg: #cdd6f4;
-  --ctp-fg-dim: #bac2de;
-  --ctp-fg-faint: #a6adc8;
-  --ctp-accent: #89b4fa;
-  --ctp-accent-soft: #2b3148;
-  --ctp-accent-dim: #5a6f9e;
-  --ctp-ok: #a6e3a1;
-  --ctp-err: #f38ba8;
-  --ctp-warn: #f9e2af;
-  --ctp-info: #94e2d5;
-  --ctp-on-accent: #1e1e2e;
-  --ctp-ok-soft: #2b3a2f;
-  --ctp-warn-soft: #3a382b;
-  --ctp-err-soft: #3a2b31;
-  --ctp-info-soft: #28383a;
-  --ctp-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px rgb(0 0 0 / 0.28);
-  --ctp-shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+  --ctp-bg: #0b1220;
+  --ctp-card: #1e293b;
+  --ctp-sidebar: #0f172a;
+  --ctp-topbar: #111827;
+  --ctp-bg-soft: #111827;
+  --ctp-bg-hard: #0b1220;
+  --ctp-surface: #334155;
+  --ctp-surface-2: #475569;
+  --ctp-line: #334155;
+  --ctp-fg: #f8fafc;
+  --ctp-fg-dim: #cbd5e1;
+  --ctp-fg-faint: #94a3b8;
+  --ctp-accent: #3b82f6;
+  --ctp-accent-hover: #2563eb;
+  --ctp-accent-soft: #1d4ed8;
+  --ctp-on-accent-soft: #ffffff;
+  --ctp-accent-dim: #22d3ee;
+  --ctp-ok: #10b981;
+  --ctp-err: #f87171;
+  --ctp-warn: #f59e0b;
+  --ctp-info: #8b5cf6;
+  --ctp-on-accent: #ffffff;
+  --ctp-ok-soft: #052e23;
+  --ctp-warn-soft: #3b2a06;
+  --ctp-err-soft: #3f1414;
+  --ctp-info-soft: #1e1340;
+  --ctp-shadow: 0 1px 2px rgb(0 0 0 / 0.5), 0 8px 24px rgb(0 0 0 / 0.35);
+  --ctp-shadow-sm: 0 1px 2px rgb(0 0 0 / 0.5);
 }
 
 /* `inline`: utility'ler değeri var() olarak taşır, tema değişkeni değişince renk değişir */
 @theme inline {
   --color-bg: var(--ctp-bg);
   --color-card: var(--ctp-card);
+  --color-sidebar: var(--ctp-sidebar);
+  --color-topbar: var(--ctp-topbar);
   --color-bg-soft: var(--ctp-bg-soft);
   --color-bg-hard: var(--ctp-bg-hard);
   --color-surface: var(--ctp-surface);
@@ -114,6 +128,8 @@
   --color-fg-faint: var(--ctp-fg-faint);
   --color-accent: var(--ctp-accent);
   --color-accent-soft: var(--ctp-accent-soft);
+  --color-on-accent-soft: var(--ctp-on-accent-soft);
+  --color-accent-hover: var(--ctp-accent-hover);
   --color-accent-dim: var(--ctp-accent-dim);
   --color-ok: var(--ctp-ok);
   --color-err: var(--ctp-err);
@@ -264,11 +280,58 @@
   }
 
   /* Yuvarlak köşeli ikon karesi: kart başlığı, liste satırı, boş durum */
+  /* Açık temada soluk mavi zemin + mavi glyph, koyuda palet "Primary Light"
+     (#1d4ed8) + beyaz glyph — mockup iki temada da böyle; rengi
+     `--ctp-on-accent-soft` tema başına verir. */
   .ico-tile {
-    @apply grid size-9 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent;
+    @apply grid size-9 shrink-0 place-items-center rounded-xl bg-accent-soft text-on-accent-soft;
   }
   .ico-tile-lg {
-    @apply size-12 rounded-xl text-xl;
+    @apply size-12 rounded-2xl text-xl;
+  }
+  /* Tonlar: etkinlik akisi tek renk kare dizisiyken olay turleri birbirinden
+     ayirt edilemiyordu (`dashboard::glyph_for` tonu secer). */
+  .ico-tile-accent {
+    background-color: var(--ctp-accent-soft);
+    color: var(--ctp-on-accent-soft);
+  }
+  .ico-tile-ok {
+    background-color: var(--ctp-ok-soft);
+    color: var(--ctp-ok);
+  }
+  .ico-tile-warn {
+    background-color: var(--ctp-warn-soft);
+    color: var(--ctp-warn);
+  }
+  .ico-tile-err {
+    background-color: var(--ctp-err-soft);
+    color: var(--ctp-err);
+  }
+  .ico-tile-info {
+    background-color: var(--ctp-info-soft);
+    color: var(--ctp-info);
+  }
+  /* Dolu ton: etkinlik akışındaki kareler mockup'ta soluk zemin değil düz renk
+     + beyaz glyph. Yalnızca akışta kullanılır; sayaç kutusu ve hızlı işlem
+     kareleri soluk kalır, yoksa panel baştan aşağı renk olurdu. */
+  .ico-solid {
+    @apply grid size-9 shrink-0 place-items-center rounded-xl bg-accent text-sm;
+    color: var(--ctp-on-accent);
+  }
+  .ico-solid-ok {
+    background-color: var(--ctp-ok);
+  }
+  .ico-solid-warn {
+    background-color: var(--ctp-warn);
+  }
+  .ico-solid-err {
+    background-color: var(--ctp-err);
+  }
+  .ico-solid-info {
+    background-color: var(--ctp-info);
+  }
+  .ico-solid-accent {
+    background-color: var(--ctp-accent);
   }
 
   /* --- kabuk (ADR-096 madde 2) ---
@@ -278,13 +341,14 @@
   .shell {
     @apply flex min-h-screen w-full flex-col md:flex-row;
   }
+  /* Çerçeve yok: sayfa zemini crust olduğu için kenar çubuğu kendi yüzeyiyle ayrılır */
   .side {
-    @apply flex shrink-0 flex-col gap-1 border-b border-line bg-card px-3 py-3
-           text-sm md:w-64 md:border-r md:border-b-0 md:px-4 md:py-5;
+    @apply flex shrink-0 flex-col gap-1.5 border-b border-line bg-sidebar px-3 py-3
+           text-sm md:w-72 md:border-b-0 md:px-4 md:py-6;
   }
   /* Marka kenar çubuğunun içinde, gezinmeden bir çizgiyle değil boşlukla ayrılır */
   .side-brand {
-    @apply mb-4 flex items-center gap-3 px-1 text-lg font-bold tracking-tight text-fg no-underline;
+    @apply mb-6 flex items-center gap-3 px-1 text-xl font-bold tracking-tight text-fg no-underline;
   }
   .brand-mark {
     @apply grid size-10 shrink-0 place-items-center rounded-xl bg-accent text-base text-on-accent;
@@ -292,14 +356,24 @@
   }
   /* Gezinme; dar ekranda yatay kayan şerit, md'den sonra dikey sütun */
   .side-nav {
-    @apply flex flex-row gap-1 overflow-x-auto md:flex-col md:overflow-visible;
+    @apply flex flex-row gap-1.5 overflow-x-auto md:flex-col md:overflow-visible;
   }
-  /* Ürün adı + sürüm: kenar çubuğunun dibine yapışır, dar ekranda gizlenir */
+  /* Durum + sürüm: kenar çubuğunun dibine yapışır, dar ekranda gizlenir */
   .side-foot {
     @apply mt-auto hidden px-1 pt-5 md:block;
   }
+  .side-status {
+    @apply flex items-center gap-2 text-sm font-bold;
+  }
+  /* Küçük durum noktası (kenar çubuğu dibi); rengi `.dot-<ton>` verir */
+  .dot {
+    @apply inline-block size-2 shrink-0 rounded-full bg-fg-faint;
+  }
+  .dot-ok {
+    background-color: var(--ctp-ok);
+  }
   .nav-link {
-    @apply flex items-center gap-3 rounded-lg px-3 py-2.5 whitespace-nowrap text-fg-dim
+    @apply flex items-center gap-3 rounded-xl px-3.5 py-3 whitespace-nowrap text-fg-dim
            no-underline hover:bg-bg hover:text-fg;
   }
   /* Glyph'lerin ilerleme genişliği farklı; sabit kutu etiketleri aynı hizada tutar */
@@ -326,17 +400,18 @@
   }
   .topbar {
     @apply sticky top-0 z-10 flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-line
-           bg-card px-4 py-3 md:px-6;
+           bg-topbar px-4 py-3 md:px-6;
   }
   /* Arama kutusu: ikon input'un içinde durur (ayrı bileşen değil, konumlandırma) */
   .search {
     @apply relative min-w-0 flex-1 md:max-w-md;
   }
   .search .ico {
-    @apply pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-sm text-fg-faint;
+    @apply pointer-events-none absolute top-1/2 left-4 -translate-y-1/2 text-sm text-fg-faint;
   }
+  /* Mockup'taki gibi hap biçimli; ikon için soldan yer açılır */
   .search .input {
-    @apply pl-9;
+    @apply rounded-full pl-10;
   }
   /* Kullanıcı çipi: baş harf avatarı + ad + yetki */
   .userchip {
@@ -347,7 +422,7 @@
   }
   .avatar {
     @apply grid size-8 shrink-0 place-items-center rounded-full bg-accent-soft text-xs
-           font-bold text-accent;
+           font-bold text-on-accent-soft;
   }
   .page {
     @apply mx-auto w-full min-w-0 max-w-7xl px-4 py-6 md:px-6;
@@ -387,19 +462,24 @@
 
   /* --- yüzeyler --- */
   .card {
-    @apply rounded-xl border border-line bg-card p-5;
+    @apply rounded-2xl border border-line bg-card p-5;
     box-shadow: var(--ctp-shadow);
   }
   .card-tight {
-    @apply rounded-lg border border-line bg-card p-3;
+    @apply rounded-xl border border-line bg-card p-3;
     box-shadow: var(--ctp-shadow-sm);
   }
-  /* Kart başlığı: ikon karesi + başlık + sağda eylem */
+  /* Kart başlığı: ikon + başlık + sağda eylem. Mockup'ta panel kartlarının
+     başlığında kare değil düz glyph var; kare yalnızca sayaç ve liste
+     satırlarında kalır. */
   .card-head {
-    @apply mb-4 flex items-center gap-3;
+    @apply mb-4 flex items-center gap-2.5;
   }
   .card-head .h2 {
     @apply mb-0;
+  }
+  .card-icon {
+    @apply w-5 text-center text-base text-accent;
   }
   .chip {
     @apply inline-flex items-center gap-1.5 rounded-lg bg-bg px-2.5 py-1 text-sm;
@@ -407,7 +487,7 @@
 
   /* Boş durum: ikon karesi + başlık + ipucu + eylem */
   .empty {
-    @apply flex flex-col items-center gap-3 rounded-xl border border-line bg-card px-6 py-12 text-center;
+    @apply flex flex-col items-center gap-3 rounded-2xl border border-line bg-card px-6 py-12 text-center;
     box-shadow: var(--ctp-shadow);
   }
   .empty-title {
@@ -487,7 +567,7 @@
     --v: 100;
   }
   .hero {
-    @apply flex flex-wrap items-center gap-4 rounded-xl border border-line bg-card p-5;
+    @apply flex flex-wrap items-center gap-4 rounded-2xl border border-line bg-card p-5;
     box-shadow: var(--ctp-shadow);
   }
   .hero-text {
@@ -499,7 +579,7 @@
 
   /* Sayaç kutusu: ikon karesi + etiket + büyük sayı + alt not */
   .stat {
-    @apply rounded-xl border border-line bg-card p-4;
+    @apply rounded-2xl border border-line bg-card p-4;
     box-shadow: var(--ctp-shadow);
   }
   .stat-head {
@@ -512,7 +592,7 @@
     @apply mt-1 text-3xl leading-none font-bold tracking-tight tabular-nums;
   }
   .stat-foot {
-    @apply mt-2 text-xs text-fg-faint;
+    @apply mt-1.5 text-xs text-fg-faint;
   }
 
   /* Etkinlik akışı: ikon karesi + başlık/alt satır + sağda saat */
@@ -541,28 +621,51 @@
     @apply flex flex-col;
   }
 
-  /* Çubuk grafik: sütunlar eşit paylaşır, yükseklik `--v` yüzdesinden gelir */
+  /* Çubuk grafik. İki satırlı ızgara: üstte y ekseni + çizim alanı (aynı
+     yüksekliği paylaşırlar, böylece eksen yazıları kılavuz çizgileriyle
+     hizalı), altta gün etiketleri. Sütunlar `auto-cols-fr` ile eşit; yükseklik
+     `--v` yüzdesinden gelir (satır içi `style` CSP'de yasak). */
   .chart {
-    @apply flex min-h-44 flex-1 items-end gap-2;
+    @apply grid flex-1 gap-x-3;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-rows: minmax(10rem, 1fr) auto;
   }
-  .chart-col {
-    @apply flex h-full flex-1 flex-col items-center justify-end gap-1;
+  .chart-y {
+    @apply col-start-1 row-start-1 flex flex-col justify-between text-[0.65rem]
+           text-fg-faint tabular-nums;
   }
+  /* Kılavuz çizgileri yarım yükseklikte bantlar: tepe, orta ve taban, y
+     eksenindeki üç yazının tam karşılığı */
+  .chart-plot {
+    @apply col-start-2 row-start-1 grid auto-cols-fr grid-flow-col gap-2 border-b border-line;
+    /* `to bottom`: ilk bant ustten baslar, boylece tepedeki cizgi de cizilir
+       (`to top` ile en ustteki bant kenara denk gelip kirpiliyordu) */
+    background-image: repeating-linear-gradient(
+      to bottom,
+      var(--ctp-line) 0 1px,
+      transparent 1px 50%
+    );
+  }
+  /* `overflow-hidden`: yığının iki dilimi yuvarlama yüzünden bir adım taşabilir
+     (`dashboard::a_stacked_column_never_overflows_the_plot`) */
   .chart-stack {
-    @apply flex w-full max-w-10 flex-col-reverse justify-start gap-0.5;
-    height: 100%;
+    @apply flex h-full w-full max-w-10 flex-col-reverse justify-start gap-0.5
+           justify-self-center overflow-hidden;
   }
   /* `min-height` yok: sifir degerli gun icin sablon cubugu hic basmaz, 2px'lik
      hayalet cizgi "o gun bir sey oldu" gibi okunurdu */
   .bar {
-    @apply w-full rounded-sm bg-accent;
+    @apply w-full rounded-t-md bg-accent;
     height: calc(var(--v, 0) * 1%);
   }
   .bar-soft {
     background-color: var(--ctp-accent-dim);
   }
+  .chart-axis {
+    @apply col-start-2 row-start-2 grid auto-cols-fr grid-flow-col gap-2 pt-2;
+  }
   .chart-x {
-    @apply text-[0.65rem] whitespace-nowrap text-fg-faint;
+    @apply overflow-hidden text-center text-[0.65rem] text-ellipsis whitespace-nowrap text-fg-faint;
   }
   .legend {
     @apply mt-3 flex flex-wrap items-center gap-4 text-xs text-fg-faint;
@@ -572,6 +675,94 @@
   }
   .legend-dot-soft {
     background-color: var(--ctp-accent-dim);
+  }
+
+  /* --- halka grafik (personel dağılımı) ---
+     Dilimler SVG `stroke-dasharray`/`stroke-dashoffset` sunum öznitelikleriyle
+     çizilir: `conic-gradient` dilim açısını ancak satır içi `style` ile alırdı,
+     CSP onu yasaklıyor (ADR-088); SVG öznitelikleri `style-src`e takılmaz. */
+  .donut {
+    @apply grid shrink-0 place-items-center;
+  }
+  .donut > * {
+    grid-area: 1 / 1;
+  }
+  .donut-svg {
+    @apply size-36 -rotate-90;
+  }
+  .donut-ring {
+    fill: none;
+    stroke: var(--ctp-bg-hard);
+    stroke-width: 4;
+  }
+  .donut-seg {
+    fill: none;
+    stroke-width: 4;
+    stroke-linecap: butt;
+  }
+  .seg-accent {
+    stroke: var(--ctp-accent);
+  }
+  .seg-cyan {
+    stroke: var(--ctp-accent-dim);
+  }
+  .seg-info {
+    stroke: var(--ctp-info);
+  }
+  .seg-warn {
+    stroke: var(--ctp-warn);
+  }
+  .donut-center {
+    @apply text-center leading-tight;
+  }
+  .donut-total {
+    @apply text-2xl font-bold tabular-nums;
+  }
+  /* Halkanın yanındaki açıklama: renk noktası + ad + sayı + yüzde */
+  .donut-legend {
+    @apply min-w-0 flex-1 divide-y divide-line;
+  }
+  .donut-legend-row {
+    @apply flex items-center gap-2.5 py-2 text-sm;
+  }
+  .donut-legend-row .dot {
+    @apply size-2.5;
+  }
+  .dot-accent {
+    background-color: var(--ctp-accent);
+  }
+  .dot-cyan {
+    background-color: var(--ctp-accent-dim);
+  }
+  .dot-info {
+    background-color: var(--ctp-info);
+  }
+  .dot-warn {
+    background-color: var(--ctp-warn);
+  }
+
+  /* --- dikey çubuk dağılımı (departman bazlı) ---
+     Mockup'taki gibi sütunun üstünde sayı, altında ad. Yükseklik `--v`
+     yüzdesinden gelir (satır içi `style` CSP'de yasak). */
+  .vbars {
+    @apply grid auto-cols-fr grid-flow-col items-end gap-2;
+  }
+  .vbar {
+    @apply grid min-w-0 gap-1.5 text-center;
+    grid-template-rows: auto 8rem auto;
+  }
+  .vbar-value {
+    @apply text-xs font-bold tabular-nums;
+  }
+  .vbar-track {
+    @apply flex w-full items-end justify-center;
+  }
+  .vbar-fill {
+    @apply w-full max-w-10 rounded-t-md bg-accent;
+    height: calc(var(--v, 0) * 1%);
+  }
+  .vbar-name {
+    @apply overflow-hidden text-xs text-ellipsis whitespace-nowrap text-fg-faint;
   }
 
   /* Dağılım satırı: etiket + sayı + ölçek çubuğu + yüzde */
@@ -594,7 +785,7 @@
     @apply flex flex-col gap-1.5;
   }
   .qa-row {
-    @apply flex items-center gap-3 rounded-lg border border-line px-3 py-2.5 text-sm
+    @apply flex items-center gap-3 rounded-xl border border-line px-3 py-2.5 text-sm
            font-bold text-fg no-underline hover:bg-bg;
   }
   .qa-row .nav-chevron {
@@ -609,7 +800,7 @@
     box-shadow: var(--ctp-shadow-sm);
   }
   .btn-primary {
-    @apply border-transparent bg-accent text-on-accent hover:bg-accent hover:opacity-90;
+    @apply border-transparent bg-accent text-on-accent hover:bg-accent-hover;
   }
   .btn-ok {
     @apply border-transparent bg-ok text-on-accent hover:bg-ok hover:opacity-90;
@@ -667,7 +858,7 @@
 
   /* Vurgulu panel: müdahale / acil gibi dikkat isteyen bloklar */
   .panel {
-    @apply rounded-xl border border-line bg-card p-4;
+    @apply rounded-2xl border border-line bg-card p-4;
     box-shadow: var(--ctp-shadow);
   }
   /* Yumuşak tonlar tema başına token: Tailwind'in `/20` saydamlık değiştiricisi

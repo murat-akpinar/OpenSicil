@@ -146,6 +146,7 @@ pub fn routes() -> Router<AppState> {
         .merge(crate::mapping_web::routes())
         .merge(crate::upcoming::routes())
         .merge(crate::reconcile::routes())
+        .merge(crate::reports::routes())
         .merge(crate::search::routes())
         .merge(crate::first_password::routes())
 }
@@ -706,11 +707,13 @@ mod tests {
         assert_eq!(stored, "en", "tercih oturum satırında");
 
         let body = home(test_app(pool.clone()), cookie).await;
+        // Kenar cubugu etiketleri (ADR-096): "Yaklasan bitisler" /reports altina
+        // tasindi, menude artik Personel ve Raporlar var
         assert!(
-            body.contains("Home") && body.contains("Upcoming ends"),
+            body.contains("Home") && body.contains("Personnel"),
             "{body}"
         );
-        assert!(!body.contains("Yaklaşan bitişler"), "{body}");
+        assert!(!body.contains("Personel"), "{body}");
         assert!(
             body.contains("<html lang=\"en\">") && body.contains(">TR<"),
             "{body}"

@@ -29,7 +29,7 @@ pub struct Notice {
 }
 
 impl Notice {
-    fn err(text: String) -> Notice {
+    pub fn err(text: String) -> Notice {
         Notice {
             error: text,
             ..Notice::default()
@@ -66,10 +66,10 @@ pub fn routes() -> Router<AppState> {
 }
 
 // Tekrar eden alanlar (entitlement) ve hedef basina ayar alanlari (pa.<hedef> ...).
-struct Fields(Vec<(String, String)>);
+pub(crate) struct Fields(pub Vec<(String, String)>);
 
 impl Fields {
-    fn get(&self, key: &str) -> &str {
+    pub(crate) fn get(&self, key: &str) -> &str {
         self.0
             .iter()
             .find(|(k, _)| k == key)
@@ -77,7 +77,7 @@ impl Fields {
             .unwrap_or("")
     }
 
-    fn all_i64(&self, key: &str) -> Vec<i64> {
+    pub(crate) fn all_i64(&self, key: &str) -> Vec<i64> {
         self.0
             .iter()
             .filter(|(k, _)| k == key)

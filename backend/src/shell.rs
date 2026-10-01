@@ -27,6 +27,9 @@ pub struct Shell {
     pub version: &'static str,
     /// Arama kutusunun doldurulmus hali; arama disindaki sayfalarda bos
     pub query: String,
+    /// Kenar cubugundaki "Ayarlar" yalnizca `admin`e gorunur: sayfanin kendisi
+    /// zaten reddediyor, menude cikmasi yetkisiz operatore 403 vaat etmek olurdu
+    pub is_admin: bool,
     authority: Option<String>,
 }
 
@@ -41,6 +44,9 @@ impl Shell {
             initials: initials(username),
             version: env!("CARGO_PKG_VERSION"),
             query: String::new(),
+            is_admin: authorities
+                .iter()
+                .any(|a| a == crate::oidc::ADMIN_AUTHORITY),
             authority: top_authority(authorities),
         }
     }
@@ -128,5 +134,15 @@ mod tests {
 
         let none = Shell::from_parts("Murat Akpinar", &[]);
         assert_eq!(none.authority(&Lang::Tr), "");
+    }
+
+    #[test]
+    fn only_admin_sees_the_settings_link() {
+        // Yapilandirma sayfasi `admin` disindakini 403 ile reddediyor; menude
+        // gostermek olmayan bir kapiyi isaret etmek olurdu.
+        assert!(Shell::from_parts("a", &["admin".to_string()]).is_admin);
+        assert!(!Shell::from_parts("a", &["role_admin".to_string()]).is_admin);
+        assert!(!Shell::from_parts("a", &["hr".to_string(), "auditor".to_string()]).is_admin);
+        assert!(!Shell::from_parts("a", &[]).is_admin);
     }
 }

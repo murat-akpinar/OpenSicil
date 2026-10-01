@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}{{ lang.t("nav.identities") }} — OpenSicil{% endblock %}
+{% block content %}
+{# Personel listesi: ust bardaki arama hizli onizleme, tam liste burada ve sayfali #}
+<div class="page-head">
+  <div>
+    <h1 class="h1">{{ lang.t("nav.identities") }}</h1>
+    <p class="sub">{{ lang.t1("identities.total", total) }}</p>
+  </div>
+  <div class="flex flex-wrap items-center gap-2">
+    <form class="search w-full sm:w-72" method="get" action="/identities" role="search">
+      <i class="ico ico-search" aria-hidden="true"></i>
+      <input class="input" type="search" name="q" value="{{ q }}" placeholder="{{ lang.t("identities.search") }}" aria-label="{{ lang.t("identities.search") }}">
+    </form>
+    {% if can_register %}
+    <a class="btn btn-primary" href="/identities/new"><i class="ico ico-plus" aria-hidden="true"></i>{{ lang.t("home.new_identity") }}</a>
+    {% endif %}
+  </div>
+</div>
+
+{% if rows.is_empty() %}
+<div class="empty">
+  <span class="ico-tile ico-tile-lg"><i class="ico ico-users" aria-hidden="true"></i></span>
+  <p class="empty-title">{% if q.is_empty() %}{{ lang.t("home.empty_title") }}{% else %}{{ lang.t("identities.no_match") }}{% endif %}</p>
+  <p class="empty-hint">{% if q.is_empty() %}{{ lang.t("home.empty_hint") }}{% else %}{{ lang.t("identities.no_match_hint") }}{% endif %}</p>
+  {% if can_register && q.is_empty() %}
+  <a class="btn btn-primary" href="/identities/new"><i class="ico ico-plus" aria-hidden="true"></i>{{ lang.t("home.new_identity") }}</a>
+  {% endif %}
+</div>
+{% else %}
+<div class="card overflow-x-auto p-0">
+  <table class="tbl">
+    <thead>
+      <tr>
+        <th>{{ lang.t("field.full_name") }}</th>
+        <th>{{ lang.t("field.employee_number") }}</th>
+        <th>{{ lang.t("field.username") }}</th>
+        <th>{{ lang.t("field.department") }}</th>
+        <th>{{ lang.t("field.state") }}</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for i in rows %}
+      <tr>
+        <td>
+          <span class="flex items-center gap-2.5">
+            <span class="avatar" aria-hidden="true">{{ i.initials }}</span>
+            <a class="link" href="/identities/{{ i.id }}">{{ i.name }}</a>
+          </span>
+        </td>
+        <td class="muted whitespace-nowrap">{{ i.employee_number }}</td>
+        <td class="muted">{% if i.username.is_empty() %}—{% else %}{{ i.username }}{% endif %}</td>
+        <td class="muted">{% if i.department.is_empty() %}—{% else %}{{ i.department }}{% endif %}</td>
+        <td><span class="badge badge-{{ i.state_kind }}">{{ lang.key("state", i.state) }}</span></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{# Sayfalama GET formu: aramayi gizli alanda tasir, boylece sorgunun URL
+   kacisi tarayiciya kalir (sablonda urlencode filtresi yok) #}
+<div class="mt-4 flex flex-wrap items-center justify-between gap-3">
+  <p class="meta">{{ range }}</p>
+  <form method="get" action="/identities" class="flex items-center gap-2">
+    <input type="hidden" name="q" value="{{ q }}">
+    {% match prev_offset %}{% when Some with (o) %}
+    <button class="btn btn-sm" type="submit" name="offset" value="{{ o }}">{{ lang.t("identities.prev") }}</button>
+    {% when None %}{% endmatch %}
+    {% match next_offset %}{% when Some with (o) %}
+    <button class="btn btn-sm" type="submit" name="offset" value="{{ o }}">{{ lang.t("identities.next") }}</button>
+    {% when None %}{% endmatch %}
+  </form>
+</div>
+{% endif %}
+{% endblock %}

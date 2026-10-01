@@ -21,8 +21,43 @@ pub struct Dashboard {
     pub totals: Totals,
     pub activity: Vec<Event>,
     pub trend: Vec<TrendDay>,
+    /// Grafigin y ekseninin tepesi: en kalabalik gunun toplami. Sablon ekseni
+    /// bundan ve yarisindan yazar — cubugun yaninda sayi olmadan yukseklik
+    /// "iki mi iki yuz mu" sorusunu cevaplamiyordu.
+    pub trend_peak: i64,
+    /// Ortadaki eksen yazısı; zirve tek sayıysa boş. Tam sayı bölmesi tek
+    /// zirvede yalan söylüyordu: çizgi 1,5'ta dururken yazı "1" oluyordu.
+    pub trend_mid: String,
     pub departments: Vec<DistRow>,
+    /// Calisma tipine gore personel dagilimi (halka grafik)
+    pub employment: Donut,
 }
+
+/// Halka grafik: dilimler SVG `stroke-dasharray` ile cizilir. `conic-gradient`
+/// dilim acisini ancak satir ici `style` ya da yuzde basina ayri bir sinifla
+/// alabilirdi (CSP satir ici stili yasakliyor, ADR-088); SVG sunum oznitelikleri
+/// `style-src`e takilmaz ve tam deger tasir.
+pub struct Donut {
+    pub total: i64,
+    pub slices: Vec<Slice>,
+}
+
+pub struct Slice {
+    /// Veritabani anahtari; ekran karsiligi `lang.key("employment", …)`
+    pub key: String,
+    pub count: i64,
+    pub pct: i64,
+    /// `stroke-dasharray`: dilim uzunlugu + kalani (cember 100 birime ayarli)
+    pub dash: String,
+    /// `stroke-dashoffset`: dilim 12 yonunden baslasin diye 25'ten geri sayilir
+    pub offset: i64,
+    /// Dilim rengi sinifi (`.seg-<ton>`)
+    pub tone: &'static str,
+}
+
+/// Dilim renkleri, paletin grafik sirasi (mavi, turkuaz, mor, turuncu).
+/// `employment_type` dort degerle sinirli (0004_identity_model.sql), liste yeter.
+const SLICE_TONES: [&str; 4] = ["accent", "cyan", "info", "warn"];
 
 pub struct Totals {
     pub identities: i64,
@@ -42,6 +77,9 @@ pub struct Event {
     pub person: String,
     pub time: String,
     pub icon: &'static str,
+    /// Ikon karesinin tonu (`.ico-tile-<ton>`): akis tek renk kare dizisiyken
+    /// olay turleri birbirinden ayirt edilemiyordu
+    pub tone: &'static str,
 }
 
 pub struct TrendDay {
@@ -62,12 +100,20 @@ pub struct DistRow {
 
 pub async fn load(pool: &PgPool, time_zone: &str) -> Result<Dashboard, sqlx::Error> {
     let (totals, today) = totals(pool, time_zone).await?;
+    let (trend, trend_peak) = trend(pool, time_zone).await?;
     Ok(Dashboard {
         today,
         totals,
         activity: activity(pool, time_zone).await?,
-        trend: trend(pool, time_zone).await?,
+        trend,
+        trend_mid: if trend_peak >= 2 && trend_peak % 2 == 0 {
+            (trend_peak / 2).to_string()
+        } else {
+            String::new()
+        },
+        trend_peak,
         departments: departments(pool).await?,
+        employment: employment(pool).await?,
     })
 }
 
@@ -123,19 +169,24 @@ async fn activity(pool: &PgPool, time_zone: &str) -> Result<Vec<Event>, sqlx::Er
     .await?;
     Ok(rows
         .into_iter()
-        .map(|(event_type, actor, person, time)| Event {
-            icon: icon_for(&event_type),
-            event_type,
-            actor: actor.unwrap_or_default(),
-            person: person.unwrap_or_default(),
-            time,
+        .map(|(event_type, actor, person, time)| {
+            let (icon, tone) = glyph_for(&event_type);
+            Event {
+                icon,
+                tone,
+                event_type,
+                actor: actor.unwrap_or_default(),
+                person: person.unwrap_or_default(),
+                time,
+            }
         })
         .collect())
 }
 
 /// Eğilim: son yedi gun, gun basina kayit ve ayrilis sayisi. Gunler
 /// `generate_series` ile uretilir, boylece olaysiz gun de sutun olarak cizilir.
-async fn trend(pool: &PgPool, time_zone: &str) -> Result<Vec<TrendDay>, sqlx::Error> {
+/// Doner: gunler + y ekseninin tepesi.
+async fn trend(pool: &PgPool, time_zone: &str) -> Result<(Vec<TrendDay>, i64), sqlx::Error> {
     let rows: Vec<(String, i64, i64)> = sqlx::query_as(
         "SELECT to_char(d.day, 'DD.MM'), \
                 count(a.id) FILTER (WHERE a.event_type = $2), \
@@ -154,13 +205,15 @@ async fn trend(pool: &PgPool, time_zone: &str) -> Result<Vec<TrendDay>, sqlx::Er
     .bind(TREND_DAYS)
     .fetch_all(pool)
     .await?;
+    // Iki seri ayni sutunda ust uste yigiliyor: olcek gunluk *toplamin* zirvesi
+    // olmali. Serilerin ayri ayri zirvesine gore yuzdelenmesi iki dolu gunde
+    // %100 + %100 ediyor ve sutun kartin disina tasiyordu.
     let peak = rows
         .iter()
-        .map(|(_, joined, departed)| joined.max(departed))
+        .map(|(_, joined, departed)| joined + departed)
         .max()
-        .copied()
         .unwrap_or(0);
-    Ok(rows
+    let days = rows
         .into_iter()
         .map(|(label, joined, departed)| TrendDay {
             label,
@@ -169,7 +222,8 @@ async fn trend(pool: &PgPool, time_zone: &str) -> Result<Vec<TrendDay>, sqlx::Er
             joined_pct: percent(joined, peak),
             departed_pct: percent(departed, peak),
         })
-        .collect())
+        .collect();
+    Ok((days, peak))
 }
 
 /// Departman kirilimi: en kalabalik bes departman (ADR-076 madde 3).
@@ -194,6 +248,61 @@ async fn departments(pool: &PgPool) -> Result<Vec<DistRow>, sqlx::Error> {
         .collect())
 }
 
+/// Personel dagilimi: calisma tipine gore. Dilim yuzdeleri burada hesaplanir ve
+/// **son dilim kalani yutar** — yuvarlama artigi halkada bosluk birakmasin.
+async fn employment(pool: &PgPool) -> Result<Donut, sqlx::Error> {
+    let rows: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT employment_type, count(*) FROM identities WHERE deleted_at IS NULL \
+         GROUP BY employment_type ORDER BY count(*) DESC, employment_type",
+    )
+    .fetch_all(pool)
+    .await?;
+    let total: i64 = rows.iter().map(|(_, count)| *count).sum();
+    Ok(Donut {
+        slices: slices(rows, total),
+        total,
+    })
+}
+
+/// Halkanin dilimleri: yuzde, `stroke-dasharray` ve `stroke-dashoffset`.
+/// Saf — DB olmadan sinanir.
+fn slices(rows: Vec<(String, i64)>, total: i64) -> Vec<Slice> {
+    let last = rows.len().saturating_sub(1);
+    let mut cumulative = 0_i64;
+    rows.into_iter()
+        .enumerate()
+        .map(|(i, (key, count))| {
+            // Son dilim kalani yutar: yuvarlama artigi halkada bosluk birakmasin
+            let pct = if i == last {
+                100 - cumulative
+            } else {
+                exact_percent(count, total)
+            };
+            // 25: cember 100 birim ve 3 yonunden basliyor; dilimleri 12 yonune
+            // kaydirmak icin baslangictan ceyrek tur geri alinir
+            let offset = 25 - cumulative;
+            cumulative += pct;
+            Slice {
+                key,
+                count,
+                pct,
+                dash: format!("{pct} {}", 100 - pct),
+                offset,
+                tone: SLICE_TONES[i % SLICE_TONES.len()],
+            }
+        })
+        .collect()
+}
+
+/// Yuvarlanmis yuzde (halka dilimi); `.v-NN` sinifina baglanmadigi icin bese
+/// yuvarlanmaz, SVG `stroke-dasharray` tam degeri tasir.
+fn exact_percent(value: i64, total: i64) -> i64 {
+    if value <= 0 || total <= 0 {
+        return 0;
+    }
+    (value * 100 + total / 2) / total
+}
+
 /// Zirveye gore yuzde, en yakin bese yuvarlanmis: sablon `.v-NN` sinifini
 /// secebilsin diye (satir ici `style` CSP'de yasak). Sifir olmayan deger hic
 /// gorunmeyecek kadar kisa cizilmesin diye en az 5 doner.
@@ -208,24 +317,28 @@ fn percent(value: i64, peak: i64) -> i64 {
 }
 
 /// Olay turunun ikonu; bilinmeyen tur notr ikon alir (ekran bozulmaz).
-fn icon_for(event_type: &str) -> &'static str {
+/// Olay turunun ikonu ve ikon karesinin tonu (`.ico-tile-<ton>`): giris yesil,
+/// ayrilis kirmizi, bekleme sarisi, tanim degisikligi turkuaz, gerisi vurgu.
+fn glyph_for(event_type: &str) -> (&'static str, &'static str) {
     match event_type {
-        audit::IDENTITY_CREATED => "ico-user-plus",
-        audit::IDENTITY_CHANGED | audit::TARGET_CHANGED | audit::MAPPING_CHANGED => "ico-refresh",
-        audit::IDENTITY_ROLE_ASSIGNED | audit::IDENTITY_ROLE_REMOVED | audit::ROLE_CHANGED => {
-            "ico-key"
+        audit::IDENTITY_CREATED => ("ico-user-plus", "ok"),
+        audit::IDENTITY_CHANGED | audit::TARGET_CHANGED | audit::MAPPING_CHANGED => {
+            ("ico-refresh", "accent")
         }
-        audit::DEPARTMENT_CHANGED => "ico-sitemap",
+        audit::IDENTITY_ROLE_ASSIGNED | audit::IDENTITY_ROLE_REMOVED | audit::ROLE_CHANGED => {
+            ("ico-key", "info")
+        }
+        audit::DEPARTMENT_CHANGED => ("ico-sitemap", "info"),
         audit::IDENTITY_DEPARTURE_SET
         | audit::IDENTITY_EMERGENCY_DEPARTURE
         | audit::IDENTITY_DEPARTURE_REVERTED
-        | audit::IDENTITY_CANCELLED => "ico-logout",
-        audit::IDENTITY_SUSPENDED | audit::IDENTITY_SUSPENSION_LIFTED => "ico-clock",
-        audit::FIRST_PASSWORD_REQUESTED | audit::FIRST_PASSWORD_SHOWN => "ico-lock",
-        audit::OPERATOR_LOGIN | audit::OPERATOR_REJECTED => "ico-sign-in",
-        audit::SETTINGS_CHANGED | audit::BOOTSTRAP_PASSWORD_CHANGED => "ico-cog",
-        audit::USED_NAME_RELEASED | audit::IDENTITY_NAME_REQUESTED => "ico-tag",
-        _ => "ico-inbox",
+        | audit::IDENTITY_CANCELLED => ("ico-logout", "err"),
+        audit::IDENTITY_SUSPENDED | audit::IDENTITY_SUSPENSION_LIFTED => ("ico-clock", "warn"),
+        audit::FIRST_PASSWORD_REQUESTED | audit::FIRST_PASSWORD_SHOWN => ("ico-lock", "warn"),
+        audit::OPERATOR_LOGIN | audit::OPERATOR_REJECTED => ("ico-sign-in", "accent"),
+        audit::SETTINGS_CHANGED | audit::BOOTSTRAP_PASSWORD_CHANGED => ("ico-cog", "accent"),
+        audit::USED_NAME_RELEASED | audit::IDENTITY_NAME_REQUESTED => ("ico-tag", "info"),
+        _ => ("ico-inbox", "accent"),
     }
 }
 // --- END FEATURE: dashboard ---
@@ -263,6 +376,20 @@ mod tests {
                 let pct = percent(value, peak);
                 assert_eq!(pct % 5, 0, "{value}/{peak} -> {pct}");
                 assert!((0..=100).contains(&pct), "{value}/{peak} -> {pct}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_stacked_column_never_overflows_the_plot() {
+        // Iki seri ayni sutunda yigiliyor ve olcek gunluk toplamin zirvesi.
+        // Yuvarlama ve "gorunur kalsin" tabani birlikte en fazla bir adim
+        // tasirabilir; `.chart-stack` bu yuzden `overflow-hidden`.
+        for peak in 1..60i64 {
+            for joined in 0..=peak {
+                let departed = peak - joined;
+                let total = percent(joined, peak) + percent(departed, peak);
+                assert!(total <= 105, "{joined}+{departed}/{peak} -> {total}");
             }
         }
     }
@@ -349,8 +476,78 @@ mod tests {
 
     #[test]
     fn known_events_get_their_own_icon_and_unknown_ones_fall_back() {
-        assert_eq!(icon_for(audit::IDENTITY_CREATED), "ico-user-plus");
-        assert_eq!(icon_for(audit::IDENTITY_EMERGENCY_DEPARTURE), "ico-logout");
-        assert_eq!(icon_for("bilinmeyen.olay"), "ico-inbox");
+        assert_eq!(glyph_for(audit::IDENTITY_CREATED), ("ico-user-plus", "ok"));
+        assert_eq!(
+            glyph_for(audit::IDENTITY_EMERGENCY_DEPARTURE),
+            ("ico-logout", "err")
+        );
+        assert_eq!(glyph_for("bilinmeyen.olay"), ("ico-inbox", "accent"));
+    }
+
+    #[test]
+    fn donut_slices_close_the_ring_and_start_where_the_previous_one_ended() {
+        let rows = vec![
+            ("permanent".to_string(), 312_i64),
+            ("contract".to_string(), 128),
+            ("intern".to_string(), 68),
+            ("outsourced".to_string(), 39),
+        ];
+        let total: i64 = rows.iter().map(|(_, c)| *c).sum();
+        let slices = slices(rows, total);
+
+        // Yuzdeler tam 100 eder: son dilim yuvarlama artigini yutar
+        assert_eq!(slices.iter().map(|s| s.pct).sum::<i64>(), 100);
+        assert_eq!(slices[0].pct, 57);
+        // Her dilim bir oncekinin bittigi yerden baslar (offset = 25 - onceki toplam)
+        assert_eq!(slices[0].offset, 25);
+        assert_eq!(slices[1].offset, 25 - 57);
+        assert_eq!(slices[2].offset, 25 - 57 - 23);
+        // dasharray dilimi + kalani; cember 100 birim
+        assert_eq!(slices[0].dash, "57 43");
+        // Renkler paletin grafik sirasinda
+        assert_eq!(slices[0].tone, "accent");
+        assert_eq!(slices[3].tone, "warn");
+    }
+
+    #[test]
+    fn a_single_slice_fills_the_ring_and_no_data_draws_nothing() {
+        let one = slices(vec![("permanent".to_string(), 7)], 7);
+        assert_eq!(one[0].pct, 100);
+        assert_eq!(one[0].dash, "100 0");
+        assert!(slices(Vec::new(), 0).is_empty());
+    }
+
+    #[test]
+    fn every_slice_tone_has_a_css_class() {
+        // Sablon `seg-{{ tone }}` ve `dot-{{ tone }}` yaziyor; ikisi de app.css'te olmali
+        let css = include_str!("../../frontend/assets/app.css");
+        for tone in SLICE_TONES {
+            assert!(
+                css.contains(&format!(".seg-{tone} {{")),
+                "eksik .seg-{tone}"
+            );
+            assert!(
+                css.contains(&format!(".dot-{tone} {{")),
+                "eksik .dot-{tone}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_tone_has_a_css_class() {
+        // Sablon `ico-tile-{{ tone }}` yaziyor; app.css yalnizca bu bes tonu
+        // taniyor. Araya baska bir ad sizarsa ikon karesi renksiz kalir.
+        let css = include_str!("../../frontend/assets/app.css");
+        for tone in ["accent", "ok", "warn", "err", "info"] {
+            assert!(
+                css.contains(&format!(".ico-tile-{tone} {{")),
+                "app.css'te .ico-tile-{tone} yok"
+            );
+            // Etkinlik akisi dolu tonu kullanir (mockup: duz renk + beyaz glyph)
+            assert!(
+                css.contains(&format!(".ico-solid-{tone} {{")),
+                "app.css'te .ico-solid-{tone} yok"
+            );
+        }
     }
 }

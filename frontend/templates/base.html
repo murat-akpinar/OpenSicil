@@ -16,16 +16,21 @@
     {% block nav %}
     <aside class="side">
       <a class="side-brand" href="/"><span class="brand-mark"><i class="ico ico-shield" aria-hidden="true"></i></span>OpenSicil</a>
+      {# Kullanilmis adlar ve yaklasan bitisler /reports altinda; menu mockup'taki
+         gibi kisa kalir. Ayarlar yalnizca `admin`e gorunur — sayfa zaten reddediyor. #}
       <nav class="side-nav">
         <a class="nav-link" href="/"><i class="ico ico-home" aria-hidden="true"></i>{{ lang.t("nav.home") }}<i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
-        <a class="nav-link" href="/upcoming"><i class="ico ico-calendar" aria-hidden="true"></i>{{ lang.t("nav.upcoming") }}<i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
+        <a class="nav-link" href="/identities"><i class="ico ico-users" aria-hidden="true"></i>{{ lang.t("nav.identities") }}<i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
         <a class="nav-link" href="/roles"><i class="ico ico-key" aria-hidden="true"></i>{{ lang.t("nav.roles") }}<i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
         <a class="nav-link" href="/departments"><i class="ico ico-sitemap" aria-hidden="true"></i>{{ lang.t("nav.departments") }}<i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
+        <a class="nav-link" href="/reports"><i class="ico ico-chart" aria-hidden="true"></i>{{ lang.t("nav.reports") }}<i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
         <a class="nav-link" href="/targets"><i class="ico ico-server" aria-hidden="true"></i>{{ lang.t("nav.targets") }}<i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
-        <a class="nav-link" href="/used-names"><i class="ico ico-tag" aria-hidden="true"></i>{{ lang.t("nav.used_names") }}<i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
+        {% if shell.is_admin %}
+        <a class="nav-link" href="/config"><i class="ico ico-cog" aria-hidden="true"></i>{{ lang.t("nav.settings") }}<i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
+        {% endif %}
       </nav>
       <div class="side-foot">
-        <p class="text-sm font-bold">OpenSicil</p>
+        <p class="side-status"><span class="dot dot-ok" aria-hidden="true"></span>{{ lang.t("shell.system_active") }}</p>
         <p class="meta">v{{ shell.version }}</p>
       </div>
     </aside>

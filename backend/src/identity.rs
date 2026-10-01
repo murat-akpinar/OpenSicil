@@ -20,6 +20,9 @@ const E164_MAX_DIGITS: usize = 15;
 const INTERVENTION_PREFIX: &str = "müdahale gerekiyor: ";
 const INTERVENTION_STATUS: &str = "needs_intervention";
 const RECENT_LIMIT: i64 = 50;
+/// Ana sayfadaki "son kimlikler" kutusu: panelin bir karti, liste degil.
+/// Tam liste `/identities`te ve sayfali — panel 50 satirla uzayip gidiyordu.
+const HOME_RECENT_LIMIT: i64 = 8;
 const EVENT_LIMIT: i64 = 20;
 
 #[derive(Deserialize, Default, Clone)]
@@ -292,6 +295,15 @@ pub async fn starts_by_today(
         .await
 }
 
+/// Kurulum saat diliminde bugun, `YYYY-MM-DD` (ADR-039). Tarih girdisinin
+/// varsayilani; sunucunun yerel saatiyle degil kurumun saatiyle doldurulur.
+pub async fn today(pool: &PgPool, time_zone: &str) -> Result<String, sqlx::Error> {
+    sqlx::query_scalar("SELECT to_char((now() AT TIME ZONE $1)::date, 'YYYY-MM-DD')")
+        .bind(time_zone)
+        .fetch_one(pool)
+        .await
+}
+
 // Kimlik no yokken ad-soyad esleşmesi uyaridir, engel degil (docs/03).
 // Katlama DB yerel ayarindan bagimsiz: Turkce buyuk harfler (I/İ dahil) once
 // translate ile kucuge indirilir, lower() kalan ASCII'yi halleder.
@@ -411,12 +423,39 @@ pub struct Listed {
     /// Listedeki bas harf avatari (ADR-096 madde 3); kabugun cipiyle ayni yardimci
     pub initials: String,
     pub employee_number: String,
+    /// Worker uretene kadar bos (ADR-015)
+    pub username: String,
+    /// Departman adi; atanmamissa bos
+    pub department: String,
     pub state: &'static str,
     pub state_kind: &'static str,
 }
 
-/// (id, ad soyad, sicil) satirlari — liste sorgularinin ortak cikti sirasi
-type ListedRow = (i64, String, Option<String>);
+/// (id, ad soyad, sicil, kullanici adi, departman) — liste sorgularinin ortak
+/// cikti sirasi; `with_state` bu sirayi bekler
+type ListedRow = (i64, String, Option<String>, Option<String>, Option<String>);
+
+/// Liste sorgularinin ortak SELECT + JOIN'i; `$tail` derleme aninda eklenir
+/// (`concat!`, calisma aninda birlestirme yok — `timeline_sql!` ile ayni kalip).
+/// Kolon sirasi `ListedRow` ile birebir.
+macro_rules! listed_select {
+    () => {
+        "SELECT i.id, i.given_name || ' ' || i.surname, i.employee_number, \
+         i.username, d.name \
+         FROM identities i LEFT JOIN departments d ON d.id = i.department_id "
+    };
+}
+
+/// Ad, kullanici adi ve sicilde arama; kimlik numarasi kapsam disi (ADR-010).
+/// Bos sorgu `%%` olur ve `given_name` NOT NULL oldugu icin her satiri getirir.
+macro_rules! listed_where_match {
+    () => {
+        "i.deleted_at IS NULL AND ( \
+               i.given_name ILIKE $1 ESCAPE '\\' OR i.surname ILIKE $1 ESCAPE '\\' \
+            OR i.given_name || ' ' || i.surname ILIKE $1 ESCAPE '\\' \
+            OR i.username ILIKE $1 ESCAPE '\\' OR i.employee_number ILIKE $1 ESCAPE '\\')"
+    };
+}
 
 // ponytail: kimlik basina bir durum sorgusu, listeler 50 ile sinirli; tek
 // sorguya almak `lifecycle_state`i SQL'e kopyalamak demek (ADR-038 tek yer).
@@ -426,13 +465,15 @@ async fn with_state(
     rows: Vec<ListedRow>,
 ) -> Result<Vec<Listed>, sqlx::Error> {
     let mut listed = Vec::with_capacity(rows.len());
-    for (id, name, employee_number) in rows {
+    for (id, name, employee_number, username, department) in rows {
         let state = load_state(pool, time_zone, id).await?;
         listed.push(Listed {
             id,
             initials: crate::shell::initials(&name),
             name,
             employee_number: employee_number.unwrap_or_default(),
+            username: username.unwrap_or_default(),
+            department: department.unwrap_or_default(),
             state: state.map(state_key).unwrap_or(""),
             state_kind: state.map(state_kind).unwrap_or("muted"),
         });
@@ -441,11 +482,11 @@ async fn with_state(
 }
 
 pub async fn recent(pool: &PgPool, time_zone: &str) -> Result<Vec<Listed>, sqlx::Error> {
-    let rows: Vec<ListedRow> = sqlx::query_as(
-        "SELECT id, given_name || ' ' || surname, employee_number FROM identities \
-         WHERE deleted_at IS NULL ORDER BY created_at DESC, id DESC LIMIT $1",
-    )
-    .bind(RECENT_LIMIT)
+    let rows: Vec<ListedRow> = sqlx::query_as(concat!(
+        listed_select!(),
+        "WHERE i.deleted_at IS NULL ORDER BY i.created_at DESC, i.id DESC LIMIT $1"
+    ))
+    .bind(HOME_RECENT_LIMIT)
     .fetch_all(pool)
     .await?;
     with_state(pool, time_zone, rows).await
@@ -459,19 +500,49 @@ pub async fn search(
     time_zone: &str,
     query: &str,
 ) -> Result<Vec<Listed>, sqlx::Error> {
-    let rows: Vec<ListedRow> = sqlx::query_as(
-        "SELECT id, given_name || ' ' || surname, employee_number FROM identities \
-         WHERE deleted_at IS NULL AND ( \
-               given_name ILIKE $1 ESCAPE '\\' OR surname ILIKE $1 ESCAPE '\\' \
-            OR given_name || ' ' || surname ILIKE $1 ESCAPE '\\' \
-            OR username ILIKE $1 ESCAPE '\\' OR employee_number ILIKE $1 ESCAPE '\\') \
-         ORDER BY surname, given_name, id LIMIT $2",
-    )
+    let rows: Vec<ListedRow> = sqlx::query_as(concat!(
+        listed_select!(),
+        "WHERE ",
+        listed_where_match!(),
+        " ORDER BY i.surname, i.given_name, i.id LIMIT $2"
+    ))
     .bind(like_contains(query))
     .bind(RECENT_LIMIT)
     .fetch_all(pool)
     .await?;
     with_state(pool, time_zone, rows).await
+}
+
+/// Personel sayfasinin bir sayfasi (`/identities`): toplam sayi + satirlar.
+/// Ust bardaki arama kutusu en fazla `RECENT_LIMIT` satir dondururken burada
+/// liste sayfalanir — 20.000 kimlikte (N-03) tek sayfada basmak olmazdi.
+pub async fn page(
+    pool: &PgPool,
+    time_zone: &str,
+    query: &str,
+    offset: i64,
+    limit: i64,
+) -> Result<(Vec<Listed>, i64), sqlx::Error> {
+    let pattern = like_contains(query);
+    let total: i64 = sqlx::query_scalar(concat!(
+        "SELECT count(*) FROM identities i WHERE ",
+        listed_where_match!()
+    ))
+    .bind(&pattern)
+    .fetch_one(pool)
+    .await?;
+    let rows: Vec<ListedRow> = sqlx::query_as(concat!(
+        listed_select!(),
+        "WHERE ",
+        listed_where_match!(),
+        " ORDER BY i.surname, i.given_name, i.id LIMIT $2 OFFSET $3"
+    ))
+    .bind(&pattern)
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(pool)
+    .await?;
+    Ok((with_state(pool, time_zone, rows).await?, total))
 }
 
 /// `%ara%` kalibi; kullanicinin yazdigi `%` ve `_` joker degil harf sayilir.
@@ -1464,6 +1535,43 @@ mod tests {
             diff_text(Lang::En, Active, true, Some("pending")),
             "target has pending, expected active"
         );
+    }
+
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn the_personnel_page_searches_paginates_and_reports_the_total() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        crate::test_support::seed_two_identities(&pool).await;
+        let tz = "Europe/Istanbul";
+
+        // Ilk sayfa: iki kisi, departman adi dolu, toplam dogru
+        let (rows, total) = page(&pool, tz, "", 0, 50).await.unwrap();
+        assert_eq!(total, 2);
+        assert_eq!(rows.len(), 2);
+        // Siralama soyada gore: Kaya, Yilmaz
+        assert_eq!(rows[0].name, "Ali Kaya");
+        assert_eq!(rows[0].department, "Test Birimi");
+        assert_eq!(rows[0].username, "", "adi worker uretir, kayitta bos");
+        assert_eq!(rows[0].state, "active");
+
+        // Sayfa boyu: ikinci sayfa bir satir, toplam degismez
+        let (first, total) = page(&pool, tz, "", 0, 1).await.unwrap();
+        assert_eq!((first.len(), total), (1, 2));
+        let (second, _) = page(&pool, tz, "", 1, 1).await.unwrap();
+        assert_eq!(second[0].name, "Ayşe Yılmaz");
+
+        // Arama hem satirlari hem toplami daraltir
+        let (hit, total) = page(&pool, tz, "yılmaz", 0, 50).await.unwrap();
+        assert_eq!((hit.len(), total), (1, 1));
+        assert_eq!(hit[0].name, "Ayşe Yılmaz");
+
+        // Joker karakter harf sayilir: `%` kimseyi getirmez
+        let (none, total) = page(&pool, tz, "%", 0, 50).await.unwrap();
+        assert!(none.is_empty());
+        assert_eq!(total, 0);
+
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
     }
 
     #[tokio::test]

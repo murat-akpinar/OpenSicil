@@ -4,7 +4,7 @@
 // ilk parola ister (ADR-019/085, first_password.rs).
 
 use askama::Template;
-use axum::extract::{Form, FromRequestParts, Path, State};
+use axum::extract::{Form, FromRequestParts, Path, Query, State};
 use axum::http::request::Parts;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect, Response};
@@ -67,7 +67,7 @@ pub(crate) fn internal(what: &str, e: impl std::fmt::Display) -> Response {
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/identities/new", get(new_form))
-        .route("/identities", post(create))
+        .route("/identities", get(list_page).post(create))
         .route("/identities/{id}", get(show))
         .route("/identities/{id}/jobs/{job_id}/retry", post(retry))
         .route("/identities/{id}/names", post(request_names))
@@ -81,6 +81,67 @@ pub fn routes() -> Router<AppState> {
         .route("/identities/{id}/suspension", post(suspend))
         .route("/identities/{id}/suspension/lift", post(lift))
         .route("/identities/{id}/accounts/{target_id}/manage", post(manage))
+}
+
+/// Personel listesinin sayfa boyu. Ust bardaki arama kutusu hizli bir onizleme;
+/// tam liste burada ve sayfali (N-03: 20.000 kimlik tek sayfaya basilamaz).
+const PAGE_SIZE: i64 = 50;
+
+#[derive(Deserialize)]
+struct ListQuery {
+    q: Option<String>,
+    offset: Option<i64>,
+}
+
+#[derive(Template)]
+#[template(path = "identities.html")]
+struct IdentitiesTemplate {
+    lang: Lang,
+    shell: Shell,
+    rows: Vec<identity::Listed>,
+    q: String,
+    total: i64,
+    /// "1–50 / 312": aralik burada kurulur, sablon aritmetik yapmaz
+    range: String,
+    prev_offset: Option<i64>,
+    next_offset: Option<i64>,
+    can_register: bool,
+}
+
+/// Personel listesi: okuma her operatorde (auditor dahil), "Yeni kimlik"
+/// dugmesi yalnizca kayit yetkisinde.
+async fn list_page(
+    OperatorSession(op): OperatorSession,
+    State(state): State<AppState>,
+    Query(q): Query<ListQuery>,
+) -> Response {
+    let query = q.q.unwrap_or_default();
+    let offset = q.offset.unwrap_or(0).max(0);
+    match identity::page(&state.pool, &state.time_zone, &query, offset, PAGE_SIZE).await {
+        Ok((rows, total)) => {
+            let shown = rows.len() as i64;
+            let from = if shown == 0 { 0 } else { offset + 1 };
+            render(&IdentitiesTemplate {
+                lang: op.lang,
+                can_register: allowed(&op, REGISTER_AUTHORITIES),
+                shell: Shell::of(&op),
+                q: query,
+                total,
+                range: op.lang.tn(
+                    "identities.range",
+                    &[
+                        &from.to_string(),
+                        &(offset + shown).to_string(),
+                        &total.to_string(),
+                    ],
+                ),
+                prev_offset: (offset > 0).then(|| (offset - PAGE_SIZE).max(0)),
+                next_offset: (offset + shown < total).then_some(offset + PAGE_SIZE),
+                rows,
+            })
+        }
+        Err(e) => internal("personel listesi okunamadı", e),
+    }
 }
 
 // --- START FEATURE: adoption ---
@@ -862,6 +923,88 @@ mod tests {
             .await
             .unwrap();
         String::from_utf8(bytes.to_vec()).unwrap()
+    }
+
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn the_personnel_list_renders_searches_and_hides_the_register_button() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        crate::test_support::seed_two_identities(&pool).await;
+        let app = crate::web::routes()
+            .with_state(crate::web::test_state(pool.clone(), "https://localhost"));
+        let hr = operator_cookie(&pool, &["hr"]).await;
+        let auditor = operator_cookie(&pool, &["auditor"]).await;
+
+        // Oturumsuz istek girise doner
+        let r = app
+            .clone()
+            .oneshot(request("GET", "/identities", "", ""))
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::SEE_OTHER);
+
+        // hr listeyi gorur ve kayit dugmesi acik
+        let r = app
+            .clone()
+            .oneshot(request("GET", "/identities", "", &hr))
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::OK);
+        let body = body_string(r).await;
+        assert!(
+            body.contains("Ayşe Yılmaz") && body.contains("Ali Kaya"),
+            "{body}"
+        );
+        assert!(body.contains("Test Birimi"), "departman kolonu: {body}");
+        assert!(body.contains("/identities/new"), "kayıt düğmesi: {body}");
+
+        // auditor okur ama kayit dugmesi yok (yetki kontrolu servis katmaninda)
+        let r = app
+            .clone()
+            .oneshot(request("GET", "/identities", "", &auditor))
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::OK);
+        let body = body_string(r).await;
+        assert!(body.contains("Ayşe Yılmaz"), "{body}");
+        assert!(
+            !body.contains("/identities/new"),
+            "auditor düğmesiz: {body}"
+        );
+
+        // Arama hem listeyi daraltir hem kutuda kalir
+        let r = app
+            .clone()
+            .oneshot(request("GET", "/identities?q=kaya", "", &hr))
+            .await
+            .unwrap();
+        let body = body_string(r).await;
+        assert!(
+            body.contains("Ali Kaya") && !body.contains("Ayşe Yılmaz"),
+            "{body}"
+        );
+        assert!(
+            body.contains("value=\"kaya\""),
+            "sorgu kutuda kalır: {body}"
+        );
+
+        // Raporlar kapagi her operatorde acilir ve mutabakat baglantisini verir
+        let r = app
+            .clone()
+            .oneshot(request("GET", "/reports", "", &auditor))
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::OK);
+        let body = body_string(r).await;
+        assert!(body.contains("/reconcile"), "{body}");
+        assert!(
+            body.contains("/upcoming") && body.contains("/used-names"),
+            "{body}"
+        );
+
+        drop(app);
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
     }
 
     #[tokio::test]

@@ -30,6 +30,12 @@ pub struct Finding {
     pub container: Option<String>,
     pub enabled: Option<bool>,
     pub identity_id: Option<i64>,
+    /// Toplu sahiplenmenin kimlik satirini kurdugu kisi oznitelikleri (ADR-102).
+    /// `missing` bulgusunda hesap dizinde yok, dordu de bos.
+    pub given_name: Option<String>,
+    pub surname: Option<String>,
+    pub employee_number: Option<String>,
+    pub department_name: Option<String>,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -72,6 +78,10 @@ pub fn compare(accounts: &[DirectoryAccount], links: &[Link]) -> Vec<Finding> {
                 container: Some(account.container.clone()),
                 enabled: Some(account.enabled),
                 identity_id: link.map(|l| l.identity_id),
+                given_name: account.given_name.clone(),
+                surname: account.surname.clone(),
+                employee_number: account.employee_number.clone(),
+                department_name: account.department.clone(),
             }
         })
         .collect();
@@ -89,6 +99,10 @@ pub fn compare(accounts: &[DirectoryAccount], links: &[Link]) -> Vec<Finding> {
             container: None,
             enabled: None,
             identity_id: Some(link.identity_id),
+            given_name: None,
+            surname: None,
+            employee_number: None,
+            department_name: None,
         });
     }
     findings.sort_by(|a, b| a.account_name.cmp(&b.account_name));
@@ -131,8 +145,9 @@ pub async fn store(
     for finding in findings {
         sqlx::query(
             "INSERT INTO reconcile_findings (target_system_id, read_job_id, kind, \
-             external_id, account_name, display_name, container, enabled, identity_id) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+             external_id, account_name, display_name, container, enabled, identity_id, \
+             given_name, surname, employee_number, department_name) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
         )
         .bind(target)
         .bind(read_job_id)
@@ -143,6 +158,10 @@ pub async fn store(
         .bind(&finding.container)
         .bind(finding.enabled)
         .bind(finding.identity_id)
+        .bind(&finding.given_name)
+        .bind(&finding.surname)
+        .bind(&finding.employee_number)
+        .bind(&finding.department_name)
         .execute(&mut *tx)
         .await?;
     }
@@ -163,6 +182,10 @@ mod tests {
             dn: format!("CN={sam},OU=Users,OU=Hogwarts,DC=hogwarts,DC=local"),
             container: "OU=Users,OU=Hogwarts,DC=hogwarts,DC=local".to_string(),
             enabled,
+            given_name: Some(sam.to_string()),
+            surname: Some("Hogwarts".to_string()),
+            employee_number: None,
+            department: Some("Teachers".to_string()),
         }
     }
 

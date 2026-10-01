@@ -147,6 +147,9 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/targets/{id}/reconcile", get(page))
         .route("/targets/{id}/reconcile/scan", post(scan))
+        // --- START FEATURE: bulk-adoption ---
+        .route("/targets/{id}/reconcile/adopt", post(adopt))
+    // --- END FEATURE: bulk-adoption ---
 }
 
 #[derive(Template)]
@@ -158,6 +161,12 @@ struct ReconcileTemplate {
     v: View,
     notice: Notice,
     can_scan: bool,
+    /// ADR-102 toplu sahiplenme: yetki + formun doldurulacak secenekleri
+    can_adopt: bool,
+    candidates: Vec<crate::bulk_adopt::Candidate>,
+    departments: Vec<crate::identity::Choice>,
+    roles: Vec<crate::identity::Choice>,
+    today: String,
 }
 
 async fn render_page(
@@ -166,14 +175,25 @@ async fn render_page(
     target: i64,
     notice: Notice,
 ) -> Response {
-    match load(&state.pool, target, &state.time_zone).await {
-        Ok(v) => render(&ReconcileTemplate {
+    let loaded = tokio::try_join!(
+        load(&state.pool, target, &state.time_zone),
+        crate::bulk_adopt::candidates(&state.pool, target),
+        crate::identity::form_options(&state.pool),
+        crate::identity::today(&state.pool, &state.time_zone),
+    );
+    match loaded {
+        Ok((v, candidates, options, today)) => render(&ReconcileTemplate {
             lang: op.lang,
             shell: Shell::of(op),
             target_id: target,
             v,
             notice,
             can_scan: allowed(op, &SCAN_AUTHORITIES),
+            can_adopt: allowed(op, crate::bulk_adopt::AUTHORITIES),
+            candidates,
+            departments: options.departments,
+            roles: options.roles,
+            today,
         }),
         Err(e) => internal("mutabakat bulguları okunamadı", e),
     }
@@ -211,9 +231,226 @@ async fn scan(
 }
 // --- END FEATURE: reconcile ---
 
+// --- START FEATURE: bulk-adoption ---
+/// Secilen "yonetilmeyen" hesaplari kimlige cevirir (ADR-102). Hedefe yazma
+/// yok: baglantiyi worker `observed` modunda kurar.
+async fn adopt(
+    OperatorSession(op): OperatorSession,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    axum::extract::Form(form): axum::extract::Form<Vec<(String, String)>>,
+) -> Response {
+    if !allowed(&op, crate::bulk_adopt::AUTHORITIES) {
+        return forbidden(op.lang);
+    }
+    let f = crate::org_web::Fields(form);
+    let batch = match batch_from(&f) {
+        Ok(batch) => batch,
+        Err(key) => return render_page(&state, &op, id, Notice::err(op.lang.t(key).into())).await,
+    };
+    let keys = crate::national_id::Keys {
+        aead: &state.aead_key,
+        blind_index: &state.blind_index_key,
+    };
+    let selected = f.all_i64("finding");
+    let outcome =
+        crate::bulk_adopt::adopt(&state.pool, &keys, &state.time_zone, id, &selected, &batch).await;
+    match outcome {
+        Ok(outcome) => {
+            audit_adoption(&state, &op, id, &outcome).await;
+            render_page(&state, &op, id, adoption_notice(op.lang, &outcome)).await
+        }
+        Err(crate::bulk_adopt::AdoptError::Invalid(key)) => {
+            render_page(&state, &op, id, Notice::err(op.lang.t(key).into())).await
+        }
+        Err(crate::bulk_adopt::AdoptError::Db(e)) => internal("toplu sahiplenme", e),
+    }
+}
+
+/// Partinin ortak alanlari; AD'de karsiligi olmayan ya da guvenilmeyen degerler.
+fn batch_from(f: &crate::org_web::Fields) -> Result<crate::bulk_adopt::Batch, &'static str> {
+    let department = f
+        .get("department_id")
+        .trim()
+        .parse::<i64>()
+        .map_err(|_| "err.department_required")?;
+    let role = f
+        .get("primary_role_id")
+        .trim()
+        .parse::<i64>()
+        .map_err(|_| "err.primary_role_required")?;
+    let employment_type = f.get("employment_type").trim().to_string();
+    let start_date = f.get("start_date").trim().to_string();
+    if start_date.is_empty() {
+        return Err("err.start_date_required");
+    }
+    Ok(crate::bulk_adopt::Batch {
+        primary_role_id: role,
+        employment_type,
+        start_date,
+        fallback_department_id: department,
+    })
+}
+
+/// Her acilan kimlik icin ayri `identity.created` satiri: denetim kaydinda
+/// "bu kisi nasil geldi" sorusu tek satirda cevaplanabilsin (ADR-009).
+async fn audit_adoption(
+    state: &AppState,
+    op: &crate::operator_session::Operator,
+    target: i64,
+    outcome: &crate::bulk_adopt::Outcome,
+) {
+    for id in &outcome.created {
+        let detail = serde_json::json!({ "source": "bulk_adopt", "target_system_id": target });
+        audit_operator(state, op, crate::audit::IDENTITY_CREATED, Some(*id), detail).await;
+    }
+}
+
+fn adoption_notice(lang: Lang, outcome: &crate::bulk_adopt::Outcome) -> Notice {
+    let created = lang.t1("reconcile.adopted", outcome.created.len());
+    if outcome.skipped.is_empty() {
+        return Notice::info(created);
+    }
+    // Atlananlar ad ve nedeniyle yazilir: operator neyin kaldigini bilmeli
+    let detail: Vec<String> = outcome
+        .skipped
+        .iter()
+        .map(|(name, reason)| format!("{name} ({})", lang.t(reason)))
+        .collect();
+    Notice {
+        info: created,
+        error: lang.tn(
+            "reconcile.adopt_skipped",
+            &[&outcome.skipped.len().to_string(), &detail.join(", ")],
+        ),
+    }
+}
+// --- END FEATURE: bulk-adoption ---
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn bulk_adoption_needs_authority_and_turns_unmanaged_accounts_into_identities() {
+        use axum::body::Body;
+        use axum::http::{header, Request, StatusCode};
+        use tower::ServiceExt;
+
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        crate::test_support::seed_two_identities(&pool).await;
+        let app = crate::web::routes()
+            .with_state(crate::web::test_state(pool.clone(), "https://localhost"));
+        let target: i64 = sqlx::query_scalar("SELECT id FROM target_systems WHERE kind = 'ad'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let department: i64 = sqlx::query_scalar("SELECT id FROM departments LIMIT 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let role: i64 = sqlx::query_scalar("SELECT id FROM roles WHERE kind = 'primary' LIMIT 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let read_job: i64 = sqlx::query_scalar(
+            "INSERT INTO read_jobs (kind, target_system_id, requested_by) \
+             VALUES ('reconcile', $1, 'test') RETURNING id",
+        )
+        .bind(target)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let finding: i64 = sqlx::query_scalar(
+            "INSERT INTO reconcile_findings (target_system_id, read_job_id, kind, external_id, \
+             account_name, display_name, container, enabled, given_name, surname) \
+             VALUES ($1, $2, 'unmanaged', 'g1', 'harry.potter', 'Harry Potter', 'OU=Users', \
+             true, 'Harry', 'Potter') RETURNING id",
+        )
+        .bind(target)
+        .bind(read_job)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let cookie = |authorities: &'static [&'static str]| {
+            let pool = pool.clone();
+            async move {
+                let operator = crate::operator_session::Operator {
+                    subject: "sub-x".to_string(),
+                    username: "ik.operatoru".to_string(),
+                    email: "ik@example.org".to_string(),
+                    authorities: authorities.iter().map(|a| a.to_string()).collect(),
+                    auth_source: crate::operator_session::AuthSource::Oidc,
+                    lang: crate::i18n::DEFAULT,
+                };
+                let token = crate::operator_session::create_session(&pool, &operator)
+                    .await
+                    .unwrap();
+                format!("{}={token}", crate::cookie::OPERATOR_SESSION_COOKIE_NAME)
+            }
+        };
+        let post = |cookie: String, body: String| {
+            let app = app.clone();
+            async move {
+                app.oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(format!("/targets/{target}/reconcile/adopt"))
+                        .header("content-type", "application/x-www-form-urlencoded")
+                        .header(header::COOKIE, cookie)
+                        .body(Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap()
+            }
+        };
+        let body = format!(
+            "finding={finding}&primary_role_id={role}&department_id={department}\
+             &employment_type=permanent&start_date=2026-10-01"
+        );
+
+        // auditor kimlik acamaz
+        let r = post(cookie(&["auditor"]).await, body.clone()).await;
+        assert_eq!(r.status(), StatusCode::FORBIDDEN);
+        let count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM identities WHERE existing_ad_account_hint IS NOT NULL",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(count, 0, "yetkisiz istek kimlik açmadı");
+
+        // hr sahiplenir: kimlik acilir, ipucu yazilir, denetim satiri duser
+        let r = post(cookie(&["hr"]).await, body).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        let row: (String, String, String) = sqlx::query_as(
+            "SELECT given_name, surname, existing_ad_account_hint FROM identities \
+             WHERE existing_ad_account_hint IS NOT NULL",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            row,
+            ("Harry".into(), "Potter".into(), "harry.potter".into())
+        );
+        let audited: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM audit_log WHERE event_type = $1 \
+             AND detail->>'source' = 'bulk_adopt'",
+        )
+        .bind(crate::audit::IDENTITY_CREATED)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(audited, 1);
+
+        drop(app);
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
 
     #[tokio::test]
     #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]

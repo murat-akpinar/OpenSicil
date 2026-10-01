@@ -549,14 +549,26 @@ pub struct DirectoryAccount {
     /// DN'in konteyner kismi: ilk `CN=…,` atilmis hali (ekranda "nerede duruyor").
     pub container: String,
     pub enabled: bool,
+    /// Toplu sahiplenmenin kimlik satirini kurdugu kisi oznitelikleri (ADR-102).
+    /// Gercek AD'de dordu de bos olabilir (docs/11 W8); eksigini operator verir.
+    pub given_name: Option<String>,
+    pub surname: Option<String>,
+    pub employee_number: Option<String>,
+    /// AD'nin serbest metin `department` degeri; departman agacina ad
+    /// eslesmesiyle baglanir (ADR-102), burada ham metin durur.
+    pub department: Option<String>,
 }
 
-const ACCOUNT_ATTRS: [&str; 5] = [
+const ACCOUNT_ATTRS: [&str; 9] = [
     "objectGUID",
     "sAMAccountName",
     "displayName",
     "cn",
     "userAccountControl",
+    "givenName",
+    "sn",
+    "employeeID",
+    "department",
 ];
 
 // userAccountControl ACCOUNTDISABLE biti (docs/05); UAC 514 = 512 | 2 = pasif.
@@ -590,6 +602,10 @@ fn to_account(entry: &SearchEntry) -> Option<DirectoryAccount> {
         container: container_of(&entry.dn),
         dn: entry.dn.clone(),
         enabled: uac & ACCOUNTDISABLE == 0,
+        given_name: text_attr(entry, "givenName"),
+        surname: text_attr(entry, "sn"),
+        employee_number: text_attr(entry, "employeeID"),
+        department: text_attr(entry, "department"),
     })
 }
 

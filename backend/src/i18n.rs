@@ -355,8 +355,8 @@ mod tests {
 
     #[test]
     fn translations_differ_between_languages() {
-        assert_eq!(Lang::Tr.t("nav.identities"), "Kimlikler");
-        assert_eq!(Lang::En.t("nav.identities"), "Identities");
+        assert_eq!(Lang::Tr.t("nav.identities"), "Personel");
+        assert_eq!(Lang::En.t("nav.identities"), "Personnel");
         assert_eq!(Lang::Tr.key("state", "active"), "aktif");
         assert_eq!(Lang::En.key("state", "active"), "active");
     }
