@@ -226,12 +226,16 @@ pub async fn similar_name_exists(
 
 // Her hedef icin kimlik bazli is (ADR-016); connector'i olmayan hedefte
 // worker sonucu "connector'i yok" yazar, ekran gizlemez (ADR-078).
-pub async fn enqueue_all_targets(pool: &PgPool, identity_id: i64) -> Result<(), sqlx::Error> {
+pub async fn enqueue_all_targets(
+    pool: &PgPool,
+    identity_id: i64,
+    priority: crate::jobs::Priority,
+) -> Result<(), sqlx::Error> {
     let targets: Vec<i64> = sqlx::query_scalar("SELECT id FROM target_systems ORDER BY id")
         .fetch_all(pool)
         .await?;
     for target in targets {
-        crate::jobs::enqueue(pool, identity_id, target, crate::jobs::Priority::Single).await?;
+        crate::jobs::enqueue(pool, identity_id, target, priority).await?;
     }
     Ok(())
 }
@@ -770,7 +774,9 @@ mod tests {
         let id = create(&pool, &keys, tz, &validate(&f).await_ok())
             .await
             .unwrap();
-        enqueue_all_targets(&pool, id).await.unwrap();
+        enqueue_all_targets(&pool, id, crate::jobs::Priority::Single)
+            .await
+            .unwrap();
         let end_at: String = sqlx::query_scalar(
             "SELECT to_char(end_at AT TIME ZONE 'Europe/Istanbul', 'YYYY-MM-DD HH24:MI') \
              FROM identities WHERE id = $1",

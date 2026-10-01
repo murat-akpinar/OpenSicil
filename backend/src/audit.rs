@@ -11,6 +11,9 @@ pub const OPERATOR_LOGIN: &str = "operator.login";
 pub const OPERATOR_REJECTED: &str = "operator.rejected";
 pub const IDENTITY_CREATED: &str = "identity.created";
 pub const JOB_RETRY_REQUESTED: &str = "job.retry_requested";
+pub const ROLE_CHANGED: &str = "role.changed";
+pub const DEPARTMENT_CHANGED: &str = "department.changed";
+pub const TARGET_CHANGED: &str = "target.changed";
 
 pub struct Actor<'a> {
     pub subject: Option<&'a str>,

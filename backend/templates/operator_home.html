@@ -7,7 +7,8 @@
   <form method="post" action="/logout"><button class="text-sm underline" type="submit">Çıkış</button></form>
 </div>
 <p class="mb-1">Kullanıcı: {{ username }}</p>
-<p class="mb-4 text-sm" style="color:#a6adc8;">Yetkiler: {{ authorities.join(", ") }}</p>
+<p class="mb-2 text-sm" style="color:#a6adc8;">Yetkiler: {{ authorities.join(", ") }}</p>
+<p class="mb-4 text-sm"><a class="underline" href="/roles">Roller</a> · <a class="underline" href="/departments">Departmanlar</a> · <a class="underline" href="/targets">Hedef sistemler</a></p>
 <div class="flex justify-between items-center mb-3">
   <h2 class="font-medium">Kimlikler</h2>
   <a class="rounded px-3 py-1" style="background:#89b4fa; color:#1e1e2e;" href="/identities/new">Yeni kimlik</a>

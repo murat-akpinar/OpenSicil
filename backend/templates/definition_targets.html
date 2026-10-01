@@ -1,0 +1,40 @@
+{# Rol ve departman sayfalarinin ortak parcasi: hedef basina katalog uyelikleri ve tek degerli ayarlar #}
+{% for t in targets %}
+<fieldset class="space-y-2 rounded p-3" style="border:1px solid #313244;">
+  <legend class="font-medium px-1">{{ t.target_name }}</legend>
+  <p class="text-sm" style="color:#a6adc8;">Üyelikler (katalogdan)</p>
+  {% if t.memberships.is_empty() %}
+  <p class="text-sm">Katalogda öğe yok; worker hedefi okuyunca dolar.</p>
+  {% endif %}
+  {% for m in t.memberships %}
+  <label class="block text-sm"><input type="checkbox" name="entitlement" value="{{ m.id }}"{% if m.selected %} checked{% endif %}> {{ m.label }}</label>
+  {% endfor %}
+  {% if show_settings %}
+  <div class="grid grid-cols-2 gap-3 mt-3">
+    <div>
+      <label class="block text-sm mb-1" for="pa.{{ t.target_id }}">Hesap açılsın</label>
+      <select class="w-full rounded px-3 py-2 text-black" id="pa.{{ t.target_id }}" name="pa.{{ t.target_id }}">
+        <option value=""{% if t.provision == "" %} selected{% endif %}>Söylemiyor</option>
+        <option value="true"{% if t.provision == "true" %} selected{% endif %}>Evet</option>
+        <option value="false"{% if t.provision == "false" %} selected{% endif %}>Hayır</option>
+      </select>
+    </div>
+    <div>
+      <label class="block text-sm mb-1" for="ct.{{ t.target_id }}">OU / COS</label>
+      <select class="w-full rounded px-3 py-2 text-black" id="ct.{{ t.target_id }}" name="ct.{{ t.target_id }}">
+        <option value="">Söylemiyor</option>
+        {% for c in t.containers %}<option value="{{ c.id }}"{% if c.selected %} selected{% endif %}>{{ c.label }}</option>{% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="block text-sm mb-1" for="ed.{{ t.target_id }}">E-posta alan adı</label>
+      <input class="w-full rounded px-3 py-2 text-black" type="text" id="ed.{{ t.target_id }}" name="ed.{{ t.target_id }}" value="{{ t.email_domain }}">
+    </div>
+    <div>
+      <label class="block text-sm mb-1" for="us.{{ t.target_id }}">UPN soneki</label>
+      <input class="w-full rounded px-3 py-2 text-black" type="text" id="us.{{ t.target_id }}" name="us.{{ t.target_id }}" value="{{ t.upn_suffix }}">
+    </div>
+  </div>
+  {% endif %}
+</fieldset>
+{% endfor %}

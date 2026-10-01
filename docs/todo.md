@@ -99,7 +99,8 @@ Kurallar:
   - Not (2026-10-01): backend 100 / worker 60 test (lab dahil), format ve clippy temiz, `cargo audit` yalnızca ADR-073 `rsa`; kapsam backend %92,94 / worker %91,27; imaj taraması Faz 2 tabanıyla aynı (backend 60, worker 58, `Status: fixed` yok); sır sızıntısı taraması boş; TODO yok; 50 satırı aşan yalnızca test fonksiyonları. docs/07 listesinden üç madde işaretlendi (backend hesap bağlantısı yazamaz, `bekliyor`+bitiş geçmiş tek tik tek iş, ADR-060); özel karakterli ad (virgül/yıldız) ile lab'da hesap açma ve elle pasifleştirilen hesabın korunması lab testine girmedi, 3b/3c kapanışında
 
 ### 3b. Roller ve adlar
-- [ ] Rol ve departman ekranları, katalogdan seçim, grup ve OU yönetimi
+- [x] Rol ve departman ekranları, katalogdan seçim, grup ve OU yönetimi
+  - Not: ADR-080 — kayıt doğrudan modele yazılır ve etkilenen kimlikler için öncelik 2 iş açılır (taslak/eşik 3f'te `org::enqueue_affected`'ı sahneleme yoluna taşır); rol/departman silme yok; `/targets` hedef sistem varsayılanlarını da kapsar
 - [ ] Elle kullanıcı adı; bağlı olmayan hesapla ve kullanılmış adla çakışmada müdahale; serbest bırakma ([ADR-022](decisions/022-kullanici-adi-elle-giris-ve-cakisma.md), [ADR-035](decisions/035-kullanilmis-ad-duz-metin-serbest-birakma.md), [ADR-042](decisions/042-ayni-kisi-farkli-anahtar.md))
 - [ ] Eşleme izinli listesi + "sadece boşsa yaz" ([ADR-029](decisions/029-esleme-hedef-oznitelikleri-izinli-liste.md), [ADR-034](decisions/034-sam-upn-esleme-disi-ve-bossa-yaz.md))
 - [ ] Belirsiz bileşen kuralı: "hesap açılsın=hayır" mevcut hesabı silmez ([ADR-040](decisions/040-motor-belirsiz-degere-dokunmaz.md))

@@ -44,19 +44,19 @@ impl FromRequestParts<AppState> for OperatorSession {
     }
 }
 
-fn allowed(operator: &Operator, any_of: &[&str]) -> bool {
+pub(crate) fn allowed(operator: &Operator, any_of: &[&str]) -> bool {
     operator
         .authorities
         .iter()
         .any(|a| any_of.contains(&a.as_str()))
 }
 
-fn forbidden() -> Response {
+pub(crate) fn forbidden() -> Response {
     (StatusCode::FORBIDDEN, "Bu işlem için yetkiniz yok.").into_response()
 }
 
-fn internal(what: &str, e: impl std::fmt::Display) -> Response {
-    eprintln!("identity_web: {what}: {e}");
+pub(crate) fn internal(what: &str, e: impl std::fmt::Display) -> Response {
+    eprintln!("web: {what}: {e}");
     StatusCode::INTERNAL_SERVER_ERROR.into_response()
 }
 
@@ -154,9 +154,18 @@ async fn create(
         "end_date": new.end_date,
         "national_id_set": new.national_id.is_some(),
     });
-    audit_operator(&state, &op, crate::audit::IDENTITY_CREATED, id, detail).await;
+    audit_operator(
+        &state,
+        &op,
+        crate::audit::IDENTITY_CREATED,
+        Some(id),
+        detail,
+    )
+    .await;
     // Kayit tamam; is acilamazsa log'a duser, zamanlayici (uctan uca kutucugu) yakalar.
-    if let Err(e) = identity::enqueue_all_targets(&state.pool, id).await {
+    if let Err(e) =
+        identity::enqueue_all_targets(&state.pool, id, crate::jobs::Priority::Single).await
+    {
         eprintln!("identity_web: iş açılamadı (kimlik {id}): {e}");
     }
     Redirect::to(&format!("/identities/{id}")).into_response()
@@ -188,7 +197,14 @@ async fn retry(
     match crate::jobs::request_retry(&state.pool, job_id, id).await {
         Ok(true) => {
             let detail = serde_json::json!({ "job_id": job_id });
-            audit_operator(&state, &op, crate::audit::JOB_RETRY_REQUESTED, id, detail).await;
+            audit_operator(
+                &state,
+                &op,
+                crate::audit::JOB_RETRY_REQUESTED,
+                Some(id),
+                detail,
+            )
+            .await;
         }
         // Is mudahalede degil ya da bu kimligin degil: sayfa guncel durumu gosterir.
         Ok(false) => {}
@@ -197,21 +213,20 @@ async fn retry(
     Redirect::to(&format!("/identities/{id}")).into_response()
 }
 
-async fn audit_operator(
+pub(crate) async fn audit_operator(
     state: &AppState,
     operator: &Operator,
     event_type: &str,
-    identity_id: i64,
+    identity_id: Option<i64>,
     detail: serde_json::Value,
 ) {
     let actor = crate::audit::Actor {
         subject: Some(&operator.subject),
         username: &operator.username,
     };
-    if let Err(e) =
-        crate::audit::record(&state.pool, &actor, event_type, Some(identity_id), detail).await
+    if let Err(e) = crate::audit::record(&state.pool, &actor, event_type, identity_id, detail).await
     {
-        eprintln!("identity_web: denetim kaydı yazılamadı ({event_type}): {e}");
+        eprintln!("web: denetim kaydı yazılamadı ({event_type}): {e}");
     }
 }
 // --- END FEATURE: identity-registration ---

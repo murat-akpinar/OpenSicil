@@ -47,4 +47,5 @@
 - Tek add ile AD hesabı açma, etkinleştirme ve pasifleştirme (ADR-057)
 - Kimlik kayıt formu, kişi sayfası ve hedefteki fark görünümü (F-12, ADR-078)
 - Zamanlayıcı ve uçtan uca lab doğrulaması: kayıt → AD'de pasif hesap → ekranda açıldı (ADR-079)
+- Rol, departman ve hedef sistem ekranları, katalogdan seçim (ADR-080)
 

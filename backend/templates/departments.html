@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Departmanlar — OpenSicil{% endblock %}
+{% block width %}max-w-3xl{% endblock %}
+{% block content %}
+<div class="flex justify-between items-center mb-6">
+  <h1 class="text-xl font-semibold">Departmanlar</h1>
+  <a class="text-sm underline" href="/login">Ana sayfa</a>
+</div>
+{% if !error.is_empty() %}<p class="mb-4" style="color:#f38ba8;">{{ error }}</p>{% endif %}
+<table class="w-full text-sm mb-6">
+  <thead><tr class="text-left" style="color:#a6adc8;"><th>Ad</th><th>Kod</th><th>Öğe</th></tr></thead>
+  <tbody>
+  {% for d in departments %}
+    <tr style="border-top:1px solid #313244;">
+      <td class="py-1">{{ d.indent }}<a class="underline" href="/departments/{{ d.id }}">{{ d.name }}</a></td>
+      <td>{{ d.code }}</td>
+      <td>{{ d.entitlements }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% if can_edit %}
+<h2 class="font-medium mb-2">Yeni departman</h2>
+<form method="post" action="/departments" class="grid grid-cols-3 gap-3 items-end">
+  <div>
+    <label class="block text-sm mb-1" for="name">Ad</label>
+    <input class="w-full rounded px-3 py-2 text-black" type="text" id="name" name="name" required>
+  </div>
+  <div>
+    <label class="block text-sm mb-1" for="code">Kod</label>
+    <input class="w-full rounded px-3 py-2 text-black" type="text" id="code" name="code">
+  </div>
+  <div>
+    <label class="block text-sm mb-1" for="parent_id">Üst departman</label>
+    <select class="w-full rounded px-3 py-2 text-black" id="parent_id" name="parent_id">
+      <option value="">Kök</option>
+      {% for d in departments %}<option value="{{ d.id }}">{{ d.indent }}{{ d.name }}</option>{% endfor %}
+    </select>
+  </div>
+  <button class="col-span-3 rounded py-2" style="background:#89b4fa; color:#1e1e2e;" type="submit">Kaydet</button>
+</form>
+{% endif %}
+{% endblock %}
