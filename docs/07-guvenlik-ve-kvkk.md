@@ -64,7 +64,8 @@ OpenSicil'i ele geçiren biri istediği kişiye hesap açıp VPN yetkisi verebil
 - Admin portu (7071) güvenlik duvarında **sadece worker'ın çıktığı IP'ye** açıktır, internete asla.
 
 ### Yönetici hesapları
-- Operatörlerin AD hesapları da OpenSicil'in kapsamındaysa yanlış bir ayrılış veya askı OIDC girişini keser ve düzeltecek kimse kalmaz. En az bir `OpenSicil-Admins` üyesi yönetilen kapsam **dışında** bir hesap olur (ya da IdP'de yerel bir hesap). Kurulum ön koşuludur ([docs/09](09-kurulum.md)).
+- Giriş OpenSicil'in kendi ekranındandır ([ADR-095](decisions/095-giris-kendi-ekranimiz-ad-bind-asil.md)): asıl kapı AD'ye LDAP simple bind (parola AD'de doğrulanır, kilitleme ve süre AD politikasıdır, OpenSicil parola saklamaz), yetkiler AD grup üyeliğinden okunur; OIDC isteğe bağlı ikinci kapıdır (MFA isteyen kurum onu açar, v1'de MFA yoktur — bilinçli kabul); yerel `admin` kalıcı break-glass hesabıdır (argon2id, ilk girişte zorunlu parola değişimi, 5 başarısız denemede 15 dakika kilit, her girişi denetim kaydında `source = local`). Boş parola dizine hiç gitmez (RFC 4513 "unauthenticated bind" başarılı dönebilir); servis hesabının kendi bind reddi operatöre "parolan yanlış" diye değil "AD'ye ulaşılamıyor" diye döner ([ADR-105](decisions/105-ad-bind-kapisi-uygulamasi.md)).
+- Operatörlerin AD hesapları da OpenSicil'in kapsamındaysa yanlış bir ayrılış veya askı o operatörün girişini üç kapıda da keser ([ADR-059](decisions/059-netlestirmeler-operator-geri-alma-aski-bitisi-accountexpires.md)). Düzeltecek kimse kalmasın diye iki güvence vardır: en az bir `OpenSicil-Admins` üyesi yönetilen kapsam **dışında** bir hesap olur (kurulum ön koşulu, [docs/09](09-kurulum.md)) ve yerel break-glass hesabı kalıcıdır.
 - Tek Sistem yöneticisi olan kurumda onay zaman kilidi açılır ([ADR-026](decisions/026-degisiklik-seti-onayinda-zaman-kilidi.md)).
 
 ## Ağ
@@ -72,14 +73,14 @@ OpenSicil'i ele geçiren biri istediği kişiye hesap açıp VPN yetkisi verebil
 | Bileşen | Gelen | Giden |
 |---|---|---|
 | nginx | 443 (dışarıya açık tek port) | backend |
-| backend | nginx'ten | PostgreSQL; OIDC akışı backend'de yapılırsa IdP |
+| backend | nginx'ten | PostgreSQL; AD (636, yalnızca giriş: servis hesabıyla arama + operatörün parolasıyla bind + grup okuma — [ADR-095](decisions/095-giris-kendi-ekranimiz-ad-bind-asil.md)); OIDC yapılandırılmışsa IdP |
 | worker | **Yok** | PostgreSQL, AD (636), Zimbra (7071) |
 | PostgreSQL | backend, worker | Yok |
 
 - AD bağlantısı sadece LDAPS'tir ve sertifika doğrulaması kapatılamaz; CA sertifikası kuruluma verilir.
 - Zimbra bağlantısı HTTPS'tir ve sertifika doğrulanır.
 - PostgreSQL başka bir sunucudaysa bağlantı `sslmode=verify-full` ile kurulur; `sqlx` varsayılanı `prefer` sessizce düz metne düşer ([ADR-061](decisions/061-dagitim-sozlesmesi-compose-ve-kubernetes.md)).
-- Backend'in AD'ye ve Zimbra'ya ağ düzeyinde de ulaşamaması hedeflenir. Yöntemi (Docker iç ağı veya host güvenlik duvarı; Kubernetes'te çıkış yönlü NetworkPolicy — [docs/09](09-kurulum.md#kubernetese-özel-ön-koşullar)), OIDC akışının nerede yapılacağıyla birlikte kurulumda belirlenir. Çünkü backend OIDC'yi kendisi yaparsa IdP'ye çıkış yapması gerekir.
+- Backend AD'ye **yalnızca okur**: giriş kapısı servis hesabıyla kullanıcıyı arar, operatörün parolasıyla bind eder ve grup üyeliğini okur ([ADR-095](decisions/095-giris-kendi-ekranimiz-ad-bind-asil.md), [ADR-105](decisions/105-ad-bind-kapisi-uygulamasi.md)). Hesap açma, üyelik ve öznitelik yazma yolu yalnızca worker'dadır (`ad_account.rs`); backend'de AD'ye yazan kod yoktur ve `account_links`/katalog tablolarına yazamaz ([ADR-015](decisions/015-veritabani-rolleri.md)). Bunun bedeli: backend AD servis hesabının parolasını çözebiliyor (ADR-068'den beri `app_settings`'te AEAD ile şifreli ve anahtar iki serviste de var; giriş kapısıyla artık her girişte çözülüyor) — ele geçirilmiş bir backend'in AD'ye yazabilmesi için servis hesabının yazma hakkını da kullanması gerekir, bu kabul edilen risktir ve servis hesabının delegasyonunu yönetilen OU'larla sınırlı tutmanın ([docs/05](05-active-directory.md#servis-hesabı-yetkileri)) bir gerekçesi daha budur. Backend'in Zimbra'ya ağ düzeyinde ulaşamaması hedeflenir; yöntemi (Docker iç ağı veya host güvenlik duvarı; Kubernetes'te çıkış yönlü NetworkPolicy — [docs/09](09-kurulum.md#kubernetese-özel-ön-koşullar)) kurulumda belirlenir. Backend OIDC'yi kendisi yaptığı için yapılandırılmışsa IdP'ye de çıkış yapar.
 
 ## Enjeksiyon
 
@@ -93,7 +94,7 @@ OpenSicil'i ele geçiren biri istediği kişiye hesap açıp VPN yetkisi verebil
 ## Denetim kaydı
 
 **Ne yazılır:**
-- Kim (OIDC `sub` ve kullanıcı adı), ne zaman, hangi işlem, hangi hedef, sonuç.
+- Kim (operatör öznesi — AD kapısında `ad:<objectGUID>`, OIDC'de `sub`, yerel hesapta sabit — kullanıcı adı ve giriş kapısı `source`), ne zaman, hangi işlem, hangi hedef, sonuç.
 - Kimlik, rol, departman, katalog, eşleme ve ayar değişiklikleri: önce/sonra, hassas alanlar hariç.
 - Hedef sistemde uygulanan her işlem: eklenen/kaldırılan grup, taşıma, pasifleştirme. Worker işlemden **önce** niyet satırını, sonra sonuç satırını yazar; niyet yazılamıyorsa işlem uygulanmaz. Sonucu olmayan niyet "sonucu bilinmiyor"dur ([ADR-062](decisions/062-is-kirasi-ve-yarida-kalan-is.md)).
 - İlk parola verme (parola hariç), kimlik numarası görüntüleme, toplu değişiklik onayı veya reddi, fren devreye girmesi. Kullanılmış adın serbest bırakılması ve elle pasifleştirilmiş hesabın etkinleştirilmesi, gerekçesiyle.

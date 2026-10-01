@@ -37,7 +37,7 @@ OpenSicil üç soruyu birbirinden ayırır ve yalnızca birincisini cevaplar:
 
 ```mermaid
 flowchart LR
-    ik["İK / BT operatörü"] -->|"OIDC ile giriş"| opensicil["OpenSicil"]
+    ik["İK / BT operatörü"] -->|"AD kullanıcı adı + parolasıyla giriş<br/>(LDAP bind; OIDC isteğe bağlı)"| opensicil["OpenSicil"]
     opensicil -->|"hesap, OU, grup"| ad[("Active Directory")]
     opensicil -->|"mailbox, COS, liste"| zimbra[("Zimbra")]
     ad -->|"LDAP federation"| idp["Keycloak (IdP)"]
@@ -50,7 +50,7 @@ OpenSicil uygulamalara doğrudan dokunmaz. Uygulama erişimi AD grubu üzerinden
 
 ## Mimari
 
-Dört container, tek depo, ayrı bir frontend container'ı yok. Bütün tasarım tek bir kurala dayanır: **kullanıcıya bakan bileşen, AD'ye yazabilen sırları hiç tutmaz.**
+Dört container, tek depo, ayrı bir frontend container'ı yok. Bütün tasarım tek bir kurala dayanır: **kullanıcıya bakan bileşende AD'ye yazan tek satır kod yoktur.** Hesap açan, üyelik ve öznitelik yazan yol yalnızca worker'dadır; backend AD'ye yalnızca giriş için okur — servis hesabıyla kullanıcıyı arar, operatörün parolasıyla bind eder ([ADR-095](docs/decisions/095-giris-kendi-ekranimiz-ad-bind-asil.md)).
 
 ```mermaid
 flowchart TB
@@ -60,7 +60,7 @@ flowchart TB
 
     subgraph user_zone["Kullanıcı bölgesi"]
         nginx["nginx :443 → :8080<br/>tek giriş kapısı<br/><b>TLS burada sonlanır</b> (ADR-066)"]
-        backend["backend :8080 (Rust: axum + sqlx)<br/>yönetim API'si + HTML (Tailwind, derlenmiş CSS — ADR-064/088)<br/>OIDC oturumu (ADR-065), değişiklik seti, iş oluşturma<br/><b>AD / Zimbra sırrı yok</b>"]
+        backend["backend :8080 (Rust: axum + sqlx + ldap3)<br/>yönetim API'si + HTML (Tailwind, derlenmiş CSS — ADR-064/088)<br/>giriş: AD bind asıl kapı (ADR-095), yerel break-glass, isteğe bağlı OIDC (ADR-065)<br/>değişiklik seti, iş oluşturma<br/><b>AD'ye yazma kodu yok, Zimbra sırrı yok</b>"]
     end
 
     subgraph data["Veri"]
@@ -84,15 +84,16 @@ flowchart TB
     worker -->|"636"| ad
     worker -->|"7071"| zimbra
     prom -.->|"/metrics, Bearer token<br/>nginx'ten geçmez"| backend
-    backend x-.-x|"yol yok"| ad
+    backend -->|"636, yalnızca giriş:<br/>arama + bind + grup okuma (ADR-095)"| ad
+    backend x-.-x|"yol yok"| zimbra
 ```
 
 | Bileşen | Görev | Ağ |
 |---|---|---|
 | **nginx** | Tek giriş kapısı; host'ta yalnızca bu serviste port açık (443, TLS burada sonlanır — [ADR-066](docs/decisions/066-tls-nginxte-sonlanir.md); önünde ayrı bir proxy/Ingress varsa düz HTTP'ye alınabilir) | Dışarıya açık tek port |
-| **backend** | Yönetim API'si + HTML arayüzü (Tailwind şablonları, ayrı frontend yok — [ADR-064](docs/decisions/064-frontend-htmx-tailwind.md); CSS, font ve tema betiği binary'ye gömülü, dış CDN yok — ADR-088), OIDC oturumu ([ADR-065](docs/decisions/065-oidc-akisi-backend.md)), doğrulama, değişiklik seti, iş oluşturma | Yalnızca nginx'ten gelen ve veritabanına giden bağlantı. **AD'ye ve Zimbra'ya hiç bağlanmaz** |
+| **backend** | Yönetim API'si + HTML arayüzü (Tailwind şablonları, ayrı frontend yok — [ADR-064](docs/decisions/064-frontend-htmx-tailwind.md); CSS, font ve tema betiği binary'ye gömülü, dış CDN yok — ADR-088), giriş ekranı: AD bind asıl kapı ([ADR-095](docs/decisions/095-giris-kendi-ekranimiz-ad-bind-asil.md)), yerel break-glass `admin`, isteğe bağlı OIDC ([ADR-065](docs/decisions/065-oidc-akisi-backend.md)); doğrulama, değişiklik seti, iş oluşturma | nginx'ten gelen; veritabanına, giriş için AD'ye (636, yalnızca okuma) ve yapılandırılmışsa IdP'ye giden bağlantı. **AD'ye hiç yazmaz, Zimbra'ya hiç bağlanmaz** |
 | **worker** | Olması gereken durumu hesaplar, farkı bulur, connector'larla uygular, zamanlanmış işleri çalıştırır | Gelen bağlantı yok. Yalnızca veritabanına, AD'ye ve Zimbra'ya giden bağlantı |
-| **db** | PostgreSQL: kimlikler, roller, katalog, iş kuyruğu, denetim kaydı, OIDC oturumları | Yalnızca backend ve worker |
+| **db** | PostgreSQL: kimlikler, roller, katalog, iş kuyruğu, denetim kaydı, operatör oturumları | Yalnızca backend ve worker |
 
 **Neden iki süreç:** AD'de hesap açıp gruba ekleyebilen sırlar kurumun en değerli sırlarındandır. İnternete bakan bileşen bunları hiç görmezse, backend'i ele geçiren saldırgan en fazla veritabanına *niyet* yazabilir. Worker'ın *gerçeklerine* (hesap bağlantısı, katalog) yazamaz, çünkü veritabanı rolleri buna izin vermez ([ADR-015](docs/decisions/015-veritabani-rolleri.md)); worker da bu niyeti uygulamadan önce kendi sınırlarıyla kontrol eder ([ADR-014](docs/decisions/014-yonetim-kapsami-ve-toplu-degisiklik-freni.md)).
 
@@ -216,7 +217,7 @@ Aynı imajlar ve tek `compose.yaml` dört topolojide çalışır ([ADR-061](docs
 | Tek yazma sırası, ayrı okuma şeridi | Saatlik sayaçlar yarışsızdır; 30 dakikalık mutabakat acil ayrılışı bekletmez | Yazma şeridi kimlik işlerini sırayla çalıştırır; mutabakat ve katalog yenileme yanında çalışır, hedefe hiç yazmaz | [047](docs/decisions/047-worker-tek-sirada.md), [051](docs/decisions/051-okuma-seridi.md) |
 | İş kirayla alınır; niyet işlemden önce yazılır | İş ortasında öldürülen worker ne işi ne denetim izini kaybetmeli | 5 dakikalık kira, yeniden alımda deneme hakkı azalmaz; her connector yazmasından önce denetim kaydına niyet satırı yazılır, yazılamıyorsa hedefe dokunulmaz | [062](docs/decisions/062-is-kirasi-ve-yarida-kalan-is.md) |
 | Zamanlayıcı olay değil sorgu çalıştırır | Worker hafta sonu kapalı kaldıysa kaçırılan geçişler kaybolmamalı | Her tikte türetilen durum uygulananla karşılaştırılır, fark için iş açılır | [028](docs/decisions/028-worker-zamanlamasi.md) |
-| Yönetim girişi OIDC ile | OpenSicil parola doğrulamamalı, IdP olmamalı | Görev ayrılığıyla altı yönetim yetkisi; ayrılmış ya da askıdaki operatörün her isteği reddedilir | [005](docs/decisions/005-yonetim-girisi-oidc.md), [019](docs/decisions/019-ilk-parola-teslimi.md), [059](docs/decisions/059-netlestirmeler-operator-geri-alma-aski-bitisi-accountexpires.md) |
+| Giriş kendi ekranımızdan: AD'ye bind asıl kapı, yerel break-glass yanında, OIDC isteğe bağlı | AD'si olan kuruma ikinci bir kimlik sistemi dayatılmamalı; parola yine OpenSicil'de durmamalı | Doğrulama ve kilitleme AD'de, yetkiler AD gruplarından (OIDC ile aynı eşleme); görev ayrılığıyla altı yönetim yetkisi; ayrılmış ya da askıdaki operatörün her isteği üç kapıda da reddedilir; yerel hesap argon2id + 5 denemede 15 dk kilit | [095](docs/decisions/095-giris-kendi-ekranimiz-ad-bind-asil.md), [005](docs/decisions/005-yonetim-girisi-oidc.md), [019](docs/decisions/019-ilk-parola-teslimi.md), [059](docs/decisions/059-netlestirmeler-operator-geri-alma-aski-bitisi-accountexpires.md) |
 
 ### Frenler (ayarla değil, varsayılan olarak güvenli)
 
@@ -262,7 +263,7 @@ Aynı imajlar ve tek `compose.yaml` dört topolojide çalışır ([ADR-061](docs
 
 Her faz atlanamayan bir güvenlik ve test kapanışıyla biter ([docs/08](docs/08-gereksinimler.md#önerilen-faz-sırası)).
 
-1. **Altyapı** — iskelet ve süreç sözleşmesi, OIDC girişi, kod olarak Samba AD + Keycloak lab'ı (midPoint denemesi burada yapılır), Zimbra keşfi
+1. **Altyapı** — iskelet ve süreç sözleşmesi, giriş (önce OIDC; sonra [ADR-095](docs/decisions/095-giris-kendi-ekranimiz-ad-bind-asil.md) ile AD bind asıl kapı oldu), kod olarak Samba AD + Keycloak lab'ı (midPoint denemesi burada yapılır), Zimbra keşfi
 2. **Kayıt ve model** — veritabanı rolleri, kimlik, departman ağacı, roller, katalog, denetim kaydı, saf modül olarak olması gereken durum fonksiyonu
 3. **AD provisioning** — motor ve kuyruk, roller ve adlar, yaşam döngüsü, ilk parola, gözlem modunda sahiplenme, fren ve onay
 4. **Zimbra** — connector, COS ve liste kataloğu, yaşam döngüsü karşılıkları

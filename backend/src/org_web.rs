@@ -244,37 +244,38 @@ impl Chain {
     }
 }
 
+/// Hedefin katalog ogeleri ekran satiri olarak; `pick` secili olani soyler.
+fn item_views(
+    list: &[org::CatalogChoice],
+    target: i64,
+    lang: Lang,
+    pick: impl Fn(i64) -> bool,
+) -> Vec<ItemView> {
+    list.iter()
+        .filter(|c| c.target_id == target)
+        .map(|c| ItemView {
+            id: c.id,
+            label: item_label(c, lang),
+            selected: pick(c.id),
+        })
+        .collect()
+}
+
 fn target_views(
     def: &Definition,
     options: &CatalogOptions,
     chain: &Chain,
     lang: Lang,
 ) -> Vec<TargetView> {
-    let items = |list: &[org::CatalogChoice], target: i64, pick: &dyn Fn(i64) -> bool| {
-        list.iter()
-            .filter(|c| c.target_id == target)
-            .map(|c| ItemView {
-                id: c.id,
-                label: item_label(c, lang),
-                selected: pick(c.id),
-            })
-            .collect::<Vec<_>>()
-    };
     let named = |target: i64| {
-        options
+        let selected = |id| def.entitlement_ids.contains(&id);
+        let names = options
             .memberships
             .iter()
             .filter(|c| c.target_id == target)
-            .map(|c| {
-                (
-                    c.display_name.clone(),
-                    ItemView {
-                        id: c.id,
-                        label: item_label(c, lang),
-                        selected: def.entitlement_ids.contains(&c.id),
-                    },
-                )
-            })
+            .map(|c| c.display_name.clone());
+        names
+            .zip(item_views(&options.memberships, target, lang, selected))
             .collect::<Vec<_>>()
     };
     def.settings
@@ -286,7 +287,7 @@ fn target_views(
                 target_name: s.target_name.clone(),
                 empty: named.is_empty(),
                 groups: group_memberships(named, lang.t("def.other_group")),
-                containers: items(&options.containers, s.target_id, &|id| {
+                containers: item_views(&options.containers, s.target_id, lang, |id| {
                     s.container_item_id == Some(id)
                 }),
                 provision: match s.provision_account {
@@ -347,6 +348,33 @@ fn winner<'a, T>(
     chain.iter().copied().find(|s| pick(s).is_some())
 }
 
+/// "Su an gecerli" satiri. Kaynak cumlesi burada kuruluyor: sablon yalnizca
+/// basiyor, "hedef sistem varsayilani tanimindan" gibi bir birlesim cikmasin.
+fn effective(
+    lang: Lang,
+    label: &'static str,
+    value: Option<String>,
+    from: Option<&org::SettingSource>,
+) -> Effective {
+    Effective {
+        label,
+        value: value.unwrap_or_else(|| lang.t("def.nobody_says").to_string()),
+        from: match from {
+            Some(s) if s.is_self => lang.t("def.from_self").to_string(),
+            Some(s) => lang.t1("def.from", &s.label),
+            None => lang.t("def.from_target_default").to_string(),
+        },
+    }
+}
+
+fn yes_no(lang: Lang, v: bool) -> String {
+    lang.t(match v {
+        true => "common.yes",
+        false => "common.no",
+    })
+    .to_string()
+}
+
 fn effective_rows(
     owner: Owner,
     chain: &[&org::SettingSource],
@@ -355,17 +383,6 @@ fn effective_rows(
     lang: Lang,
 ) -> Vec<Effective> {
     let resolved = ds::resolve_single_valued(&model_of(owner, chain, target));
-    // Kaynak cumlesi burada kuruluyor: sablon yalnizca basiyor, "hedef sistem
-    // varsayilani tanimindan" gibi bir birlesim cikmasin.
-    let row = |label, value: Option<String>, from: Option<&org::SettingSource>| Effective {
-        label,
-        value: value.unwrap_or_else(|| lang.t("def.nobody_says").to_string()),
-        from: match from {
-            Some(s) if s.is_self => lang.t("def.from_self").to_string(),
-            Some(s) => lang.t1("def.from", &s.label),
-            None => lang.t("def.from_target_default").to_string(),
-        },
-    };
     let container_name = |id: Option<i64>| {
         let id = id?;
         options
@@ -374,36 +391,32 @@ fn effective_rows(
             .find(|c| c.id == id)
             .map(|c| item_label(c, lang))
     };
-    let yes_no = |v: bool| {
-        lang.t(match v {
-            true => "common.yes",
-            false => "common.no",
-        })
-        .to_string()
-    };
+    // `desired_state::provision_expected` ile ayni dususu yapar: kimse
+    // soylemezse hedefin varsayilani gecerli olur.
+    let provision = resolved
+        .provision_account
+        .unwrap_or(target.provision_account_default);
     vec![
-        // `desired_state::provision_expected` ile ayni dususu yapar: kimse
-        // soylemezse hedefin varsayilani gecerli olur.
-        row(
+        effective(
+            lang,
             "def.provision",
-            Some(yes_no(
-                resolved
-                    .provision_account
-                    .unwrap_or(target.provision_account_default),
-            )),
+            Some(yes_no(lang, provision)),
             winner(chain, |s| s.provision),
         ),
-        row(
+        effective(
+            lang,
             "def.container",
             container_name(resolved.container),
             winner(chain, |s| s.container_item_id),
         ),
-        row(
+        effective(
+            lang,
             "def.email_domain",
             resolved.email_domain.clone(),
             winner(chain, |s| s.email_domain.clone()),
         ),
-        row(
+        effective(
+            lang,
             "def.upn_suffix",
             resolved.upn_suffix.clone(),
             winner(chain, |s| s.upn_suffix.clone()),

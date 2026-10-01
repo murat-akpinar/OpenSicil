@@ -548,6 +548,34 @@ struct ConfigForm {
     oidc_client_secret: String,
 }
 
+impl From<ConfigForm> for crate::settings::AppSettingsInput {
+    fn from(form: ConfigForm) -> Self {
+        Self {
+            ad_host: form.ad_host,
+            ad_bind_dn: form.ad_bind_dn,
+            ad_service_password: form.ad_service_password,
+            zimbra_url: form.zimbra_url,
+            zimbra_admin_password: form.zimbra_admin_password,
+            oidc_issuer: form.oidc_issuer,
+            oidc_client_id: form.oidc_client_id,
+            oidc_client_secret: form.oidc_client_secret,
+        }
+    }
+}
+
+/// Denetim satirina yalnizca hangi sirrin guncellendigi girer, degeri degil.
+fn updated_secret_names(form: &ConfigForm) -> Vec<&'static str> {
+    [
+        ("ad_service_password", &form.ad_service_password),
+        ("zimbra_admin_password", &form.zimbra_admin_password),
+        ("oidc_client_secret", &form.oidc_client_secret),
+    ]
+    .into_iter()
+    .filter(|(_, value)| !value.is_empty())
+    .map(|(name, _)| name)
+    .collect()
+}
+
 async fn config_submit(
     OperatorSession(operator): OperatorSession,
     State(state): State<AppState>,
@@ -556,15 +584,7 @@ async fn config_submit(
     if !allowed(&operator, CONFIG_AUTHORITIES) {
         return forbidden(operator.lang);
     }
-    let secrets_updated: Vec<&str> = [
-        ("ad_service_password", &form.ad_service_password),
-        ("zimbra_admin_password", &form.zimbra_admin_password),
-        ("oidc_client_secret", &form.oidc_client_secret),
-    ]
-    .into_iter()
-    .filter(|(_, value)| !value.is_empty())
-    .map(|(name, _)| name)
-    .collect();
+    let secrets_updated = updated_secret_names(&form);
     let before = match crate::settings::load(&state.pool).await {
         Ok(s) => s,
         Err(e) => {
@@ -572,16 +592,7 @@ async fn config_submit(
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
-    let input = crate::settings::AppSettingsInput {
-        ad_host: form.ad_host,
-        ad_bind_dn: form.ad_bind_dn,
-        ad_service_password: form.ad_service_password,
-        zimbra_url: form.zimbra_url,
-        zimbra_admin_password: form.zimbra_admin_password,
-        oidc_issuer: form.oidc_issuer,
-        oidc_client_id: form.oidc_client_id,
-        oidc_client_secret: form.oidc_client_secret,
-    };
+    let input = crate::settings::AppSettingsInput::from(form);
     if let Err(e) = crate::settings::save(&state.pool, &state.aead_key, &input).await {
         eprintln!("web: ayarlar kaydedilemedi: {e}");
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();

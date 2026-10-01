@@ -39,7 +39,7 @@ OpenSicil separates three questions and answers only the first one:
 
 ```mermaid
 flowchart LR
-    hr["HR / IT operator"] -->|"OIDC login"| opensicil["OpenSicil"]
+    hr["HR / IT operator"] -->|"login with AD username + password<br/>(LDAP bind; OIDC optional)"| opensicil["OpenSicil"]
     opensicil -->|"account, OU, groups"| ad[("Active Directory")]
     opensicil -->|"mailbox, COS, lists"| zimbra[("Zimbra")]
     ad -->|"LDAP federation"| idp["Keycloak (IdP)"]
@@ -52,7 +52,7 @@ OpenSicil never touches applications directly. Application access is granted thr
 
 ## Architecture
 
-Four containers, one repository, no separate frontend container. The whole design hangs on one rule: **the component that faces users never holds the secrets that can write to AD.**
+Four containers, one repository, no separate frontend container. The whole design hangs on one rule: **the component that faces users contains not a single line of code that writes to AD.** Creating accounts and writing memberships or attributes happens only in the worker; the backend reads AD only to log operators in — it looks the user up with the service account and binds with the operator's password ([ADR-095](docs/decisions/095-giris-kendi-ekranimiz-ad-bind-asil.md)).
 
 ```mermaid
 flowchart TB
@@ -62,7 +62,7 @@ flowchart TB
 
     subgraph user_zone["User zone"]
         nginx["nginx :443 → :8080<br/>single entry point<br/><b>TLS terminates here</b> (ADR-066)"]
-        backend["backend :8080 (Rust: axum + sqlx)<br/>admin API + HTML (Tailwind, compiled CSS — ADR-064/088)<br/>OIDC session (ADR-065), change sets, job creation<br/><b>no AD / Zimbra secrets</b>"]
+        backend["backend :8080 (Rust: axum + sqlx + ldap3)<br/>admin API + HTML (Tailwind, compiled CSS — ADR-064/088)<br/>login: AD bind as the main gate (ADR-095), local break-glass, optional OIDC (ADR-065)<br/>change sets, job creation<br/><b>no code that writes to AD, no Zimbra secrets</b>"]
     end
 
     subgraph data["Data"]
@@ -86,15 +86,16 @@ flowchart TB
     worker -->|"636"| ad
     worker -->|"7071"| zimbra
     prom -.->|"/metrics, Bearer token<br/>bypasses nginx"| backend
-    backend x-.-x|"no route"| ad
+    backend -->|"636, login only:<br/>search + bind + group read (ADR-095)"| ad
+    backend x-.-x|"no route"| zimbra
 ```
 
 | Component | Job | Network |
 |---|---|---|
 | **nginx** | Single entry point; the only service with a published host port (443, TLS terminates here — [ADR-066](docs/decisions/066-tls-nginxte-sonlanir.md); switches to plain HTTP if a proxy/Ingress sits in front) | The only published port |
-| **backend** | Admin API + HTML UI (Tailwind templates, no separate frontend — [ADR-064](docs/decisions/064-frontend-htmx-tailwind.md); CSS, font and theme script embedded in the binary, no external CDN — ADR-088), OIDC session ([ADR-065](docs/decisions/065-oidc-akisi-backend.md)), validation, change sets, job creation | Inbound from nginx only, outbound to the database. **Never connects to AD or Zimbra** |
+| **backend** | Admin API + HTML UI (Tailwind templates, no separate frontend — [ADR-064](docs/decisions/064-frontend-htmx-tailwind.md); CSS, font and theme script embedded in the binary, no external CDN — ADR-088), login screen: AD bind as the main gate ([ADR-095](docs/decisions/095-giris-kendi-ekranimiz-ad-bind-asil.md)), local break-glass `admin`, optional OIDC ([ADR-065](docs/decisions/065-oidc-akisi-backend.md)); validation, change sets, job creation | Inbound from nginx; outbound to the database, to AD for login only (636, read-only) and to the IdP when configured. **Never writes to AD, never connects to Zimbra** |
 | **worker** | Computes the desired state, finds the diff, applies it through connectors, runs scheduled work | No inbound connections. Outbound to the database, AD and Zimbra only |
-| **db** | PostgreSQL: identities, roles, catalog, job queue, audit log, OIDC sessions | backend and worker only |
+| **db** | PostgreSQL: identities, roles, catalog, job queue, audit log, operator sessions | backend and worker only |
 
 **Why two processes:** credentials that can create accounts and add them to groups are among the most valuable secrets an organisation has. If the internet-facing component never sees them, an attacker who takes over the backend can at most write *intent* into the database. They cannot write the worker's *facts* (account links, catalog), because the database roles forbid it ([ADR-015](docs/decisions/015-veritabani-rolleri.md)), and the worker checks that intent against its own limits before acting ([ADR-014](docs/decisions/014-yonetim-kapsami-ve-toplu-degisiklik-freni.md)).
 
@@ -218,7 +219,7 @@ All 62 records live in [docs/decisions/](docs/decisions/); the annotated list is
 | One write lane, a separate read lane | Hourly counters are race-free; a 30-minute reconciliation never delays an emergency leave | The write lane runs identity jobs serially; reconciliation and catalog refresh run beside it and never write to a target | [047](docs/decisions/047-worker-tek-sirada.md), [051](docs/decisions/051-okuma-seridi.md) |
 | Jobs are leased; intent is written before acting | A worker killed mid-job must lose neither the job nor the audit trail | 5-minute lease, no retry consumed on re-take; the audit intent row is written before every connector write, and if it cannot be written the target is not touched | [062](docs/decisions/062-is-kirasi-ve-yarida-kalan-is.md) |
 | The scheduler runs queries, not events | If the worker was down over a weekend, missed transitions must not be lost | Every tick compares derived state with applied state and opens jobs for the difference | [028](docs/decisions/028-worker-zamanlamasi.md) |
-| Admin login through OIDC | OpenSicil must not verify passwords or become an IdP | Six admin permissions with separation of duties; a departed or suspended operator is rejected on every request | [005](docs/decisions/005-yonetim-girisi-oidc.md), [019](docs/decisions/019-ilk-parola-teslimi.md), [059](docs/decisions/059-netlestirmeler-operator-geri-alma-aski-bitisi-accountexpires.md) |
+| Our own login screen: AD bind as the main gate, a local break-glass account beside it, OIDC optional | An organisation that already has AD must not be forced into a second identity system; passwords must still never live in OpenSicil | Verification and lockout happen in AD, permissions come from AD groups (the same mapping as OIDC); six admin permissions with separation of duties; a departed or suspended operator is rejected on every request at all three gates; the local account uses argon2id and locks for 15 minutes after 5 failures | [095](docs/decisions/095-giris-kendi-ekranimiz-ad-bind-asil.md), [005](docs/decisions/005-yonetim-girisi-oidc.md), [019](docs/decisions/019-ilk-parola-teslimi.md), [059](docs/decisions/059-netlestirmeler-operator-geri-alma-aski-bitisi-accountexpires.md) |
 
 ### Brakes (safe by default, not by configuration)
 
@@ -264,7 +265,7 @@ Added only when the need is proven; written earlier they are just maintenance lo
 
 Every phase ends with a security-and-test closing box that cannot be skipped ([docs/08](docs/08-gereksinimler.md#önerilen-faz-sırası)).
 
-1. **Infrastructure** — skeleton and process contract, OIDC login, Samba AD + Keycloak lab as code (the midPoint trial happens here), Zimbra discovery
+1. **Infrastructure** — skeleton and process contract, login (OIDC first; later [ADR-095](docs/decisions/095-giris-kendi-ekranimiz-ad-bind-asil.md) made AD bind the main gate), Samba AD + Keycloak lab as code (the midPoint trial happens here), Zimbra discovery
 2. **Records and model** — database roles, identities, department tree, roles, catalog, audit log, the desired-state function as a pure module
 3. **AD provisioning** — engine and queue, roles and names, lifecycle, first password, adoption in observe mode, brakes and approval
 4. **Zimbra** — connector, COS and list catalog, lifecycle counterparts

@@ -95,29 +95,29 @@ pub fn compare(accounts: &[DirectoryAccount], links: &[Link]) -> Vec<Finding> {
         .collect();
 
     // ADR-040 "kayip hesap": OpenSicil bagli sayiyor, dizinde yok.
-    for link in links {
-        if accounts.iter().any(|a| a.guid == link.external_id) {
-            continue;
-        }
-        findings.push(Finding {
-            kind: MISSING,
-            external_id: link.external_id.clone(),
-            account_name: link.username.clone().unwrap_or_else(|| "?".to_string()),
-            display_name: None,
-            container: None,
-            enabled: None,
-            identity_id: Some(link.identity_id),
-            given_name: None,
-            surname: None,
-            employee_number: None,
-            department_name: None,
-            mail: None,
-            mobile: None,
-            telephone: None,
-        });
-    }
+    let seen = |link: &&Link| accounts.iter().any(|a| a.guid == link.external_id);
+    findings.extend(links.iter().filter(|l| !seen(l)).map(missing_finding));
     findings.sort_by(|a, b| a.account_name.cmp(&b.account_name));
     findings
+}
+
+fn missing_finding(link: &Link) -> Finding {
+    Finding {
+        kind: MISSING,
+        external_id: link.external_id.clone(),
+        account_name: link.username.clone().unwrap_or_else(|| "?".to_string()),
+        display_name: None,
+        container: None,
+        enabled: None,
+        identity_id: Some(link.identity_id),
+        given_name: None,
+        surname: None,
+        employee_number: None,
+        department_name: None,
+        mail: None,
+        mobile: None,
+        telephone: None,
+    }
 }
 
 const LINKS_SQL: &str = "SELECT l.external_id, l.mode, l.identity_id, i.username \

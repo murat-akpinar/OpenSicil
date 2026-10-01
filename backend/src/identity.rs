@@ -1297,23 +1297,24 @@ pub fn split_error(last_error: &str) -> (String, String) {
     }
 }
 
+type JobRow = (
+    i64,
+    String,
+    String,
+    i32,
+    String,
+    Option<String>,
+    Option<String>,
+    bool,
+);
+
 pub(crate) async fn load_jobs(
     pool: &PgPool,
     lang: Lang,
     time_zone: &str,
     id: i64,
 ) -> Result<Vec<Job>, sqlx::Error> {
-    type Row = (
-        i64,
-        String,
-        String,
-        i32,
-        String,
-        Option<String>,
-        Option<String>,
-        bool,
-    );
-    let rows: Vec<Row> = sqlx::query_as(
+    let rows: Vec<JobRow> = sqlx::query_as(
         "SELECT j.id, t.name, j.status, j.attempts, \
          to_char(j.next_attempt_at AT TIME ZONE $2, 'YYYY-MM-DD HH24:MI'), \
          j.last_error, j.result, j.retry_requested FROM jobs j \
@@ -1324,34 +1325,32 @@ pub(crate) async fn load_jobs(
     .bind(time_zone)
     .fetch_all(pool)
     .await?;
-    Ok(rows
-        .into_iter()
-        .map(
-            |(id, target, status, attempts, next, error, result, retry)| {
-                let waiting = error
-                    .as_deref()
-                    .and_then(|e| throttle_reason(lang, e))
-                    .unwrap_or_default();
-                let (summary, detail) = match waiting.is_empty() {
-                    true => error.as_deref().map(split_error).unwrap_or_default(),
-                    false => (String::new(), String::new()),
-                };
-                Job {
-                    id,
-                    target,
-                    status_kind: status_kind(&status),
-                    attempts,
-                    next_attempt_at: next,
-                    summary,
-                    detail,
-                    waiting,
-                    result: result.unwrap_or_default(),
-                    retryable: status == INTERVENTION_STATUS && !retry,
-                    status,
-                }
-            },
-        )
-        .collect())
+    Ok(rows.into_iter().map(|row| job_from(lang, row)).collect())
+}
+
+fn job_from(lang: Lang, row: JobRow) -> Job {
+    let (id, target, status, attempts, next, error, result, retry) = row;
+    let waiting = error
+        .as_deref()
+        .and_then(|e| throttle_reason(lang, e))
+        .unwrap_or_default();
+    let (summary, detail) = match waiting.is_empty() {
+        true => error.as_deref().map(split_error).unwrap_or_default(),
+        false => (String::new(), String::new()),
+    };
+    Job {
+        id,
+        target,
+        status_kind: status_kind(&status),
+        attempts,
+        next_attempt_at: next,
+        summary,
+        detail,
+        waiting,
+        result: result.unwrap_or_default(),
+        retryable: status == INTERVENTION_STATUS && !retry,
+        status,
+    }
 }
 
 async fn load_events(pool: &PgPool, time_zone: &str, id: i64) -> Result<Vec<Event>, sqlx::Error> {
