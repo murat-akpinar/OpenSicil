@@ -11,7 +11,10 @@
 -- Yapi (gercek AD'deki OU ve grup duzenine birebir):
 --   Hogwarts
 --   ├── Teachers    OU=Users,OU=Teachers        GG-Teachers
+--   │   └── brans adlari (Charms, Potions, Headmaster's Office …) — AD'deki
+--   │       `department` degeri; OU ve grup TEACHERS'tan miras
 --   ├── Staff       OU=Users,OU=Staff           GG-Staff
+--   │   └── Facilities, Health Services, Library — ayni sekilde
 --   └── Houses                                  GG-Students-All
 --       ├── Gryffindor  OU=Users,OU=Gryffindor,OU=Houses   GG-House-Gryffindor
 --       ├── Hufflepuff  …                                  GG-House-Hufflepuff
@@ -43,6 +46,35 @@ FROM (VALUES
   ('HUFFLEPUFF', 'Hufflepuff'),
   ('RAVENCLAW',  'Ravenclaw'),
   ('SLYTHERIN',  'Slytherin')
+) AS v(code, name)
+ON CONFLICT (code) DO NOTHING;
+
+-- Ogretmen ve personel hesaplarinin AD'deki `department` degeri OU adi degil,
+-- brans/birim adidir ("Charms", "Library"). Toplu sahiplenme departmani adiyla
+-- esledigi icin (`bulk_adopt::candidates`) bu adlar agacta yoksa 13 hesap
+-- "eslesmedi" rozeti aliyordu. Kendi gruplari ve OU'lari yok: zincir yukari
+-- yurudugu icin TEACHERS/STAFF'in grubunu ve OU'sunu miras aliyorlar (ADR-017).
+INSERT INTO departments (code, name, parent_id)
+SELECT v.code, v.name, (SELECT id FROM departments WHERE code = 'TEACHERS')
+FROM (VALUES
+  ('CARE_MAGICAL', 'Care of Magical Creatures'),
+  ('CHARMS',       'Charms'),
+  ('DADA',         'Defence Against the Dark Arts'),
+  ('DIVINATION',   'Divination'),
+  ('FLYING',       'Flying'),
+  ('HEADMASTER',   'Headmaster''s Office'),
+  ('HERBOLOGY',    'Herbology'),
+  ('POTIONS',      'Potions'),
+  ('TRANSFIG',     'Transfiguration')
+) AS v(code, name)
+ON CONFLICT (code) DO NOTHING;
+
+INSERT INTO departments (code, name, parent_id)
+SELECT v.code, v.name, (SELECT id FROM departments WHERE code = 'STAFF')
+FROM (VALUES
+  ('FACILITIES', 'Facilities'),
+  ('HEALTH',     'Health Services'),
+  ('LIBRARY',    'Library')
 ) AS v(code, name)
 ON CONFLICT (code) DO NOTHING;
 
@@ -157,3 +189,11 @@ ORDER BY p.code NULLS FIRST, d.code;
 SELECT r.kind, r.name, r.title,
        (SELECT count(*) FROM role_entitlements e WHERE e.role_id = r.id) AS gruplar
 FROM roles r ORDER BY r.kind, r.name;
+
+-- Toplu sahiplenme ekraninin "eslesmedi" rozetiyle ayni kosul
+-- (`bulk_adopt::candidates`): bos cikmasi gerekir.
+SELECT f.account_name, f.department_name AS eslesmeyen_departman
+FROM reconcile_findings f
+LEFT JOIN departments d ON lower(d.name) = lower(f.department_name)
+WHERE f.kind = 'unmanaged' AND d.id IS NULL
+ORDER BY f.department_name, f.account_name;

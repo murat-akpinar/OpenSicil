@@ -32,6 +32,7 @@
 - Mutabakat sayaç kutuları panel yapısına alındı; iki AD ortamı belgelendi
 - .env yedekleri artık git'e girmiyor
 - Toplu sahiplenmede departman artık AD'den gelir, form alanı isteğe bağlı
+- Hogwarts seed'i AD'deki branş departmanlarını da kuruyor
 
 ### Testler
 
