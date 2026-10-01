@@ -13,6 +13,7 @@ mod db;
 // icin cagirir, motora ozel alanlari kullanmaz (ADR-038).
 #[allow(dead_code)]
 mod desired_state;
+mod errors;
 mod first_password;
 mod health;
 mod i18n;

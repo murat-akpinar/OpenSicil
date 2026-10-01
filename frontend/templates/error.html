@@ -1,0 +1,10 @@
+{% extends "base_auth.html" %}
+{% block title %}{{ code }} — OpenSicil{% endblock %}
+{% block content %}
+<div class="text-center">
+  <p class="h1 mb-1">{{ code }}</p>
+  <p class="h2 mb-1">{{ lang.t(title_key) }}</p>
+  <p class="muted mb-5 text-sm">{{ lang.t(hint_key) }}</p>
+  <a class="btn btn-primary" href="/"><i class="ico ico-home" aria-hidden="true"></i>{{ lang.t("err.back_home") }}</a>
+</div>
+{% endblock %}

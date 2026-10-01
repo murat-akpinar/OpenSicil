@@ -188,12 +188,15 @@ pub async fn rejection_response(
         eprintln!("operator_guard: denetim kaydı yazılamadı: {e}");
     }
     (
-        StatusCode::FORBIDDEN,
         [(
             header::SET_COOKIE,
             clear_cookie_header(OPERATOR_SESSION_COOKIE_NAME),
         )],
-        operator.lang.t("err.access_denied_departed"),
+        crate::errors::page_with_hint(
+            operator.lang,
+            StatusCode::FORBIDDEN,
+            "err.access_denied_departed",
+        ),
     )
         .into_response()
 }

@@ -158,6 +158,8 @@ Eşik, bağlantısı gözlem modunda olan ya da o hedefte hesabı olmayacak kiml
 | Kuyruk yoklama | 5 sn | ([ADR-028](decisions/028-worker-zamanlamasi.md)) |
 | İş kirası | 5 dk (ayar değil) | Worker iş ortasında öldürülürse o iş en fazla bu kadar bekler, deneme hakkı azalmaz. Sürüm yükseltmede beklemez: worker SIGTERM'de elindeki işi bitirir ([ADR-062](decisions/062-is-kirasi-ve-yarida-kalan-is.md)) |
 | Metrik ucu erişimi | Bearer token | Backend ortam değişkeni; token'sız istek 401 alır ([ADR-061](decisions/061-dagitim-sozlesmesi-compose-ve-kubernetes.md)) |
+| İstek hız sınırı (nginx) | gezinme 30 r/s (burst 60), giriş yolları 12 r/dk (burst 5), IP başına 24 eşzamanlı bağlantı | `nginx/nginx.conf`, ortam değişkeni değil. Sınır **kaynak IP başına**dır: bütün operatörler tek NAT adresinin arkasındaysa payları ortaktır — o kurulumda değerleri yükseltin. Aşan istek backend'e hiç gitmez, 429 ve "İstek kabul edilmedi" sayfası alır. Yerel hesabın 5 deneme/15 dk kilidi ([ADR-095](decisions/095-giris-kendi-ekranimiz-ad-bind-asil.md)) bundan bağımsız, uygulamada durur |
+| İzin verilen HTTP metotları | `GET`, `HEAD`, `POST` | Uygulamanın kullandığı küme; gerisi nginx'te 405 alır ve backend'e ulaşmaz |
 
 **Soyad değişimi (v1):** OpenSicil görünen adı ve CN'i günceller; kullanıcı adı ve e-posta değişmez (F-25 v2'dedir). Hesabı AD'de ya da Zimbra'da **elle yeniden adlandırmayın**: kaynak OpenSicil'deki addır, eşlenmiş `mail` bir sonraki işte eski adrese geri yazılır ([ADR-012](decisions/012-oznitelik-esleme.md)) ve kişi sayfası eski adı gösterir. Yeni soyadla adres gerekiyorsa Zimbra'da takma ad ekleyin; OpenSicil takma adlara dokunmaz.
 
@@ -185,6 +187,34 @@ Veritabanı yedeğe dönünce yedekten sonra açılan hesapların bağlantısı,
 
 Motor, kapatılmış hesabı geri açmaz ve silinmiş hesabı yeniden açmaz ([ADR-032](decisions/032-elle-pasiflestirme-korunur.md), [ADR-040](decisions/040-motor-belirsiz-degere-dokunmaz.md)); ama kaybolan ayrılışların grupları geri yazılır. 3. adım bu yüzden atlanmaz. Aynı mod sürüm yükseltmeden sonraki ilk açılışta ve DC ya da Zimbra bakım penceresinde de kullanılır.
 
+## Sır sızarsa
+
+`.env` (ya da bir yedeği) yanlış bir yere düşerse — git geçmişi, bir ticket eki, bir ekran paylaşımı — oradaki değer **yanmış sayılır**. Dosyayı silmek yetmez: silinen bir blob'u geçmişten çıkarmak başka iş, onu okumuş olanı geri almak imkânsız. Tek gerçek düzeltme, değeri geçersiz kılmaktır ([ADR-104](decisions/104-env-yedegi-public-repoya-push-edildi.md)).
+
+**Hangi değer neyi açar:**
+
+| Değer | Neyi açar | Sızarsa ne olur |
+|---|---|---|
+| `POSTGRES_OWNER_PASSWORD` | şema sahibi rolü | Şemayı değiştirebilir, her tabloyu okur/yazar. Veritabanının `ports:` satırı yoktur ([ADR-061](decisions/061-dagitim-sozlesmesi-compose-ve-kubernetes.md)), yani saldırganın ayrıca ağa girmesi gerekir |
+| `POSTGRES_BACKEND_PASSWORD` | backend servis rolü | Kimlik, rol, departman, oturum tabloları; denetim kaydına yalnızca ekleme |
+| `POSTGRES_WORKER_PASSWORD` | worker servis rolü | Hesap bağlantıları, iş kuyruğu, katalog |
+| `AEAD_MASTER_KEY` | DB'deki **bütün şifreli değerler**: AD servis hesabı parolası, Zimbra admin parolası, OIDC client secret, kimlik numaraları, bekleyen ilk parolalar ([ADR-010](decisions/010-kisisel-veri-kimlik-no-telefon.md), [ADR-036](decisions/036-ilk-parola-aead.md), [ADR-068](decisions/068-yapilandirma-sayfasi-ve-bootstrap-hesabi.md)) | Tek başına hiçbir şey; veritabanı dökümüyle birlikte **her şey**. Bu yüzden `.env` ile yedek asla aynı yerde durmaz |
+| `BLIND_INDEX_KEY` | kimlik numarası blind index'i (HMAC) | Elindeki bir kimlik numarasının bu kurumda olup olmadığını döküm üstünde sınayabilir |
+| `METRICS_TOKEN` | metrik ucu | Sayaçları okur (kişisel veri içermez) |
+
+**Rotasyon sırası** — `sh scripts/sir-rotasyonu.sh --onayla` 1–4'ü yapar, 5–6 elle:
+
+1. **Ön koşul:** yerel break-glass `admin` hesabıyla girebildiğinizi doğrulayın ve AD servis hesabı parolasını hazırlayın. AEAD anahtarı değişince OIDC girişi, client secret yeniden girilene kadar çalışmaz — o aralıkta tek kapı yerel hesaptır ([ADR-095](decisions/095-giris-kendi-ekranimiz-ad-bind-asil.md)).
+2. `.env`'deki altı değer yeniden üretilir. Postgres parolaları DSN'e girdiği için yalnızca alfanumerik; iki anahtar `openssl rand -base64 32` (32 bayt, base64 — başka uzunluk açılışta reddedilir).
+3. Şema sahibi rolü `ALTER ROLE … PASSWORD` ile döner. `POSTGRES_PASSWORD` ortam değişkeni **yalnızca ilk `initdb`'de** okunur; mevcut bir veritabanında onu değiştirmek hiçbir şey yapmaz.
+4. `docker compose run --rm --no-deps migrate` backend ve worker rollerinin parolasını `ALTER ROLE` ile döndürür ([ADR-015](decisions/015-veritabani-rolleri.md)); ardından `docker compose up -d backend worker` iki servisi yeni anahtarlarla yeniden oluşturur. **Veritabanı silinmez.**
+5. Yerel `admin` ile girip Yapılandırma sayfasından **AD servis hesabı parolasını ve OIDC client secret'ı yeniden girin** (Zimbra bağlıysa onun admin parolasını da). Sır alanı boş bırakılırsa backend eski şifreli değeri korur (`COALESCE`) — o değer artık çözülemez, yani bu alanlar **dolu gönderilmelidir**.
+6. Doğrulama: `/` 200 dönüyor, OIDC girişi yeniden çalışıyor, hedef sistemin mutabakat ekranındaki "Yeniden tara" AD'ye bağlanabiliyor.
+
+**AEAD anahtarı değişince ne yeniden girilir:** `app_settings`'teki üç sır (AD, Zimbra, OIDC). Bekleyen ilk parolalar okunamaz hale gelir — zaten 10 dakikalık ömürleri var, operatör yeniden ister. **Kimlik numarası dolu bir kurulumda bu rotasyon tek başına yapılamaz:** `national_id_enc` eski anahtarla şifrelidir ve `national_id_bidx` eski HMAC anahtarıyla üretilmiştir; v1'de yeniden şifreleme aracı yoktur ([ADR-010](decisions/010-kisisel-veri-kimlik-no-telefon.md) sürüm baytını bıraktı, dönüştürücüyü değil). Betik bu durumda durur ve hiçbir şeye dokunmaz.
+
+**Git geçmişi yeniden yazılmaz** ([ADR-104](decisions/104-env-yedegi-public-repoya-push-edildi.md)): `git push --force` proje kuralıyla yasak ve GitHub silinen blob'u kendi çöp toplamasına kadar sunmaya devam eder, yani yeniden yazma tek başına sırrı geri almaz. Rotasyon geçmişte duran değeri değersizleştirir; asıl düzeltme budur.
+
 ## Migration
 Aynı imajın `migrate` alt komutu, şema sahibi rolüyle **tek seferlik container** olarak çalışır: compose'da backend ve worker'ın `service_completed_successfully` ile beklediği servis, Kubernetes'te Job. Sahip rolünün parolası yalnızca bu container'a verilir ([ADR-015](decisions/015-veritabani-rolleri.md), [ADR-061](decisions/061-dagitim-sozlesmesi-compose-ve-kubernetes.md)). Backend ve worker açılışta şema sürümüne bakar; eskiyse çıkar, orkestratör yeniden başlatır. Komutlar: tek sunucuda (topoloji A) `docker compose up -d` migrate'i `depends_on: service_completed_successfully` ile otomatik önce çalıştırır; elle ya da B/C'de tek başına çalıştırmak için `docker compose run --rm --no-deps migrate`.
 
@@ -204,4 +234,5 @@ Ekran HTML'i backend'in içinden gelir; ayrı bir frontend container'ı, Node ç
 - **Renk teması** açık ve koyu ([ADR-100](decisions/100-renk-paleti-catppuccin-yerine-slate-blue.md) paleti). Varsayılan tarayıcı/sistem tercihidir; üst bardaki düğme elle geçiş yapar ve seçim o tarayıcıda (`localStorage`) kalır. Sunucu tarafında ayar yoktur.
 - **Arayüz fontu** CaskaydiaMono Nerd Font (Regular + Bold), `backend/static/` altında self-host.
 - **Dil** TR ve EN ([ADR-089](decisions/089-arayuz-dili-tr-en-uygulamasi.md)): metinler `backend/i18n/tr.toml` ve `en.toml`'dadır, binary'ye gömülüdür. Üst bardaki `EN`/`TR` düğmesi tercihi operatörün oturumuna yazar (`operator_sessions.lang`), oturum bitince varsayılana döner; ayrı bir ortam değişkeni yoktur. Giriş, parola değiştirme ve Yapılandırma ekranlarında oturum henüz yoktur: dil tarayıcının `Accept-Language` başlığından gelir (`en…` → İngilizce, aksi halde Türkçe), seçici gösterilmez. Yeni ekran metni iki dosyaya da eklenir; eksik anahtarı `cargo test` yakalar.
+- **Hata sayfaları** kabuğun içindedir: 403, 404, 405 ve 500 aynı şablonu kullanır, gövdede yalnızca durum kodu ve iki hazır cümle durur — yol, SQL ya da sürüm dışarı çıkmaz; ayrıntı yalnızca sunucu log'undadır. Backend ayakta değilken (502/503/504) ve istek nginx'te reddedildiğinde (405, 429) sayfayı nginx verir: o iki sayfa binary'deki CSS'e ulaşamadığı için kendi stilini taşır ve iki dillidir (içerik pazarlığı yapılmaz).
 - **CSS'i yeniden üretme** (şablonlarda yeni bir sınıf kullanıldığında): `sh scripts/build-css.sh`. Betik Tailwind'in standalone CLI binary'sini (sürüm `4.3.3`, sha256 doğrulanır) `tmp/araclar/` altına indirir, `backend/assets/app.css`'ten `backend/static/app.css`'i üretir. Çıktı commit'lenir: `cargo build` ve imaj derlemesi onu olduğu gibi gömer, derleme ağ istemez. Node ya da `package.json` yoktur.

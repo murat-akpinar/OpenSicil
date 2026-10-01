@@ -56,7 +56,7 @@ pub(crate) fn allowed(operator: &Operator, any_of: &[&str]) -> bool {
 }
 
 pub(crate) fn forbidden(lang: Lang) -> Response {
-    (StatusCode::FORBIDDEN, lang.t("err.no_permission")).into_response()
+    crate::errors::page(lang, StatusCode::FORBIDDEN)
 }
 
 pub(crate) fn internal(what: &str, e: impl std::fmt::Display) -> Response {

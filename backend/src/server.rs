@@ -24,6 +24,8 @@ pub(crate) fn build_router(state: AppState) -> Router {
                 .with_state(state),
         )
         .layer(axum::middleware::from_fn(logging::log_requests))
+        // En dista: govdesiz 404/405/500 yanitlari kabugun icindeki sayfaya cevrilir
+        .layer(axum::middleware::from_fn(crate::errors::error_page))
 }
 
 struct Config {
@@ -254,6 +256,51 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let body = body_text(response).await;
+        assert!(body.contains("404"), "durum kodu sayfada yok: {body}");
+        assert!(body.contains("Sayfa bulunamadı"), "404 sayfası çizilmedi");
+        assert!(body.contains("/static/app.css"), "kabuk yüklenmedi");
+    }
+
+    // `/api/*` makine ucudur: hatasi HTML sayfaya cevrilmez
+    #[tokio::test]
+    async fn the_api_health_route_answers_without_an_html_error_page() {
+        let app = build_router(test_state());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert!(!body_text(response).await.contains("<html"));
+    }
+
+    #[tokio::test]
+    async fn a_wrong_method_gets_the_error_page_not_a_blank_405() {
+        let app = build_router(test_state());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/login")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
+        assert!(body_text(response).await.contains("405"));
+    }
+
+    async fn body_text(response: axum::response::Response) -> String {
+        let bytes = axum::body::to_bytes(response.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        String::from_utf8_lossy(&bytes).into_owned()
     }
 
     #[tokio::test]
