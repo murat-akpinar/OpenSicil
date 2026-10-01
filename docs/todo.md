@@ -115,8 +115,10 @@ Kurallar:
 ### 3c. Yaşam döngüsü
 - [x] İşe giriş, görev değişikliği (önce ekleme, sonra çıkarma — [ADR-050](decisions/050-verme-sayaci-ve-is-butunlugu.md))
   - Not: ADR-083 — worker bağlı hesapta katalog grubu farkını uygular (ekleme → OU taşıma → çıkarma), `/identities/{id}/edit` ve ek rol ekle/kaldır; saatlik sayaç "bütün iş bekler" kuralı 3f'te
-- [ ] Planlı ve acil ayrılış, geri alma (yıkıcı — [ADR-030](decisions/030-ayrilisi-geri-alma-yikici.md)), hedefte doğrulanan kayıt iptali ([ADR-048](decisions/048-kayit-iptali-hedefte-dogrulanir.md)), tarihli askı ([ADR-053](decisions/053-tarihli-aski.md))
-- [ ] `ayrıldı`dan her çıkış geri alma sayılır, askı bitişi iznin son günüdür, `accountExpires` temizlenir ([ADR-059](decisions/059-netlestirmeler-operator-geri-alma-aski-bitisi-accountexpires.md))
+- [x] Planlı ve acil ayrılış, geri alma (yıkıcı — [ADR-030](decisions/030-ayrilisi-geri-alma-yikici.md)), hedefte doğrulanan kayıt iptali ([ADR-048](decisions/048-kayit-iptali-hedefte-dogrulanir.md)), tarihli askı ([ADR-053](decisions/053-tarihli-aski.md))
+  - Not: ADR-084 — kişi sayfasında yaşam döngüsü formları; worker iptali hedefte doğrular (`verified_unused`), doğrulanmış iptal ve saklama sonu aynı silme yolu (hesap silinir, bağlantı işaretlenir, son hesapta kimlik `silindi` + kişisel veri temizliği + ad yakma; iptalde yakılmaz). Zimbra onaylı silme Zimbra bölümünde; yıkıcı sayaç/eşik 3f
+- [x] `ayrıldı`dan her çıkış geri alma sayılır, askı bitişi iznin son günüdür, `accountExpires` temizlenir ([ADR-059](decisions/059-netlestirmeler-operator-geri-alma-aski-bitisi-accountexpires.md))
+  - Not: ileri tarihli bitiş `ayrıldı`dan çıkarıyorsa `identity.departure_reverted` olarak denetlenir; form iznin son gününü alır ve dönüş gününü gösterir; `accountExpires` her işte bitişe göre yazılır, bitiş yoksa `0` (lab testinde doğrulandı)
 - [ ] Yönetici ayrılışında astların etkin yöneticisi türetilir (F-38, [ADR-041](decisions/041-astlarin-yoneticisi-turetilir.md))
 - [ ] Süreli ek rol, tarih dolunca kendiliğinden kalkar (F-37, [ADR-020](decisions/020-sureli-ek-rol.md))
 - [ ] Ayrılışta gecikmeli parola sıfırlama ([ADR-033](decisions/033-ayrilista-parola-gecikmesi.md))

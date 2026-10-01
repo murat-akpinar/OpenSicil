@@ -71,6 +71,256 @@ pub fn routes() -> Router<AppState> {
         .route("/identities/{id}/edit", get(edit_form).post(edit_submit))
         .route("/identities/{id}/roles", post(assign_role))
         .route("/identities/{id}/roles/{role_id}/delete", post(remove_role))
+        .route("/identities/{id}/departure", post(departure))
+        .route("/identities/{id}/emergency", post(emergency))
+        .route("/identities/{id}/revert", post(revert))
+        .route("/identities/{id}/cancel", post(cancel))
+        .route("/identities/{id}/suspension", post(suspend))
+        .route("/identities/{id}/suspension/lift", post(lift))
+}
+
+// --- Yasam dongusu (docs/04 Leaver, aski, iptal; ADR-084) ---
+
+#[derive(Deserialize)]
+struct LifecycleForm {
+    #[serde(default)]
+    end_date: String,
+    #[serde(default)]
+    handover_manager_id: String,
+    #[serde(default)]
+    reason: String,
+    #[serde(default)]
+    return_day: String,
+    #[serde(default)]
+    suspension_start: String,
+    #[serde(default)]
+    suspension_end: String,
+}
+
+fn opt(value: &str) -> Option<&str> {
+    let v = value.trim();
+    (!v.is_empty()).then_some(v)
+}
+
+fn bad(msg: &str) -> Response {
+    (StatusCode::BAD_REQUEST, msg.to_string()).into_response()
+}
+
+async fn finish_lifecycle(
+    state: &AppState,
+    op: &Operator,
+    id: i64,
+    event: &str,
+    detail: serde_json::Value,
+    priority: crate::jobs::Priority,
+) -> Response {
+    audit_operator(state, op, event, Some(id), detail).await;
+    if let Err(e) = identity::enqueue_all_targets(&state.pool, id, priority).await {
+        eprintln!("web: iş açılamadı (kimlik {id}): {e}");
+    }
+    Redirect::to(&format!("/identities/{id}")).into_response()
+}
+
+async fn departure(
+    OperatorSession(op): OperatorSession,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Form(form): Form<LifecycleForm>,
+) -> Response {
+    if !allowed(&op, REGISTER_AUTHORITIES) {
+        return forbidden();
+    }
+    let handover = opt(&form.handover_manager_id).and_then(|h| h.parse::<i64>().ok());
+    let outcome = identity::set_departure(
+        &state.pool,
+        &state.time_zone,
+        id,
+        form.end_date.trim(),
+        handover,
+    )
+    .await;
+    let detail =
+        serde_json::json!({ "end_date": form.end_date.trim(), "handover_manager_id": handover });
+    match outcome {
+        Ok(identity::LifecycleChange::Applied) => {
+            let event = crate::audit::IDENTITY_DEPARTURE_SET;
+            finish_lifecycle(
+                &state,
+                &op,
+                id,
+                event,
+                detail,
+                crate::jobs::Priority::Single,
+            )
+            .await
+        }
+        // ADR-059 madde 2: ayrildidan her cikis geri almadir (yikici sayaca girer, 3f)
+        Ok(identity::LifecycleChange::Reverted) => {
+            let event = crate::audit::IDENTITY_DEPARTURE_REVERTED;
+            finish_lifecycle(
+                &state,
+                &op,
+                id,
+                event,
+                detail,
+                crate::jobs::Priority::Single,
+            )
+            .await
+        }
+        Ok(identity::LifecycleChange::Rejected(msg)) => bad(&msg),
+        Err(e) => internal("ayrılış yazılamadı", e),
+    }
+}
+
+async fn emergency(
+    OperatorSession(op): OperatorSession,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Form(form): Form<LifecycleForm>,
+) -> Response {
+    if !allowed(&op, REGISTER_AUTHORITIES) {
+        return forbidden();
+    }
+    let Some(reason) = opt(&form.reason) else {
+        return bad("Acil ayrılış için gerekçe zorunlu.");
+    };
+    let handover = opt(&form.handover_manager_id).and_then(|h| h.parse::<i64>().ok());
+    match identity::set_emergency_departure(&state.pool, id, handover).await {
+        Ok(true) => {
+            let detail = serde_json::json!({ "reason": reason, "handover_manager_id": handover });
+            let event = crate::audit::IDENTITY_EMERGENCY_DEPARTURE;
+            finish_lifecycle(
+                &state,
+                &op,
+                id,
+                event,
+                detail,
+                crate::jobs::Priority::Emergency,
+            )
+            .await
+        }
+        Ok(false) => bad("Kimlik silinmiş ya da devir yöneticisi kendisi."),
+        Err(e) => internal("acil ayrılış yazılamadı", e),
+    }
+}
+
+async fn revert(
+    OperatorSession(op): OperatorSession,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Form(form): Form<LifecycleForm>,
+) -> Response {
+    if !allowed(&op, REGISTER_AUTHORITIES) {
+        return forbidden();
+    }
+    let return_day = opt(&form.return_day);
+    if return_day.is_some_and(|d| crate::desired_state::Date::from_iso(d).is_none()) {
+        return bad("Dönüş günü YYYY-AA-GG olmalı.");
+    }
+    match identity::revert_departure(&state.pool, id, return_day).await {
+        Ok(true) => {
+            let detail = serde_json::json!({ "return_day": return_day });
+            let event = crate::audit::IDENTITY_DEPARTURE_REVERTED;
+            finish_lifecycle(
+                &state,
+                &op,
+                id,
+                event,
+                detail,
+                crate::jobs::Priority::Single,
+            )
+            .await
+        }
+        Ok(false) => bad(
+            "Geri alınacak bitiş yok, kimlik silinmiş ya da kadrolu dışı: kadrolu dışında ileri tarihli yeni bitiş girin.",
+        ),
+        Err(e) => internal("geri alma yazılamadı", e),
+    }
+}
+
+async fn cancel(
+    OperatorSession(op): OperatorSession,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Response {
+    if !allowed(&op, REGISTER_AUTHORITIES) {
+        return forbidden();
+    }
+    match identity::cancel_registration(&state.pool, id).await {
+        Ok(true) => {
+            let event = crate::audit::IDENTITY_CANCELLED;
+            let detail = serde_json::json!({});
+            finish_lifecycle(
+                &state,
+                &op,
+                id,
+                event,
+                detail,
+                crate::jobs::Priority::Single,
+            )
+            .await
+        }
+        Ok(false) => {
+            bad("Sahiplenilmiş hesabı olan ya da silinmiş kimlik iptal edilemez (ADR-048).")
+        }
+        Err(e) => internal("iptal yazılamadı", e),
+    }
+}
+
+async fn suspend(
+    OperatorSession(op): OperatorSession,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Form(form): Form<LifecycleForm>,
+) -> Response {
+    if !allowed(&op, REGISTER_AUTHORITIES) {
+        return forbidden();
+    }
+    let end = opt(&form.suspension_end);
+    match identity::set_suspension(&state.pool, id, form.suspension_start.trim(), end).await {
+        Ok(true) => {
+            let detail = serde_json::json!({ "suspension_start": form.suspension_start.trim(), "suspension_end": end });
+            let event = crate::audit::IDENTITY_SUSPENDED;
+            finish_lifecycle(
+                &state,
+                &op,
+                id,
+                event,
+                detail,
+                crate::jobs::Priority::Single,
+            )
+            .await
+        }
+        Ok(false) => bad("Askı tarihleri YYYY-AA-GG olmalı, son gün ilk günden önce olamaz."),
+        Err(e) => internal("askı yazılamadı", e),
+    }
+}
+
+async fn lift(
+    OperatorSession(op): OperatorSession,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Response {
+    if !allowed(&op, REGISTER_AUTHORITIES) {
+        return forbidden();
+    }
+    match identity::lift_suspension(&state.pool, id).await {
+        Ok(true) => {
+            let event = crate::audit::IDENTITY_SUSPENSION_LIFTED;
+            let detail = serde_json::json!({});
+            finish_lifecycle(
+                &state,
+                &op,
+                id,
+                event,
+                detail,
+                crate::jobs::Priority::Single,
+            )
+            .await
+        }
+        Ok(false) => bad("Kaldırılacak askı yok."),
+        Err(e) => internal("askı kaldırılamadı", e),
+    }
 }
 
 // --- Gorev degisikligi (docs/04 Mover, ADR-083): alanlar, ek roller ---
@@ -831,6 +1081,81 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(remaining, 0);
+
+        // ADR-084 yasam dongusu rotalari: acil gerekcesiz 400, aski → sayfada donus gunu,
+        // kaldirma, planli ayrilis → denetim satiri.
+        let r = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                &format!("/identities/{id}/emergency"),
+                "reason=",
+                &hr,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::BAD_REQUEST);
+        let r = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                &format!("/identities/{id}/suspension"),
+                "suspension_start=2030-01-05&suspension_end=2030-01-15",
+                &hr,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::SEE_OTHER);
+        let body = body_string(
+            app.clone()
+                .oneshot(request("GET", &page, "", &hr))
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert!(body.contains("2030-01-16 00:00"), "{body}");
+        let r = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                &format!("/identities/{id}/suspension/lift"),
+                "",
+                &hr,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::SEE_OTHER);
+        let r = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                &format!("/identities/{id}/departure"),
+                "end_date=2030-06-30",
+                &auditor,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::FORBIDDEN);
+        let r = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                &format!("/identities/{id}/departure"),
+                "end_date=2030-06-30",
+                &hr,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::SEE_OTHER);
+        let departures: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM audit_log WHERE identity_id = $1 AND event_type = $2",
+        )
+        .bind(id)
+        .bind(crate::audit::IDENTITY_DEPARTURE_SET)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(departures, 1);
 
         drop(app);
         drop(pool);

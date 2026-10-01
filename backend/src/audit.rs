@@ -20,6 +20,12 @@ pub const MAPPING_CHANGED: &str = "mapping.changed";
 pub const IDENTITY_CHANGED: &str = "identity.changed";
 pub const IDENTITY_ROLE_ASSIGNED: &str = "identity.role_assigned";
 pub const IDENTITY_ROLE_REMOVED: &str = "identity.role_removed";
+pub const IDENTITY_DEPARTURE_SET: &str = "identity.departure_set";
+pub const IDENTITY_EMERGENCY_DEPARTURE: &str = "identity.emergency_departure";
+pub const IDENTITY_DEPARTURE_REVERTED: &str = "identity.departure_reverted";
+pub const IDENTITY_CANCELLED: &str = "identity.cancelled";
+pub const IDENTITY_SUSPENDED: &str = "identity.suspended";
+pub const IDENTITY_SUSPENSION_LIFTED: &str = "identity.suspension_lifted";
 
 pub struct Actor<'a> {
     pub subject: Option<&'a str>,

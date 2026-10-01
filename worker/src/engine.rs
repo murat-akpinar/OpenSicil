@@ -140,6 +140,14 @@ struct AdJob<'a> {
 }
 
 async fn reconcile_ad(c: &AdJob<'_>, ldap: &mut Ldap) -> Result<String, JobError> {
+    // ADR-048: iptal once hedefte dogrulanir; sonuc baglantiya yazilir, uygulama sonraki iste
+    if let (Some(link), true, Some(None)) = (
+        &c.input.link_row,
+        c.input.timeline.cancelled,
+        c.input.link.as_ref().map(|l| l.verified_unused),
+    ) {
+        return verify_cancellation(c, ldap, link).await;
+    }
     match (&c.input.link_row, c.desired.account) {
         (None, AccountPresence::Present { enabled }) => provision(c, ldap, enabled).await,
         (None, presence) => Ok(format!("hesap yok ve açılmayacak: {presence:?}")),
@@ -153,9 +161,7 @@ async fn reconcile_ad(c: &AdJob<'_>, ldap: &mut Ldap) -> Result<String, JobError
                 result
             })
         }
-        (Some(_), AccountPresence::Absent) => {
-            Ok("hesap silinmeli; silme saklama kutucuğuyla (3c) gelir".to_string())
-        }
+        (Some(link), AccountPresence::Absent) => delete_account(c, ldap, link).await,
         (Some(_), AccountPresence::AwaitingDeletionApproval) => {
             Ok("silinmeyi bekliyor (ADR-024)".to_string())
         }
@@ -517,17 +523,189 @@ async fn reconcile_existing(
     // ADR-050 sirasi: pasiflestirme → ekleme → OU tasima → cikarma → oznitelikler
     let (dn, groups) = sync_groups_and_ou(c, ldap, &account).await?;
     let attrs = sync_attributes(c, ldap, &dn).await?;
+    let expires = sync_account_expires(c, ldap, &dn).await?;
     if applied == Applied::DryRun || c.env.mode.dry_run {
         return Ok(format!(
-            "kuru çalıştırma, uygulanacaktı: {note}{groups}{attrs} ({dn})"
+            "kuru çalıştırma, uygulanacaktı: {note}{groups}{attrs}{expires} ({dn})"
         ));
     }
     if transition {
         set_applied_state(c, state).await?;
     }
     Ok(format!(
-        "{note}{groups}{attrs}: {dn} → applied_state {state}"
+        "{note}{groups}{attrs}{expires}: {dn} → applied_state {state}"
     ))
+}
+
+// ADR-046/048: hic kullanilmamis = lastLogonTimestamp bos ve pwdLastSet 0.
+// Dogrulama sonucu baglantiya yazilir; red ayrilis olarak uygulanir (desired_state).
+async fn verify_cancellation(
+    c: &AdJob<'_>,
+    ldap: &mut Ldap,
+    link: &LinkRow,
+) -> Result<String, JobError> {
+    let unused = match ad_account::find_by_guid(ldap, &link.external_id).await? {
+        Some(account) => {
+            account.last_logon_timestamp.is_none()
+                && account.pwd_last_set.as_deref().is_none_or(|v| v == "0")
+        }
+        // hedefte hesap yok: silinecek bir sey yok, iptal gecerli sayilir
+        None => true,
+    };
+    sqlx::query(
+        "UPDATE account_links SET verified_unused = $3 WHERE identity_id = $1 AND target_system_id = $2",
+    )
+    .bind(c.job.identity_id)
+    .bind(c.job.target_system_id)
+    .bind(unused)
+    .execute(c.pool)
+    .await
+    .map_err(|e| JobError::Failed(format!("iptal doğrulaması yazılamadı: {e}")))?;
+    let (event, note) = if unused {
+        (
+            "ad.cancellation.verified",
+            "iptal doğrulandı: hesap hiç kullanılmamış; silme sonraki işte",
+        )
+    } else {
+        (
+            "ad.cancellation.rejected",
+            "iptal reddedildi: hesap kullanılmış ya da sahiplenilmiş; ayrılış olarak uygulanır (ADR-048)",
+        )
+    };
+    sqlx::query(
+        "INSERT INTO audit_log (event_type, identity_id, target_system_id, detail) \
+         VALUES ($1, $2, $3, $4::jsonb)",
+    )
+    .bind(event)
+    .bind(c.job.identity_id)
+    .bind(c.job.target_system_id)
+    .bind(format!("{{\"unused\":{unused}}}"))
+    .execute(c.pool)
+    .await
+    .map_err(|e| JobError::Failed(format!("denetim satırı yazılamadı: {e}")))?;
+    Ok(note.to_string())
+}
+
+// ADR-024/038/084: hesap silinir (yikici), baglanti isaretlenir; son hesapsa kimlik
+// `silindi` olur, kisisel veri temizlenir, adlar yakilir (iptalde yakilmaz, ADR-035).
+async fn delete_account(
+    c: &AdJob<'_>,
+    ldap: &mut Ldap,
+    link: &LinkRow,
+) -> Result<String, JobError> {
+    let note = match ad_account::dn_by_guid(ldap, &link.external_id).await? {
+        Some(dn) => {
+            let op = WriteOp::DeleteAccount { dn: dn.clone() };
+            if apply(c, ldap, op, OperationClass::Destructive).await? == Applied::DryRun {
+                return Ok(format!(
+                    "kuru çalıştırma, uygulanacaktı: hesap silinir ({dn})"
+                ));
+            }
+            format!("hesap silindi: {dn}")
+        }
+        None => "hesap hedefte zaten yok; bağlantı silindi işaretlendi".to_string(),
+    };
+    sqlx::query(
+        "UPDATE account_links SET deleted_by_us_at = now(), applied_state = 'deleted' \
+         WHERE identity_id = $1 AND target_system_id = $2",
+    )
+    .bind(c.job.identity_id)
+    .bind(c.job.target_system_id)
+    .execute(c.pool)
+    .await
+    .map_err(|e| JobError::Failed(format!("bağlantı güncellenemedi: {e}")))?;
+    let finalized = finalize_if_last_account(c).await?;
+    Ok(if finalized {
+        format!("{note}; son hesap: kimlik silindi, kişisel veri temizlendi")
+    } else {
+        note
+    })
+}
+
+async fn finalize_if_last_account(c: &AdJob<'_>) -> Result<bool, JobError> {
+    let db = |e: sqlx::Error| JobError::Failed(format!("kimlik kapanışı yazılamadı: {e}"));
+    let remaining: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM account_links WHERE identity_id = $1 AND deleted_by_us_at IS NULL",
+    )
+    .bind(c.job.identity_id)
+    .fetch_one(c.pool)
+    .await
+    .map_err(db)?;
+    if remaining > 0 {
+        return Ok(false);
+    }
+    if !c.input.timeline.cancelled {
+        sqlx::query(
+            "INSERT INTO used_names (name, kind, former_identity_id) \
+             SELECT username, 'username', id FROM identities WHERE id = $1 AND username IS NOT NULL \
+             UNION ALL SELECT email, 'email', id FROM identities WHERE id = $1 AND email IS NOT NULL \
+             ON CONFLICT DO NOTHING",
+        )
+        .bind(c.job.identity_id)
+        .execute(c.pool)
+        .await
+        .map_err(db)?;
+    }
+    sqlx::query(
+        "UPDATE identities SET deleted_at = now(), given_name = '', surname = '', \
+         employee_number = NULL, mobile_phone = NULL, national_id_enc = NULL, \
+         national_id_bidx = NULL, national_id_country = NULL WHERE id = $1 AND deleted_at IS NULL",
+    )
+    .bind(c.job.identity_id)
+    .execute(c.pool)
+    .await
+    .map_err(db)?;
+    sqlx::query(
+        "INSERT INTO audit_log (event_type, identity_id, target_system_id, detail) \
+         VALUES ('identity.deleted', $1, $2, $3::jsonb)",
+    )
+    .bind(c.job.identity_id)
+    .bind(c.job.target_system_id)
+    .bind(format!(
+        "{{\"names_burned\":{}}}",
+        !c.input.timeline.cancelled
+    ))
+    .execute(c.pool)
+    .await
+    .map_err(db)?;
+    Ok(true)
+}
+
+// ADR-059 madde 4: accountExpires olmasi gereken durumun parcasi; bitis yoksa 0.
+// AD "suresiz"i 0 ya da i64::MAX ile gosterir.
+async fn sync_account_expires(
+    c: &AdJob<'_>,
+    ldap: &mut Ldap,
+    dn: &str,
+) -> Result<String, JobError> {
+    const NEVER_MAX: &str = "9223372036854775807";
+    let current = ad_account::read_attributes(ldap, dn, &["accountExpires"]).await?;
+    let current = current
+        .get("accountExpires")
+        .and_then(|v| v.first())
+        .map(|v| {
+            if v == NEVER_MAX {
+                "0".to_string()
+            } else {
+                v.clone()
+            }
+        })
+        .unwrap_or_else(|| "0".to_string());
+    let desired = c
+        .desired
+        .account_expires
+        .map(ad_account::unix_to_filetime)
+        .unwrap_or(0)
+        .to_string();
+    if current == desired {
+        return Ok(String::new());
+    }
+    let op = WriteOp::SetAttributes {
+        dn: dn.to_string(),
+        changes: vec![("accountExpires".to_string(), Some(desired))],
+    };
+    apply(c, ldap, op, OperationClass::Attribute).await?;
+    Ok(", accountExpires güncellendi".to_string())
 }
 
 // Uyelik farki yalnizca katalog gruplari uzerinden (docs/03 "Motor neye dokunur").
@@ -1006,14 +1184,112 @@ mod tests {
         assert!(account.member_of.is_empty(), "{:?}", account.member_of);
         assert!(!account.enabled);
 
-        // ADR-040: hedefte elle silinmis bagli hesap yeniden acilmaz, "kayip hesap".
-        ldap.delete(&account.dn).await.unwrap().success().unwrap();
-        let lost = run_job(&pool, &job, &env(false)).await.unwrap();
-        assert!(lost.contains("kayıp hesap"), "{lost}");
-        let links: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM account_links")
-            .fetch_one(&pool)
+        // ADR-059 madde 4: bitis kalkinca accountExpires 0 (suresiz) yazilir.
+        let expires = ad_account::read_attributes(&mut ldap, &account.dn, &["accountExpires"])
             .await
             .unwrap();
+        assert_ne!(
+            expires["accountExpires"][0], "0",
+            "ayrılan: bitiş FILETIME yazılı"
+        );
+        // bitis kaldirilinca (geri alma) accountExpires suresiz (0) yazilir; sonra yeniden ayrilis
+        sqlx::query("UPDATE identities SET end_at = NULL WHERE id = $1")
+            .bind(seed.identity)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let reverted = run_job(&pool, &job, &env(false)).await.unwrap();
+        assert!(
+            reverted.contains("accountExpires güncellendi"),
+            "{reverted}"
+        );
+        // geri alma hesabi rol OU'suna geri tasidi: DN GUID'den yeniden okunur
+        let dn = ad_account::dn_by_guid(&mut ldap, &guid)
+            .await
+            .unwrap()
+            .unwrap();
+        let expires = ad_account::read_attributes(&mut ldap, &dn, &["accountExpires"])
+            .await
+            .unwrap();
+        assert_eq!(expires["accountExpires"][0], "0");
+        sqlx::query("UPDATE identities SET end_at = now() - interval '1 hour' WHERE id = $1")
+            .bind(seed.identity)
+            .execute(&pool)
+            .await
+            .unwrap();
+        run_job(&pool, &job, &env(false)).await.unwrap();
+
+        // ADR-048/084: kayit iptali — once dogrulama (hic giris yok, pwdLastSet 0), sonra silme;
+        // iptal adi yakmaz (ADR-035), son hesap kimligi `silindi` yapar (ADR-038).
+        sqlx::query("UPDATE identities SET cancelled = TRUE WHERE id = $1")
+            .bind(seed.identity)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let verified = run_job(&pool, &job, &env(false)).await.unwrap();
+        assert!(verified.contains("iptal doğrulandı"), "{verified}");
+        let deleted = run_job(&pool, &job, &env(false)).await.unwrap();
+        assert!(
+            deleted.contains("hesap silindi") && deleted.contains("kimlik silindi"),
+            "{deleted}"
+        );
+        assert!(ad_account::find_by_guid(&mut ldap, &guid)
+            .await
+            .unwrap()
+            .is_none());
+        let (deleted_at, given, burned): (Option<i64>, String, i64) = sqlx::query_as(
+            "SELECT EXTRACT(EPOCH FROM deleted_at)::bigint, given_name, \
+             (SELECT COUNT(*) FROM used_names) FROM identities WHERE id = $1",
+        )
+        .bind(seed.identity)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(
+            deleted_at.is_some() && given.is_empty(),
+            "kişisel veri temizlendi"
+        );
+        assert_eq!(burned, 0, "kayıt iptali ad yakmaz");
+
+        // ADR-040: hedefte elle silinmis bagli hesap yeniden acilmaz, "kayip hesap"
+        // (ikinci kimlikle: hesap ac, elle sil, is yeniden acmaz). Once "hesap acilsin"
+        // yeniden acilir (yukarida kapatilmisti).
+        for sql in [
+            "UPDATE role_target_settings SET provision_account = NULL WHERE target_system_id = $1",
+            "UPDATE department_target_settings SET provision_account = NULL WHERE target_system_id = $1",
+            "UPDATE target_systems SET provision_account_default = TRUE WHERE id = $1",
+        ] {
+            sqlx::query(sql).bind(seed.ad).execute(&pool).await.unwrap();
+        }
+        test_support::enqueue(&pool, seed.other_identity, seed.ad, 1).await;
+        // ilk is hala kirali ("running"); claim siradaki acik isi, yani bunu verir
+        let other_job = crate::queue::claim(&pool, "w1", &[])
+            .await
+            .unwrap()
+            .expect("ikinci kimliğin işi kuyrukta olmalı");
+        assert_eq!(other_job.identity_id, seed.other_identity);
+        let opened = run_job(&pool, &other_job, &env(false)).await.unwrap();
+        assert!(opened.starts_with("hesap açıldı"), "{opened}");
+        let other_guid: String =
+            sqlx::query_scalar("SELECT external_id FROM account_links WHERE identity_id = $1")
+                .bind(seed.other_identity)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let other_dn = ad_account::dn_by_guid(&mut ldap, &other_guid)
+            .await
+            .unwrap()
+            .unwrap();
+        ldap.delete(&other_dn).await.unwrap().success().unwrap();
+        let lost = run_job(&pool, &other_job, &env(false)).await.unwrap();
+        assert!(lost.contains("kayıp hesap"), "{lost}");
+        let links: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM account_links WHERE identity_id = $1 AND deleted_by_us_at IS NULL",
+        )
+        .bind(seed.other_identity)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(links, 1, "bağlantı korunur, yeni hesap açılmaz");
         ldap.unbind().await.ok();
         drop(pool);

@@ -53,4 +53,5 @@
 - Öznitelik eşlemesi: izinli liste, sadece boşsa yaz, yönetici eşlemesi ve ekran (ADR-082)
 - Hesap açılsın=hayır mevcut hesabı silmez, kayıp hesap ve belirsiz yönetici dokunulmaz (ADR-040)
 - Görev değişikliği: üyelik farkı, OU taşıma, kimlik düzenleme ve ek roller (ADR-050/083)
+- Ayrılış, geri alma, kayıt iptali, tarihli askı ve hesap silme (ADR-030/048/053/059/084)
 

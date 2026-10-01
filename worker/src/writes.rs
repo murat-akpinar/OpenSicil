@@ -67,6 +67,10 @@ pub enum WriteOp {
         new_rdn: String,
         new_parent: String,
     },
+    /// Saklama sonu ya da dogrulanmis iptal (ADR-024/048/084)
+    DeleteAccount {
+        dn: String,
+    },
 }
 
 impl WriteOp {
@@ -79,6 +83,7 @@ impl WriteOp {
             WriteOp::RemoveMember { .. } => "ad.group.remove_member",
             WriteOp::SetAttributes { .. } => "ad.account.attributes",
             WriteOp::MoveAccount { .. } => "ad.account.move",
+            WriteOp::DeleteAccount { .. } => "ad.account.delete",
         }
     }
 
@@ -98,6 +103,7 @@ impl WriteOp {
             WriteOp::SetEnabled { dn, enabled } => {
                 format!("{{\"dn\":\"{}\",\"enabled\":{enabled}}}", q(dn))
             }
+            WriteOp::DeleteAccount { dn } => format!("{{\"dn\":\"{}\"}}", q(dn)),
             // Degerler yazilmaz: hassas kaynak (kimlik no) denetim kaydina girmez (docs/07)
             WriteOp::SetAttributes { dn, changes } => format!(
                 "{{\"dn\":\"{}\",\"attributes\":[{}]}}",

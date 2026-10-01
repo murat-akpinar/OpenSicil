@@ -37,6 +37,55 @@
 </div>
 {% endif %}
 
+{% if can_edit_names && !page.lifecycle.deleted %}
+<h2 class="font-medium mb-2">Yaşam döngüsü</h2>
+<div class="grid grid-cols-2 gap-4 mb-6 text-sm">
+  {% if !page.lifecycle.departed %}
+  <form method="post" action="/identities/{{ page.person.id }}/departure" class="rounded p-3 space-y-2" style="border:1px solid #313244;">
+    <p class="font-medium">Planlı ayrılış</p>
+    <label class="block">Son çalışma günü <input class="w-full rounded px-2 py-1 text-black" type="date" name="end_date" value="{{ page.lifecycle.end_date }}" required></label>
+    <label class="block">Astların devir yöneticisi (kimlik no) <input class="w-full rounded px-2 py-1 text-black" type="text" name="handover_manager_id" value="{{ page.lifecycle.handover_manager_id }}"></label>
+    <button class="rounded px-3 py-1" style="background:#89b4fa; color:#1e1e2e;" type="submit">Kaydet</button>
+  </form>
+  <form method="post" action="/identities/{{ page.person.id }}/emergency" class="rounded p-3 space-y-2" style="border:1px solid #f38ba8;">
+    <p class="font-medium" style="color:#f38ba8;">Acil ayrılış</p>
+    <label class="block">Gerekçe <input class="w-full rounded px-2 py-1 text-black" type="text" name="reason" required></label>
+    <label class="block">Astların devir yöneticisi (kimlik no) <input class="w-full rounded px-2 py-1 text-black" type="text" name="handover_manager_id" value="{{ page.lifecycle.handover_manager_id }}"></label>
+    <p class="text-xs" style="color:#a6adc8;">Hesap hemen pasifleşir ve parola sıfırlanır; açık Kerberos biletleri ve çevrimdışı cihaz önbelleği bundan etkilenmez (docs/05).</p>
+    <button class="rounded px-3 py-1" style="background:#f38ba8; color:#1e1e2e;" type="submit">Acil ayrılış</button>
+  </form>
+  {% else %}
+  <form method="post" action="/identities/{{ page.person.id }}/revert" class="rounded p-3 space-y-2" style="border:1px solid #313244;">
+    <p class="font-medium">Ayrılışı geri al (yıkıcı işlem, ADR-030)</p>
+    <label class="block">Dönüş günü (boşsa hemen) <input class="w-full rounded px-2 py-1 text-black" type="date" name="return_day"></label>
+    <button class="rounded px-3 py-1" style="background:#89b4fa; color:#1e1e2e;" type="submit">Geri al</button>
+  </form>
+  {% endif %}
+  {% if page.lifecycle.suspension_start.is_empty() %}
+  <form method="post" action="/identities/{{ page.person.id }}/suspension" class="rounded p-3 space-y-2" style="border:1px solid #313244;">
+    <p class="font-medium">Askıya al (ADR-053)</p>
+    <label class="block">İlk gün <input class="w-full rounded px-2 py-1 text-black" type="date" name="suspension_start" required></label>
+    <label class="block">İznin son günü (boşsa elle kaldırılır) <input class="w-full rounded px-2 py-1 text-black" type="date" name="suspension_end"></label>
+    <button class="rounded px-3 py-1" style="background:#89b4fa; color:#1e1e2e;" type="submit">Askıya al</button>
+  </form>
+  {% else %}
+  <form method="post" action="/identities/{{ page.person.id }}/suspension/lift" class="rounded p-3 space-y-2" style="border:1px solid #313244;">
+    <p class="font-medium">Askı: {{ page.lifecycle.suspension_start }} – {% if page.lifecycle.suspension_end.is_empty() %}açık uçlu{% else %}{{ page.lifecycle.suspension_end }} (hesaplar {{ page.lifecycle.return_day }} 00:00'da açılır){% endif %}</p>
+    <button class="rounded px-3 py-1" style="background:#89b4fa; color:#1e1e2e;" type="submit">Askıyı kaldır</button>
+  </form>
+  {% endif %}
+  {% if page.lifecycle.can_cancel && !page.lifecycle.cancelled %}
+  <form method="post" action="/identities/{{ page.person.id }}/cancel" class="rounded p-3 space-y-2" style="border:1px solid #313244;">
+    <p class="font-medium">Kayıt iptali (ADR-048)</p>
+    <p class="text-xs" style="color:#a6adc8;">Yazım hatası ya da hiç gelmeyen kişi için. Worker hesabın hiç kullanılmadığını doğrular; kullanılmışsa ayrılış olarak uygulanır. Ad yakılmaz.</p>
+    <button class="rounded px-3 py-1" style="background:#f9e2af; color:#1e1e2e;" type="submit">Kaydı iptal et</button>
+  </form>
+  {% endif %}
+  {% if page.lifecycle.cancelled %}<p style="color:#f9e2af;">Kayıt iptali istendi; worker hedefte doğruluyor.</p>{% endif %}
+  {% if page.lifecycle.emergency %}<p style="color:#f38ba8;">Acil ayrılış.</p>{% endif %}
+</div>
+{% endif %}
+
 <div class="flex justify-between items-center mb-2">
   <h2 class="font-medium">Ek roller</h2>
   {% if can_edit_names %}<a class="text-sm underline" href="/identities/{{ page.person.id }}/edit">Kimliği düzenle</a>{% endif %}

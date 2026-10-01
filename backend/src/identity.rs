@@ -458,6 +458,213 @@ pub struct PersonPage {
     pub name_intervention: bool,
     pub additional_roles: Vec<AssignedRole>,
     pub role_options: Vec<Choice>,
+    pub lifecycle: LifecycleInfo,
+}
+
+/// Kisi sayfasindaki yasam dongusu bolumu (docs/04; ADR-030/048/053/059/084).
+pub struct LifecycleInfo {
+    pub end_date: String,
+    pub handover_manager_id: String,
+    pub suspension_start: String,
+    pub suspension_end: String,
+    /// Iznin son gununun ertesi: "hesaplar X 00:00'da acilir" (ADR-059 madde 3)
+    pub return_day: String,
+    pub cancelled: bool,
+    pub emergency: bool,
+    pub departed: bool,
+    pub deleted: bool,
+    /// Hic sahiplenilmis baglantisi yoksa iptal dugmesi gosterilir (ADR-048)
+    pub can_cancel: bool,
+}
+
+async fn load_lifecycle(
+    pool: &PgPool,
+    time_zone: &str,
+    id: i64,
+    state: LifecycleState,
+) -> Result<LifecycleInfo, sqlx::Error> {
+    type Row = (
+        Option<String>,
+        Option<i64>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        bool,
+        bool,
+        bool,
+    );
+    let r: Row = sqlx::query_as(
+        "SELECT to_char((end_at AT TIME ZONE $2) - interval '1 day', 'YYYY-MM-DD'), \
+         handover_manager_id, to_char(suspension_start, 'YYYY-MM-DD'), \
+         to_char(suspension_end, 'YYYY-MM-DD'), to_char(suspension_end + 1, 'YYYY-MM-DD'), \
+         cancelled, emergency_departure, \
+         NOT EXISTS (SELECT 1 FROM account_links l WHERE l.identity_id = i.id AND l.origin = 'adopted') \
+         FROM identities i WHERE id = $1",
+    )
+    .bind(id)
+    .bind(time_zone)
+    .fetch_one(pool)
+    .await?;
+    Ok(LifecycleInfo {
+        end_date: r.0.unwrap_or_default(),
+        handover_manager_id: r.1.map(|m| m.to_string()).unwrap_or_default(),
+        suspension_start: r.2.unwrap_or_default(),
+        suspension_end: r.3.unwrap_or_default(),
+        return_day: r.4.unwrap_or_default(),
+        cancelled: r.5,
+        emergency: r.6,
+        departed: state == LifecycleState::Departed,
+        deleted: state == LifecycleState::Deleted,
+        can_cancel: r.7 && state != LifecycleState::Deleted,
+    })
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum LifecycleChange {
+    Applied,
+    /// `ayrildi`dan cikis: geri alma sayilir (ADR-059 madde 2)
+    Reverted,
+    Rejected(String),
+}
+
+// Planli ayrilis: son calisma gunu → ertesi gun 00:00 (ADR-038). Kimlik `ayrildi`
+// iken ileri tarih = geri alma.
+pub async fn set_departure(
+    pool: &PgPool,
+    time_zone: &str,
+    id: i64,
+    end_date: &str,
+    handover: Option<i64>,
+) -> Result<LifecycleChange, sqlx::Error> {
+    if Date::from_iso(end_date).is_none() {
+        return Ok(LifecycleChange::Rejected(
+            "Bitiş tarihi YYYY-AA-GG olmalı".to_string(),
+        ));
+    }
+    let before = load_state(pool, time_zone, id).await?;
+    let done = sqlx::query(
+        "UPDATE identities SET end_at = (($2::date + 1)::timestamp AT TIME ZONE $3), \
+         handover_manager_id = $4, emergency_departure = FALSE, cancelled = FALSE \
+         WHERE id = $1 AND deleted_at IS NULL AND $2::date >= start_date \
+         AND ($4::bigint IS NULL OR $4 <> $1)",
+    )
+    .bind(id)
+    .bind(end_date)
+    .bind(time_zone)
+    .bind(handover)
+    .execute(pool)
+    .await?;
+    if done.rows_affected() != 1 {
+        return Ok(LifecycleChange::Rejected(
+            "Bitiş başlangıçtan önce olamaz, devir yöneticisi kendisi olamaz ya da kimlik silinmiş"
+                .to_string(),
+        ));
+    }
+    after_departed(pool, time_zone, id, before).await
+}
+
+async fn after_departed(
+    pool: &PgPool,
+    time_zone: &str,
+    id: i64,
+    before: Option<LifecycleState>,
+) -> Result<LifecycleChange, sqlx::Error> {
+    let after = load_state(pool, time_zone, id).await?;
+    Ok(
+        if before == Some(LifecycleState::Departed) && after != Some(LifecycleState::Departed) {
+            LifecycleChange::Reverted
+        } else {
+            LifecycleChange::Applied
+        },
+    )
+}
+
+// Acil ayrilis: bitis ani simdi, acil isareti (ADR-016/033); gerekce denetimde.
+pub async fn set_emergency_departure(
+    pool: &PgPool,
+    id: i64,
+    handover: Option<i64>,
+) -> Result<bool, sqlx::Error> {
+    let done = sqlx::query(
+        "UPDATE identities SET end_at = now(), emergency_departure = TRUE, cancelled = FALSE, \
+         handover_manager_id = $2 WHERE id = $1 AND deleted_at IS NULL \
+         AND ($2::bigint IS NULL OR $2 <> $1)",
+    )
+    .bind(id)
+    .bind(handover)
+    .execute(pool)
+    .await?;
+    Ok(done.rows_affected() == 1)
+}
+
+// Geri alma (ADR-030/059): bitis kaldirilir; donus gunu ilerideyse baslangic o gun.
+// Kadrolu disinda bitis zorunlu (docs/03): orada geri alma ileri tarihli bitisle
+// yapilir (set_departure → Reverted).
+pub async fn revert_departure(
+    pool: &PgPool,
+    id: i64,
+    return_day: Option<&str>,
+) -> Result<bool, sqlx::Error> {
+    let done = sqlx::query(
+        "UPDATE identities SET end_at = NULL, emergency_departure = FALSE, cancelled = FALSE, \
+         start_date = COALESCE($2::date, start_date) \
+         WHERE id = $1 AND deleted_at IS NULL AND end_at IS NOT NULL \
+         AND employment_type = 'permanent'",
+    )
+    .bind(id)
+    .bind(return_day)
+    .execute(pool)
+    .await?;
+    Ok(done.rows_affected() == 1)
+}
+
+// Kayit iptali (ADR-048): isaret + bitis simdi; dogrulama worker'da.
+pub async fn cancel_registration(pool: &PgPool, id: i64) -> Result<bool, sqlx::Error> {
+    let done = sqlx::query(
+        "UPDATE identities SET cancelled = TRUE, end_at = now(), emergency_departure = FALSE \
+         WHERE id = $1 AND deleted_at IS NULL \
+         AND NOT EXISTS (SELECT 1 FROM account_links l WHERE l.identity_id = $1 AND l.origin = 'adopted')",
+    )
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(done.rows_affected() == 1)
+}
+
+// Tarihli aski (ADR-053): ilk gun ve iznin son gunu; bitis >= baslangic (CHECK).
+pub async fn set_suspension(
+    pool: &PgPool,
+    id: i64,
+    start: &str,
+    end: Option<&str>,
+) -> Result<bool, sqlx::Error> {
+    if Date::from_iso(start).is_none() || end.is_some_and(|e| Date::from_iso(e).is_none()) {
+        return Ok(false);
+    }
+    if end.is_some_and(|e| e < start) {
+        return Ok(false);
+    }
+    let done = sqlx::query(
+        "UPDATE identities SET suspension_start = $2::date, suspension_end = $3::date \
+         WHERE id = $1 AND deleted_at IS NULL",
+    )
+    .bind(id)
+    .bind(start)
+    .bind(end)
+    .execute(pool)
+    .await?;
+    Ok(done.rows_affected() == 1)
+}
+
+pub async fn lift_suspension(pool: &PgPool, id: i64) -> Result<bool, sqlx::Error> {
+    let done = sqlx::query(
+        "UPDATE identities SET suspension_start = NULL, suspension_end = NULL \
+         WHERE id = $1 AND suspension_start IS NOT NULL",
+    )
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(done.rows_affected() == 1)
 }
 
 pub async fn load_page(
@@ -482,6 +689,7 @@ pub async fn load_page(
             "SELECT id, name FROM roles WHERE kind = 'additional' ORDER BY name",
         )
         .await?,
+        lifecycle: load_lifecycle(pool, time_zone, id, state).await?,
         person,
         jobs,
         name_intervention,
@@ -1110,6 +1318,109 @@ mod tests {
         assert_eq!(assigned[0].ends_on, "2099-12-31");
         assert!(remove_role(&pool, id, additional).await.unwrap());
         assert!(!remove_role(&pool, id, additional).await.unwrap());
+
+        // ADR-084 yasam dongusu: planli ayrilis, gecmis bitis → ayrildi, ileri tarih = geri alma,
+        // acil, geri alma donus gunuyle, aski ve kaldirma, iptal (sahiplenilmis baglanti engeller).
+        sqlx::query("UPDATE identities SET start_date = '2026-09-01' WHERE id = $1")
+            .bind(id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(matches!(
+            set_departure(&pool, tz, id, "2026-08-01", None)
+                .await
+                .unwrap(),
+            LifecycleChange::Rejected(_)
+        ));
+        // son calisma gunu gecmiste: bitis ani (ertesi gun 00:00) gecti → ayrildi
+        assert_eq!(
+            set_departure(&pool, tz, id, "2026-09-30", Some(ids[0]))
+                .await
+                .unwrap(),
+            LifecycleChange::Applied
+        );
+        assert_eq!(
+            load_state(&pool, tz, id).await.unwrap(),
+            Some(LifecycleState::Departed)
+        );
+        assert_eq!(
+            set_departure(&pool, tz, id, "2099-01-01", None)
+                .await
+                .unwrap(),
+            LifecycleChange::Reverted,
+            "ayrildidan cikis geri almadir (ADR-059)"
+        );
+        assert!(set_emergency_departure(&pool, id, Some(id)).await.is_ok());
+        assert!(
+            !set_emergency_departure(&pool, id, Some(id)).await.unwrap(),
+            "devir yöneticisi kendisi olamaz"
+        );
+        assert!(set_emergency_departure(&pool, id, None).await.unwrap());
+        let info = load_lifecycle(&pool, tz, id, LifecycleState::Departed)
+            .await
+            .unwrap();
+        assert!(info.emergency && info.departed && info.can_cancel);
+        // Kadrolu disi (sozlesmeli): bitis kaldirilamaz, ileri tarihli bitis = geri alma
+        assert!(
+            !revert_departure(&pool, id, Some("2099-05-05"))
+                .await
+                .unwrap(),
+            "sözleşmelide bitiş kaldırılamaz"
+        );
+        assert_eq!(
+            set_departure(&pool, tz, id, "2099-05-05", None)
+                .await
+                .unwrap(),
+            LifecycleChange::Reverted
+        );
+        assert_eq!(
+            load_state(&pool, tz, id).await.unwrap(),
+            Some(LifecycleState::Active)
+        );
+        assert!(!set_suspension(&pool, id, "2026-10-05", Some("2026-10-01"))
+            .await
+            .unwrap());
+        assert!(set_suspension(&pool, id, "2026-10-05", Some("2026-10-15"))
+            .await
+            .unwrap());
+        let info = load_lifecycle(&pool, tz, id, LifecycleState::Active)
+            .await
+            .unwrap();
+        assert_eq!(
+            (info.suspension_end.as_str(), info.return_day.as_str()),
+            ("2026-10-15", "2026-10-16")
+        );
+        assert!(lift_suspension(&pool, id).await.unwrap());
+        assert!(!lift_suspension(&pool, id).await.unwrap());
+        sqlx::query(
+            "INSERT INTO account_links (identity_id, target_system_id, external_id, origin, mode) \
+             SELECT $1, id, 'adopted-1', 'adopted', 'observed' FROM target_systems WHERE kind = 'ad'",
+        )
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert!(
+            !cancel_registration(&pool, id).await.unwrap(),
+            "sahiplenilmiş hesap iptal edilemez"
+        );
+        // Kadrolu (Ali): iptal → ayrildi; geri alma bitisi kaldirir (donus gunu ileride → bekliyor)
+        assert!(cancel_registration(&pool, ids[1]).await.unwrap());
+        assert_eq!(
+            load_state(&pool, tz, ids[1]).await.unwrap(),
+            Some(LifecycleState::Departed)
+        );
+        assert!(revert_departure(&pool, ids[1], Some("2099-05-05"))
+            .await
+            .unwrap());
+        assert_eq!(
+            load_state(&pool, tz, ids[1]).await.unwrap(),
+            Some(LifecycleState::Pending)
+        );
+        assert!(
+            !revert_departure(&pool, ids[1], None).await.unwrap(),
+            "geri alınacak bitiş yok"
+        );
 
         drop(pool);
         crate::test_support::drop_temp_db(&admin_pool, &db_name).await;

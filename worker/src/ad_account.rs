@@ -202,6 +202,14 @@ impl TargetWriter for AdWriter<'_> {
                 .success()
                 .map(|_| ())
                 .map_err(ad::classify),
+            WriteOp::DeleteAccount { dn } => self
+                .ldap
+                .delete(dn)
+                .await
+                .map_err(ad::classify)?
+                .success()
+                .map(|_| ())
+                .map_err(ad::classify),
         }
     }
 }
