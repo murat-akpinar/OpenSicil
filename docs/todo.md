@@ -127,8 +127,9 @@ Kurallar:
   - Not: zamanlayıcı pencere dolunca (hedefin `password_reset_delay_days`; acilde hemen) iş açar, worker parolayı rastgeleleştirip `pwdLastSet = 0` yazar ve bağlantıda `password_reset_at_departure` işaretler (bir kez; öznitelik sınıfı, yıkıcı sayaca girmez); doğrulanmış iptalde yapılmaz
 - [x] Yaklaşan bitişler listesi (F-36)
   - Not: `/upcoming?days=N` (varsayılan 30, en çok 365; ayrı kurulum ayarı açılmadı — ekran başına değer yeter): bitişler, ek rol bitişleri, askı başlangıçları ve dönüş günleri tek sorguda, kurulum saat diliminde
-- [ ] Faz kapanışı: güvenlik ve test
+- [x] Faz kapanışı: güvenlik ve test
   - (1a'daki kapanış şablonunun aynısı)
+  - Not (2026-10-01): backend 111 / worker 73 test (lab dahil), format ve clippy temiz, `cargo audit` yalnızca ADR-073 `rsa`; kapsam backend %91,75 / worker %91,79; imaj taraması Faz 3b tabanıyla aynı (backend 60, worker 58, `Status: fixed` yok); sır sızıntısı taraması boş; TODO yok; `writes::detail_json` 55 satıra çıkmıştı, bölündü; kapanışta saklama süresi sonu silme işinin zamanlayıcıda açılmadığı görüldü ve `open_retention_jobs` eklendi (ADR-024/028). docs/07'den ADR-028, ADR-041 ve ADR-048 maddeleri işaretlendi; ADR-032 (elle pasifleştirilmiş hesabın korunması), ADR-053 askı geçişleri ve özel karakterli ad lab'da sınanmadı (3d/3e kapanışında)
 
 ### 3d. İlk parola
 - [ ] AEAD ile şifreli teslim ([ADR-036](decisions/036-ilk-parola-aead.md)), yardım masası yetkisi, ilk girişte değiştirme ayarı (F-11, [ADR-019](decisions/019-ilk-parola-teslimi.md))

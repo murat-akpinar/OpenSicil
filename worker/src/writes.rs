@@ -99,11 +99,7 @@ impl WriteOp {
             WriteOp::CreateAccount { dn, attributes, .. } => format!(
                 "{{\"dn\":\"{}\",\"attributes\":[{}]}}",
                 q(dn),
-                attributes
-                    .iter()
-                    .map(|(name, _)| format!("\"{}\"", q(name)))
-                    .collect::<Vec<_>>()
-                    .join(",")
+                attribute_names_json(attributes)
             ),
             WriteOp::SetEnabled { dn, enabled } => {
                 format!("{{\"dn\":\"{}\",\"enabled\":{enabled}}}", q(dn))
@@ -115,15 +111,7 @@ impl WriteOp {
             WriteOp::SetAttributes { dn, changes } => format!(
                 "{{\"dn\":\"{}\",\"attributes\":[{}]}}",
                 q(dn),
-                changes
-                    .iter()
-                    .map(|(name, value)| format!(
-                        "{{\"name\":\"{}\",\"cleared\":{}}}",
-                        q(name),
-                        value.is_none()
-                    ))
-                    .collect::<Vec<_>>()
-                    .join(",")
+                attribute_changes_json(changes)
             ),
             WriteOp::AddMember {
                 group_dn,
@@ -149,6 +137,32 @@ impl WriteOp {
             ),
         }
     }
+}
+
+fn json_quote(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn attribute_names_json(attributes: &[(String, String)]) -> String {
+    attributes
+        .iter()
+        .map(|(name, _)| format!("\"{}\"", json_quote(name)))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn attribute_changes_json(changes: &[(String, Option<String>)]) -> String {
+    changes
+        .iter()
+        .map(|(name, value)| {
+            format!(
+                "{{\"name\":\"{}\",\"cleared\":{}}}",
+                json_quote(name),
+                value.is_none()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 pub struct WriteRequest<'a> {

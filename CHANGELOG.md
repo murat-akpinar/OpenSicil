@@ -8,6 +8,7 @@
 - Docker iskeleti ve compose yapilandirmasini olustur
 - Faz 3a kapanışı — güvenlik ve test
 - Faz 3b kapanışı — güvenlik ve test
+- Faz 3c kapanışı — güvenlik ve test
 
 ### Dokümantasyon
 

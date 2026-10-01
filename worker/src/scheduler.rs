@@ -57,6 +57,7 @@ pub async fn tick(pool: &PgPool, time_zone: &str) -> Result<usize, String> {
     .map_err(|e| format!("bağlantılar okunamadı: {e}"))?;
     let mut opened = expire_additional_roles(&mut tx, time_zone).await?;
     opened += open_password_reset_jobs(&mut tx).await?;
+    opened += open_retention_jobs(&mut tx).await?;
     for row in rows {
         let (identity_id, target_system_id, applied) = (row.0, row.1, row.2.as_deref());
         let state = derived_state(&row)?;
@@ -133,8 +134,31 @@ async fn open_password_reset_jobs(
     Ok(opened.rows_affected() as usize)
 }
 
-// Silme (saklama suresi, ADR-024) 3c'de gelir; o gune kadar `silindi` icin is acilmaz,
-// yoksa her dakika bos is uretilirdi.
+// ADR-024/028: saklama suresi dolan ayrilmis hesap silinir; durum adi degismediginden
+// (ayrildi → ayrildi) ayri sorgu gerekir. Onay isteyen hedefte (Zimbra) onay yoksa is
+// acilmaz: "silinmeyi bekliyor" listesi onu gosterir, her dakika bos is uretilmez.
+async fn open_retention_jobs(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+) -> Result<usize, String> {
+    let opened = sqlx::query(
+        "INSERT INTO jobs (identity_id, target_system_id, priority) \
+         SELECT l.identity_id, l.target_system_id, $1 FROM account_links l \
+         JOIN identities i ON i.id = l.identity_id \
+         JOIN target_systems t ON t.id = l.target_system_id \
+         WHERE l.mode = 'managed' AND l.deleted_by_us_at IS NULL AND i.deleted_at IS NULL \
+           AND i.end_at IS NOT NULL \
+           AND i.end_at + make_interval(days => t.retention_days) <= now() \
+           AND (NOT t.delete_requires_approval OR l.deletion_approved) \
+         ON CONFLICT (identity_id, target_system_id) WHERE status <> 'succeeded' DO NOTHING",
+    )
+    .bind(TRANSITION_PRIORITY)
+    .execute(&mut **tx)
+    .await
+    .map_err(|e| format!("saklama süresi işleri açılamadı: {e}"))?;
+    Ok(opened.rows_affected() as usize)
+}
+
+// `silindi` icin is acilmaz: silme zaten uygulanmistir, her dakika bos is uretilirdi.
 pub fn needs_job(state: LifecycleState, applied: Option<&str>) -> bool {
     state != LifecycleState::Deleted && applied != Some(state_name(state))
 }
@@ -372,6 +396,60 @@ mod tests {
             tick(&pool, "Europe/Istanbul").await.unwrap(),
             1,
             "acil: hemen"
+        );
+
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
+    // ADR-024/028: saklama dolunca silme isi; onay isteyen hedefte onay yoksa acilmaz.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn tick_opens_deletion_job_after_retention_unless_approval_pending() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        let seed = crate::test_support::seed_example_model(&pool).await;
+        sqlx::query(
+            "INSERT INTO account_links (identity_id, target_system_id, external_id, origin, mode, \
+             applied_state, password_reset_at_departure) \
+             VALUES ($1, $2, 'guid-1', 'provisioned', 'managed', 'departed', TRUE)",
+        )
+        .bind(seed.identity)
+        .bind(seed.ad)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("UPDATE identities SET end_at = now() - interval '100 days' WHERE id = $1")
+            .bind(seed.identity)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            tick(&pool, "Europe/Istanbul").await.unwrap(),
+            1,
+            "90 gün saklama doldu: silme işi"
+        );
+        sqlx::query("UPDATE jobs SET status = 'succeeded'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE target_systems SET delete_requires_approval = TRUE WHERE id = $1")
+            .bind(seed.ad)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            tick(&pool, "Europe/Istanbul").await.unwrap(),
+            0,
+            "onay isteyen hedefte onaysız silme işi açılmaz"
+        );
+        sqlx::query("UPDATE account_links SET deletion_approved = TRUE")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            tick(&pool, "Europe/Istanbul").await.unwrap(),
+            1,
+            "onaylandı"
         );
 
         drop(pool);
