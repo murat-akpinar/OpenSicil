@@ -1041,57 +1041,60 @@ fn masked(aead_key: &[u8; crate::crypto::KEY_LEN], enc: &[u8], lang: Lang) -> St
 
 // Hedefteki fark (3a kapsami, ADR-078): turetilen durum ↔ applied_state. Gozlem
 // modunda farki motor hesaplar (ADR-018/087); son is sonucu oldugu gibi gosterilir.
+type AccountRow = (
+    i64,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    bool,
+    Option<String>,
+);
+
+const ACCOUNTS_SQL: &str =
+    "SELECT t.id, t.name, l.external_id, l.origin, l.mode, l.applied_state, \
+     l.manage_requested_at IS NOT NULL, \
+     (SELECT j.result FROM jobs j WHERE j.identity_id = $1 AND j.target_system_id = t.id \
+     AND j.result IS NOT NULL ORDER BY j.finished_at DESC NULLS LAST, j.id DESC LIMIT 1) \
+     FROM target_systems t \
+     LEFT JOIN account_links l ON l.target_system_id = t.id AND l.identity_id = $1 \
+     ORDER BY t.id";
+
+// Gozlem modunda fark motorun son is sonucundan gelir (ADR-087); yonetilen
+// baglantida turetilen durum ile `applied_state` karsilastirilir.
+fn account_from(row: AccountRow, state: LifecycleState, lang: Lang) -> Account {
+    let (target_id, target, external_id, origin, mode, applied, requested, result) = row;
+    let observed = mode.as_deref() == Some(OBSERVED_MODE);
+    Account {
+        target_id,
+        target,
+        diff: match observed {
+            true => result.unwrap_or_else(|| lang.t("diff.observed_pending").to_string()),
+            false => diff_text(lang, state, external_id.is_some(), applied.as_deref()),
+        },
+        external_id: external_id.unwrap_or_default(),
+        origin: origin.unwrap_or_default(),
+        mode: mode.unwrap_or_default(),
+        applied_state: applied.unwrap_or_default(),
+        observed,
+        manage_requested: requested,
+    }
+}
+
 async fn load_accounts(
     pool: &PgPool,
     id: i64,
     state: LifecycleState,
     lang: Lang,
 ) -> Result<Vec<Account>, sqlx::Error> {
-    type Row = (
-        i64,
-        String,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        bool,
-        Option<String>,
-    );
-    let rows: Vec<Row> = sqlx::query_as(
-        "SELECT t.id, t.name, l.external_id, l.origin, l.mode, l.applied_state, \
-         l.manage_requested_at IS NOT NULL, \
-         (SELECT j.result FROM jobs j WHERE j.identity_id = $1 AND j.target_system_id = t.id \
-         AND j.result IS NOT NULL ORDER BY j.finished_at DESC NULLS LAST, j.id DESC LIMIT 1) \
-         FROM target_systems t \
-         LEFT JOIN account_links l ON l.target_system_id = t.id AND l.identity_id = $1 \
-         ORDER BY t.id",
-    )
-    .bind(id)
-    .fetch_all(pool)
-    .await?;
+    let rows: Vec<AccountRow> = sqlx::query_as(ACCOUNTS_SQL)
+        .bind(id)
+        .fetch_all(pool)
+        .await?;
     Ok(rows
         .into_iter()
-        .map(
-            |(target_id, target, external_id, origin, mode, applied, requested, result)| {
-                let observed = mode.as_deref() == Some(OBSERVED_MODE);
-                Account {
-                    target_id,
-                    target,
-                    diff: match observed {
-                        true => {
-                            result.unwrap_or_else(|| lang.t("diff.observed_pending").to_string())
-                        }
-                        false => diff_text(lang, state, external_id.is_some(), applied.as_deref()),
-                    },
-                    external_id: external_id.unwrap_or_default(),
-                    origin: origin.unwrap_or_default(),
-                    mode: mode.unwrap_or_default(),
-                    applied_state: applied.unwrap_or_default(),
-                    observed,
-                    manage_requested: requested,
-                }
-            },
-        )
+        .map(|row| account_from(row, state, lang))
         .collect())
 }
 

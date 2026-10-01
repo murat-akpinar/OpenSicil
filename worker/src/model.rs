@@ -442,23 +442,15 @@ type LinkQueryRow = (
     bool,
 );
 
-async fn load_link(
-    pool: &PgPool,
-    identity_id: i64,
-    target: i64,
-) -> Result<(Option<AccountLink>, Option<LinkRow>), String> {
-    let row: Option<LinkQueryRow> = sqlx::query_as(
-        "SELECT origin, verified_unused, deletion_approved, external_id, applied_state, \
-         password_reset_at_departure, first_password_pwd_last_set, mode, \
-         manage_requested_at IS NOT NULL \
-         FROM account_links WHERE identity_id = $1 AND target_system_id = $2",
-    )
-    .bind(identity_id)
-    .bind(target)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| format!("hesap bağlantısı okunamadı: {e}"))?;
-    let Some((
+const LINK_SQL: &str =
+    "SELECT origin, verified_unused, deletion_approved, external_id, applied_state, \
+     password_reset_at_departure, first_password_pwd_last_set, mode, \
+     manage_requested_at IS NOT NULL \
+     FROM account_links WHERE identity_id = $1 AND target_system_id = $2";
+
+// Saf fonksiyonun gordugu kisim (ADR-038) ile motorun ihtiyac duydugu ham kisim.
+fn link_from(row: LinkQueryRow) -> (AccountLink, LinkRow) {
+    let (
         origin,
         verified_unused,
         deletion_approved,
@@ -468,20 +460,9 @@ async fn load_link(
         pwd,
         mode,
         manage_requested,
-    )) = row
-    else {
-        return Ok((None, None));
-    };
-    let link_row = LinkRow {
-        external_id,
-        applied_state,
-        password_reset_at_departure: reset,
-        first_password_pwd_last_set: pwd,
-        observed: mode == "observed",
-        manage_requested,
-    };
-    Ok((
-        Some(AccountLink {
+    ) = row;
+    (
+        AccountLink {
             origin: if origin == "adopted" {
                 Origin::Adopted
             } else {
@@ -489,9 +470,33 @@ async fn load_link(
             },
             verified_unused,
             deletion_approved,
-        }),
-        Some(link_row),
-    ))
+        },
+        LinkRow {
+            external_id,
+            applied_state,
+            password_reset_at_departure: reset,
+            first_password_pwd_last_set: pwd,
+            observed: mode == "observed",
+            manage_requested,
+        },
+    )
+}
+
+async fn load_link(
+    pool: &PgPool,
+    identity_id: i64,
+    target: i64,
+) -> Result<(Option<AccountLink>, Option<LinkRow>), String> {
+    let row: Option<LinkQueryRow> = sqlx::query_as(LINK_SQL)
+        .bind(identity_id)
+        .bind(target)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| format!("hesap bağlantısı okunamadı: {e}"))?;
+    match row.map(link_from) {
+        Some((link, link_row)) => Ok((Some(link), Some(link_row))),
+        None => Ok((None, None)),
+    }
 }
 // --- END FEATURE: engine ---
 

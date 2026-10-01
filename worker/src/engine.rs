@@ -409,16 +409,12 @@ fn fixed_attributes(names: &Names, cn: &str) -> Vec<(String, String)> {
 
 // Esleme kaynaklari (ADR-012/082). Hassas kaynaklar yalnizca ayar acikken cozulur;
 // `names` acilista DB'ye yeni yazilan adlardir (Person henuz eski kopya).
-async fn sources(
-    c: &AdJob<'_>,
-    ldap: &mut Ldap,
-    names: Option<&Names>,
-) -> Result<mapping::Sources, JobError> {
+fn plain_sources(c: &AdJob<'_>, names: Option<&Names>) -> HashMap<&'static str, String> {
     let p = &c.input.person;
     let or_person = |fresh: Option<String>, stored: &Option<String>| {
         fresh.or_else(|| stored.clone()).unwrap_or_default()
     };
-    let mut values: HashMap<&'static str, String> = HashMap::from([
+    HashMap::from([
         ("given_name", p.given_name.clone()),
         ("surname", p.surname.clone()),
         (
@@ -440,8 +436,17 @@ async fn sources(
         ("employment_type", p.employment_type.clone()),
         ("start_date", p.start_date.clone()),
         ("end_date", p.end_date.clone().unwrap_or_default()),
-    ]);
+    ])
+}
+
+async fn sources(
+    c: &AdJob<'_>,
+    ldap: &mut Ldap,
+    names: Option<&Names>,
+) -> Result<mapping::Sources, JobError> {
+    let mut values = plain_sources(c, names);
     if c.env.sensitive_mapping_enabled {
+        let p = &c.input.person;
         values.insert("mobile_phone", p.mobile_phone.clone().unwrap_or_default());
         let national_id = p
             .national_id_enc
@@ -834,6 +839,17 @@ async fn pending_first_password(c: &AdJob<'_>) -> Result<Option<i64>, JobError> 
         .map_err(JobError::Failed)
 }
 
+// ADR-046: hesaba hic girilmemis mi; hedeften okunan iki damgaya bakilir.
+async fn account_unused(ldap: &mut Ldap, dn: &str, link: &LinkRow) -> Result<bool, JobError> {
+    let before =
+        ad_account::read_attributes(ldap, dn, &["lastLogonTimestamp", "pwdLastSet"]).await?;
+    Ok(first_password::account_unused(
+        first_value(&before, "lastLogonTimestamp").as_deref(),
+        first_value(&before, "pwdLastSet").as_deref(),
+        link,
+    ))
+}
+
 async fn issue_first_password(
     c: &AdJob<'_>,
     ldap: &mut Ldap,
@@ -844,20 +860,13 @@ async fn issue_first_password(
     let Some(request) = request else {
         return Ok(String::new());
     };
-    let logon_attrs = ["lastLogonTimestamp", "pwdLastSet"];
-    let before = ad_account::read_attributes(ldap, dn, &logon_attrs).await?;
-    let unused = first_password::account_unused(
-        first_value(&before, "lastLogonTimestamp").as_deref(),
-        first_value(&before, "pwdLastSet").as_deref(),
-        link,
-    );
     let reject = |reason: &'static str| async move {
         first_password::reject(c.pool, request, reason)
             .await
             .map_err(JobError::Failed)?;
         Ok(format!(", ilk parola reddedildi: {reason}"))
     };
-    if !unused {
+    if !account_unused(ldap, dn, link).await? {
         return reject(first_password::REJECT_USED).await;
     }
     let password = ad_account::readable_password();

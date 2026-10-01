@@ -35,6 +35,7 @@
 - Kullanılmamış hesap kuralı (ADR-046) testleri ve docs/07 maddesi
 - Faz 3e kapanışı — güvenlik ve test
 - Arayüz kabuğu kapanışı — güvenlik ve test
+- Fren ve onay fazı kapanışı — güvenlik ve test
 
 ### Özellikler
 
