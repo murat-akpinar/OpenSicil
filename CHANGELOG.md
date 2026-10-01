@@ -37,6 +37,7 @@
 - Faz 3e kapanışı — güvenlik ve test
 - Arayüz kabuğu kapanışı — güvenlik ve test
 - Fren ve onay fazı kapanışı — güvenlik ve test
+- Gerçek Windows AD doğrulaması — üç ⊞ sorusu cevaplandı
 
 ### Özellikler
 

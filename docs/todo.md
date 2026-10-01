@@ -206,11 +206,18 @@ Kurallar:
 
 > Fazlar arası iş. Bugüne kadar bütün AD testleri `compose.lab.yaml`'daki **Samba**'ya karşı koştu; `tmp/lab-ad-notlari.md`'deki gerçek Windows Server AD'ye (192.168.1.231, `Hogwarts` örnek OU) hiç bağlanılmadı — kullanıcı 2026-10-01'de bunu sordu ve sıraya aldı. Host o gün ayaktaydı (389 ve 636 açık).
 
-- [ ] `docs/08`'deki ⊞ işaretli sorular gerçek Windows Server AD'de cevaplanır
+- [x] `docs/08`'deki ⊞ işaretli sorular gerçek Windows Server AD'de cevaplanır
   - Kapsam: `pwdLastSet` davranışı, `<GUID=…>` ile modify/modifyDN/delete, `Unexpire-Password` hakkı olmadan parola sıfırlama, ad parçası içeren parolanın reddi
   - Kabul: bağlantı Yapılandırma sayfasından girilir (`.env`'e yazılmaz, ADR-068); kapsam `Hogwarts` OU'su
   - Kabul: her cevap `docs/11-dogrulama-notlari.md`'ye sonuç + kanıt olarak girer; Samba ile farklı davranan madde varsa ADR'si yazılır
   - Not: parola `tmp/lab-ad-notlari.md`'de, git'e girmez; bulgular yazılırken host/parola dokümana kopyalanmaz
+  - Not (2026-10-01): kapsamdaki dört sorudan üçü cevaplandı, dördüncüsü aşağıdaki kutucuğa ayrıldı (ölçmek için yetkisi devredilmiş ayrı bir servis hesabı gerekiyor). Ölçen: `worker/src/ad_account.rs::windows_ad_answers_open_questions` (`AD_WIN_*`, tek geçici hesap açıp siler) ve uygulamanın kendisi — backend + worker gerçek binary, bağlantı Yapılandırma sayfasından, kapsam `OU=Users,OU=Staff,OU=Hogwarts` + `OU=Groups,OU=Hogwarts`. Sonuçlar [docs/11](11-dogrulama-notlari.md) W1–W10: tek `add` kabul edildi ve `pwdLastSet` 0 kaldı (W1), `<GUID=…>` modify/modifyDN/delete üçünde de kabul edildi (W2–W4), ad parçası içeren parola `0000052D` ile reddedildi (W5 — Samba bu kontrolü yapmıyor, ama [ADR-055](decisions/055-netlestirmeler-onay-csv-operator-parola.md) zaten bu davranışa göre yazılmıştı; karar değişmedi, yeni ADR gerekmedi), `msDS-LogonTimeSyncInterval` yok yani ADR-060 ön koşulu sağlanıyor (W6). Uçtan uca koşu: katalog gerçek AD'den 20 `GG-*` grubu + 2 OU okudu, yerleşik ve `adminCount` grupları girmedi (W8); kayıt → `CN=Sinav Hogwarts,OU=Users,OU=Staff,OU=Hogwarts`, `userAccountControl 514`, `pwdLastSet 0`, `GG-Staff` üyesi; hesap sonunda silindi
+  - Not (2026-10-01): iki kurulum bulgusu docs/09'a girdi (W7) — DC sertifikasının SAN'ında yalnızca FQDN var, `ldaps://<ip>` doğrulamadan geçmez (container'da `dns:`/`extra_hosts:` gerekir); DC kök CA'yı el sıkışmada yollamıyor, `AD_CA_PATH`'e konan PEM ayrıca alınır
+- [ ] "Unexpire-Password hakkı olmadan parola sıfırlama" sorusu ölçülür ([ADR-019](decisions/019-ilk-parola-teslimi.md))
+  - Engel: lab servis hesabı `Domain Admins` üyesi, yani hak zaten var ([docs/11](11-dogrulama-notlari.md) W10)
+  - Kabul: `OU=Hogwarts`'a yalnızca "Reset user passwords" devredilmiş ikinci bir servis hesabıyla parola sıfırlanır; `pwdLastSet` kendiliğinden 0 oluyor mu ölçülür
+  - Kabul: evet ise bu hak [docs/05](05-active-directory.md#servis-hesabı-yetkileri) delegasyon tablosuna ve docs/09 ön koşullarına eklenir
+  - Not: replikasyon sorusu (W9) ikinci bir DC istiyor; bu lab'da ölçülemez, kapsam dışı bırakıldı
 
 ## Giriş: kendi ekranımız ([ADR-095](decisions/095-giris-kendi-ekranimiz-ad-bind-asil.md))
 

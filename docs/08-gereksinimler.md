@@ -155,15 +155,15 @@ Karar listesi tek yerde tutulur: [PROJECT.md → Kararlar](PROJECT.md#kararlar).
 Önceki listedeki soruların çoğu birincil kaynakla (Zimbra ve Samba kaynak kodu, Microsoft protokol belgeleri, crate ve Keycloak dokümanı) cevaplandı ve buradan silindi; cevaplar, alıntılar ve bağlantılar [docs/11](11-dogrulama-notlari.md)'de, kararlar [ADR-057](decisions/057-birincil-kaynak-dogrulamasi.md)'dedir. Kalanlar gerçekten yalnızca çalışan sisteme karşı ölçülebilir.
 
 **Faz 1c — AD ve `ldap3` (Samba lab; ⊞ işaretliler bir kez Windows Server VM ister)**
-- [ ] Tek `add` (`unicodePwd` + `userAccountControl = 514` + `pwdLastSet = 0`) LDAPS ve simple bind ile kabul ediliyor mu; `pwdLastSet` 0 kalıyor mu? Samba kaynak kodu ve MS-ADTS "evet" der; Microsoft örneği LDAPS değil Kerberos mühürlemedir. ⊞
+- [x] Tek `add` (`unicodePwd` + `userAccountControl = 514` + `pwdLastSet = 0`) LDAPS ve simple bind ile kabul ediliyor mu; `pwdLastSet` 0 kalıyor mu? Samba kaynak kodu ve MS-ADTS "evet" der; Microsoft örneği LDAPS değil Kerberos mühürlemedir. ⊞ → gerçek Windows AD'de evet ([docs/11](11-dogrulama-notlari.md) W1)
 - [ ] Bind hata kodları: `pwdLastSet = 0` (773), süresi dolmuş (701), pasif (533), kilitli (775); parola yanlışken hangisi görünür? Operatör diline çevrilecek hata tablosunun girdisi.
-- [ ] Henüz replike olmamış hesapla başka bir DC'ye girişte dönen hata (docs/09 "aynı dakika giriş" notunun kanıtı). ⊞
-- [ ] Windows'ta `<GUID=…>` modify, modifyDN ve delete hedefi olarak kabul ediliyor mu? Worker'ın kuralı değişmez (gerçek DN ile yazar); yalnızca bilgi. ⊞
+- [ ] Henüz replike olmamış hesapla başka bir DC'ye girişte dönen hata (docs/09 "aynı dakika giriş" notunun kanıtı). ⊞ → lab'da tek DC olduğu için ölçülemedi ([docs/11](11-dogrulama-notlari.md) W9)
+- [x] Windows'ta `<GUID=…>` modify, modifyDN ve delete hedefi olarak kabul ediliyor mu? Worker'ın kuralı değişmez (gerçek DN ile yazar); yalnızca bilgi. ⊞ → üçü de kabul ediliyor ([docs/11](11-dogrulama-notlari.md) W2–W4)
 - [ ] OU'lar arası taşıma için en az delegasyon ([docs/05](05-active-directory.md#servis-hesabı-yetkileri) tablosunun kanıtı); kesin delegasyon adımları buradan docs/09'a yazılır.
-- [ ] Servis hesabında "Unexpire-Password" hakkı yokken parola sıfırlaması `pwdLastSet`'i kendiliğinden 0 yapıyor mu (MS-SAMR öyle yazar)? Evet ise [ADR-019](decisions/019-ilk-parola-teslimi.md)'un "işaret kapalı" modu bu hakkı delegasyon tablosuna ekletir. ⊞
+- [ ] Servis hesabında "Unexpire-Password" hakkı yokken parola sıfırlaması `pwdLastSet`'i kendiliğinden 0 yapıyor mu (MS-SAMR öyle yazar)? Evet ise [ADR-019](decisions/019-ilk-parola-teslimi.md)'un "işaret kapalı" modu bu hakkı delegasyon tablosuna ekletir. ⊞ → lab servis hesabı `Domain Admins` üyesi olduğu için ölçülemedi; yetkisi devredilmiş ayrı hesap gerekiyor ([docs/11](11-dogrulama-notlari.md) W10)
 - [ ] Seçilen Samba sürümünde `LDAP_MATCHING_RULE_IN_CHAIN` doğru sonuç veriyor mu ve ne kadar sürüyor (4.18'de boş sonuç raporu var)?
 - [ ] `ldap3` #156: domain kökünden alt ağaç aramasında `searchResRef` paniği `EntriesOnly` ile önleniyor mu? `objectGUID` hangi haritadan çıkıyor?
-- [ ] AD'nin ad parçası içeren parolayı reddetmesi ve worker'ın yeniden üretmesi ([ADR-055](decisions/055-netlestirmeler-onay-csv-operator-parola.md)); Samba bu kontrolü yapmaz. ⊞
+- [x] AD'nin ad parçası içeren parolayı reddetmesi ve worker'ın yeniden üretmesi ([ADR-055](decisions/055-netlestirmeler-onay-csv-operator-parola.md)); Samba bu kontrolü yapmaz. ⊞ → gerçek AD `0000052D` ile reddediyor ([docs/11](11-dogrulama-notlari.md) W5)
 
 **Zimbra (ve isteğe bağlı Carbonio CE)** — v1 dışı, "Ek Hedef Sistem: Zimbra" bölümünde cevaplanır ([ADR-090](decisions/090-zimbra-v1-sonrasina-alindi.md); eski planda Faz 1d'ydi)
 - [ ] `locked` hesaptan otomatik yanıt MTA'dan gerçekten çıkıyor mu (kodda durum kontrolü yok, gözlenmedi)?

@@ -631,4 +631,119 @@ mod tests {
         );
         ldap.unbind().await.ok();
     }
+
+    // Gercek Windows Server AD (Samba degil): docs/08'in ⊞ isaretli sorularindan
+    // ucu olculur — tek `add` kabulu ve pwdLastSet'in 0 kalmasi, ad parcasi iceren
+    // parolanin reddi (ADR-055), <GUID=…> DN'inin modify/modifyDN/delete hedefi
+    // olarak kabulu (yalnizca bilgi: worker gercek DN ile yazar). Sonuclar docs/11.
+    #[tokio::test]
+    #[ignore = "gerçek Windows AD gerektirir: AD_WIN_URL, AD_WIN_BIND_DN, AD_WIN_PASSWORD, AD_WIN_CA_FILE, AD_WIN_OU ile çalıştır"]
+    async fn windows_ad_answers_open_questions() {
+        let var = |n: &str| std::env::var(n).unwrap_or_else(|_| panic!("{n} ayarlanmalı"));
+        let cfg = ad::AdConfig {
+            urls: ad::parse_urls(&var("AD_WIN_URL")),
+            bind_dn: var("AD_WIN_BIND_DN"),
+            password: var("AD_WIN_PASSWORD"),
+            ca_file: var("AD_WIN_CA_FILE"),
+        };
+        let ou = var("AD_WIN_OU");
+        let mut ldap = ad::connect(&cfg).await.expect("Windows AD");
+        let base = ad::base_dn(&mut ldap).await.unwrap();
+        let domain = base
+            .split(',')
+            .filter_map(|part| {
+                let part = part.trim();
+                part.strip_prefix("DC=")
+                    .or_else(|| part.strip_prefix("dc="))
+            })
+            .collect::<Vec<_>>()
+            .join(".");
+        let username = format!("wintest{}", std::process::id() % 100_000);
+        let (given, surname) = ("Wintest", "Hogwartsdeneme");
+        let dn = account_dn(&cn_for(given, surname, None), &ou);
+        let _ = ldap.delete(&dn).await; // onceki calismadan kalan
+
+        // ⊞ 1: tek `add` (unicodePwd + UAC 514 + pwdLastSet 0), LDAPS + simple bind
+        let mut writer = AdWriter { ldap: &mut ldap };
+        writer
+            .write(&WriteOp::CreateAccount {
+                dn: dn.clone(),
+                attributes: vec![
+                    ("sAMAccountName".to_string(), username.clone()),
+                    (
+                        "userPrincipalName".to_string(),
+                        format!("{username}@{domain}"),
+                    ),
+                    ("givenName".to_string(), given.to_string()),
+                    ("sn".to_string(), surname.to_string()),
+                    ("displayName".to_string(), format!("{given} {surname}")),
+                ],
+                password: random_password(),
+                account_expires: None,
+            })
+            .await
+            .expect("tek add ile hesap açılmalı");
+        let guid = guid_by_dn(writer.ldap, &dn).await.unwrap();
+        let account = find_by_guid(writer.ldap, &guid)
+            .await
+            .unwrap()
+            .expect("GUID ile bulunmalı");
+        assert!(!account.enabled, "pasif açılır (UAC 514)");
+        assert_eq!(
+            account.pwd_last_set.as_deref(),
+            Some("0"),
+            "pwdLastSet 0 kalır"
+        );
+
+        // ⊞ 2: ad parcasi iceren parola reddedilir, rastgele parola kabul edilir
+        let named = writer
+            .write(&WriteOp::SetFirstPassword {
+                dn: dn.clone(),
+                password: format!("{surname}.2026!"),
+                change_required: true,
+            })
+            .await;
+        eprintln!("⊞ ad parçası içeren parola: {named:?}");
+        assert!(
+            matches!(named, Err(WriteError::Failed(_))),
+            "ad parçası içeren parola reddedilir (ADR-055)"
+        );
+        writer
+            .write(&WriteOp::SetFirstPassword {
+                dn: dn.clone(),
+                password: readable_password(),
+                change_required: true,
+            })
+            .await
+            .expect("rastgele parola kabul edilir");
+
+        // ⊞ 3: <GUID=…> yazma hedefi olabiliyor mu (bilgi; assert yok)
+        let guid_dn = format!("<GUID={guid}>");
+        let modify = writer
+            .write(&WriteOp::SetAttributes {
+                dn: guid_dn.clone(),
+                changes: vec![("description".to_string(), Some("guid-dn".to_string()))],
+            })
+            .await;
+        let rename = writer
+            .write(&WriteOp::MoveAccount {
+                dn: guid_dn.clone(),
+                new_rdn: format!("CN={}", dn_escape(format!("{given} {surname} 2"))),
+                new_parent: ou.clone(),
+            })
+            .await;
+        let delete = writer.write(&WriteOp::DeleteAccount { dn: guid_dn }).await;
+        eprintln!("⊞ <GUID=…> modify: {modify:?}");
+        eprintln!("⊞ <GUID=…> modifyDN: {rename:?}");
+        eprintln!("⊞ <GUID=…> delete: {delete:?}");
+
+        if let Some(left) = dn_by_guid(&mut ldap, &guid).await.unwrap() {
+            ldap.delete(&left).await.unwrap().success().unwrap();
+        }
+        assert!(
+            find_by_guid(&mut ldap, &guid).await.unwrap().is_none(),
+            "test hesabı temizlendi"
+        );
+        ldap.unbind().await.ok();
+    }
 }
