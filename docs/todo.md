@@ -140,8 +140,9 @@ Kurallar:
   - Kabul: N-13 ölçümü ≤ 60 sn (kayıttan parolanın ekranda görünmesine)
   - Not: ürünün hedef sahnesi ilk kez burada uçtan uca gösterilir
   - Not (2026-10-01): kayıt formunda ikinci düğme (`issue_first_password`); `identity::create` kimlik + her hedefe iş + ilk parola isteğini tek transaction'da yazar (işler artık her kayıtta transaction içinde), başlangıç bugün/geçmiş değilse form hatası (`starts_by_today`, kurum saati). Worker hesabı açar açmaz aynı işte parolayı verir (`provision` → `issue_first_password`). Bekleme ekranı hedef işlerinin ilerlemesini gösterir; teslim ekranı kullanıcı adı + e-posta + parola. `scripts/e2e-lab.sh` adım 10: **N-13 ölçümü 4 sn** (kayıt → parola ekranda), parola ikinci açılışta yok, AD'de etkin hesap (UAC 512). Betik yarıda kalan çalışmanın lab hesaplarını başta siler
-- [ ] Faz kapanışı: güvenlik ve test
+- [x] Faz kapanışı: güvenlik ve test
   - (1a'daki kapanış şablonunun aynısı)
+  - Not (2026-10-01): backend 113 / worker 79 test (lab dahil), format ve clippy temiz, `cargo audit` yalnızca ADR-073 `rsa` (backend); kapsam satır backend %93,57 / worker %94,28 (bölge %91,86 / %92,48); imaj taraması backend 61 / worker 59 — bir yeni `affected` bulgu (Debian yaması yok, ADR-071), `Status: fixed` yok; sır sızıntısı taraması ve TODO taraması boş; 50 satırı aşan yeni fonksiyonlar bölündü (`show`/`person_header`, `create`/`open_jobs`, `create`/`finish_create`, `first_value`), kalan tek aşım önceki fazdan `engine::sources` (52). docs/07'den ADR-019 (iki mod), yardım masası yetkisi, ADR-036 (gösterim/10 dk silme), ADR-046 ve ADR-054 (kuru modda ilk parola reddi) maddeleri işaretlendi; ADR-056 maddesi "giriş yapılmış kayıt iptal edilemiyor" kısmı lab'da sınanmadığı için açık kaldı. Samba simple bind'da `lastLogonTimestamp` yazıyor (lab testiyle doğrulandı, docs/05). Worker test altyapısındaki `DATABASE_URL` yarışı (`run()` testi env'i değiştiriyordu) `OnceLock` ile giderildi
 
 ### 3e. Tekil sahiplenme ve gözlem modu
 - [ ] Formdaki mevcut hesap ipucuyla gözlem modunda bağlama ([ADR-018](decisions/018-ice-aktarma-ve-sahiplenme.md))

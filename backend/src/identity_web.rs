@@ -636,6 +636,17 @@ async fn create(
         }
         Err(identity::CreateError::Db(e)) => return internal("kimlik kaydedilemedi", e),
     };
+    finish_create(&state, &op, &new, id, first_password).await
+}
+
+// Denetim satiri ve yonlendirme: ilk parola istendiyse teslim sayfasi, yoksa kisi sayfasi.
+async fn finish_create(
+    state: &AppState,
+    op: &Operator,
+    new: &identity::NewIdentity,
+    id: i64,
+    first_password: Option<i64>,
+) -> Response {
     let detail = serde_json::json!({
         "employee_number": new.employee_number,
         "department_id": new.department_id,
@@ -646,14 +657,7 @@ async fn create(
         "national_id_set": new.national_id.is_some(),
         "first_password_id": first_password,
     });
-    audit_operator(
-        &state,
-        &op,
-        crate::audit::IDENTITY_CREATED,
-        Some(id),
-        detail,
-    )
-    .await;
+    audit_operator(state, op, crate::audit::IDENTITY_CREATED, Some(id), detail).await;
     match first_password {
         Some(fp) => Redirect::to(&format!("/identities/{id}/first-password/{fp}")).into_response(),
         None => Redirect::to(&format!("/identities/{id}")).into_response(),

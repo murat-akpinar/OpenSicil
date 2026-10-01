@@ -228,29 +228,36 @@ pub async fn create(
                 _ => CreateError::Db(e),
             })?;
     }
+    let first_password = open_jobs(&mut tx, id, first_password_by).await?;
+    tx.commit().await?;
+    Ok((id, first_password))
+}
+
+// Her hedefe tek kimlik isi; istenmisse AD hedefine ilk parola istegi (ADR-056).
+async fn open_jobs(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    id: i64,
+    first_password_by: Option<&str>,
+) -> Result<Option<i64>, sqlx::Error> {
     sqlx::query(
         "INSERT INTO jobs (identity_id, target_system_id, priority) \
          SELECT $1, id, $2 FROM target_systems ORDER BY id",
     )
     .bind(id)
     .bind(crate::jobs::Priority::Single as i16)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await?;
-    let first_password = match first_password_by {
-        Some(operator) => {
-            sqlx::query_scalar(
-                "INSERT INTO first_passwords (identity_id, target_system_id, requested_by) \
-                 SELECT $1, id, $2 FROM target_systems WHERE kind = 'ad' RETURNING id",
-            )
-            .bind(id)
-            .bind(operator)
-            .fetch_optional(&mut *tx)
-            .await?
-        }
-        None => None,
+    let Some(operator) = first_password_by else {
+        return Ok(None);
     };
-    tx.commit().await?;
-    Ok((id, first_password))
+    sqlx::query_scalar(
+        "INSERT INTO first_passwords (identity_id, target_system_id, requested_by) \
+         SELECT $1, id, $2 FROM target_systems WHERE kind = 'ad' RETURNING id",
+    )
+    .bind(id)
+    .bind(operator)
+    .fetch_optional(&mut **tx)
+    .await
 }
 
 // ADR-056: ilk parola yalnizca baslangici bugun ya da gecmiste olan kayda, kurum saatiyle.

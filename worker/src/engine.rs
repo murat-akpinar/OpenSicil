@@ -603,13 +603,10 @@ async fn issue_first_password(
         return Ok(String::new());
     };
     let logon_attrs = ["lastLogonTimestamp", "pwdLastSet"];
-    let read_first = |attrs: &HashMap<String, Vec<String>>, name: &str| {
-        attrs.get(name).and_then(|v| v.first()).cloned()
-    };
     let before = ad_account::read_attributes(ldap, dn, &logon_attrs).await?;
     let unused = first_password::account_unused(
-        read_first(&before, "lastLogonTimestamp").as_deref(),
-        read_first(&before, "pwdLastSet").as_deref(),
+        first_value(&before, "lastLogonTimestamp").as_deref(),
+        first_value(&before, "pwdLastSet").as_deref(),
         link,
     );
     let reject = |reason: &'static str| async move {
@@ -632,7 +629,7 @@ async fn issue_first_password(
     }
     let stamp = match c.env.first_login_change_required {
         true => None,
-        false => read_first(
+        false => first_value(
             &ad_account::read_attributes(ldap, dn, &["pwdLastSet"]).await?,
             "pwdLastSet",
         ),
@@ -641,6 +638,10 @@ async fn issue_first_password(
         .await
         .map_err(JobError::Failed)?;
     Ok(", ilk parola verildi".to_string())
+}
+
+fn first_value(attrs: &HashMap<String, Vec<String>>, name: &str) -> Option<String> {
+    attrs.get(name).and_then(|v| v.first()).cloned()
 }
 // --- END FEATURE: first-password ---
 
@@ -1200,6 +1201,15 @@ mod tests {
             .unwrap()
             .success();
         assert!(bound.is_ok(), "teslim edilen parola bind etmeli: {bound:?}");
+        // ADR-046 lab sorusu: Samba simple bind'da lastLogonTimestamp yazar mi?
+        let after_bind = ad_account::find_by_guid(&mut ldap, &guid)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            after_bind.last_logon_timestamp.is_some(),
+            "Samba simple bind lastLogonTimestamp yazmalı (docs/05 Samba tablosu)"
+        );
         ldap.unbind().await.unwrap();
 
         // kullanilmis hesap: damga tutmuyor (kisi parolasini degistirmis) → red

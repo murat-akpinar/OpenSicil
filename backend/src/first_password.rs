@@ -11,6 +11,7 @@ use axum::routing::{get, post};
 use axum::Router;
 use sqlx::PgPool;
 
+use crate::audit::{FIRST_PASSWORD_REQUESTED, FIRST_PASSWORD_SHOWN};
 use crate::identity_web::{allowed, audit_operator, forbidden, internal, OperatorSession};
 use crate::web::{render, AppState};
 
@@ -106,14 +107,7 @@ async fn create(
         Err(e) => return internal("ilk parola isteği yazılamadı", e),
     };
     let detail = serde_json::json!({ "first_password_id": fp, "target_id": ad });
-    audit_operator(
-        &state,
-        &op,
-        crate::audit::FIRST_PASSWORD_REQUESTED,
-        Some(id),
-        detail,
-    )
-    .await;
+    audit_operator(&state, &op, FIRST_PASSWORD_REQUESTED, Some(id), detail).await;
     if let Err(e) = crate::jobs::enqueue(&state.pool, id, ad, crate::jobs::Priority::Single).await {
         eprintln!("web: ilk parola işi açılamadı (kimlik {id}): {e}");
     }
@@ -142,18 +136,10 @@ async fn show(
     if !allowed(&op, AUTHORITIES) {
         return forbidden();
     }
-    let person: Option<(String, String, Option<String>, Option<String>)> = match sqlx::query_as(
-        "SELECT given_name, surname, username, email FROM identities WHERE id = $1",
-    )
-    .bind(id)
-    .fetch_optional(&state.pool)
-    .await
-    {
-        Ok(p) => p,
+    let header = match person_header(&state.pool, id).await {
+        Ok(Some(h)) => h,
+        Ok(None) => return (StatusCode::NOT_FOUND, "Kimlik bulunamadı.").into_response(),
         Err(e) => return internal("kimlik okunamadı", e),
-    };
-    let Some((given, surname, username, email)) = person else {
-        return (StatusCode::NOT_FOUND, "Kimlik bulunamadı.").into_response();
     };
     let status = match take(&state.pool, &state.aead_key, fp, id).await {
         Ok(Some(s)) => s,
@@ -162,9 +148,9 @@ async fn show(
     };
     let mut page = FirstPasswordTemplate {
         identity_id: id,
-        name: format!("{given} {surname}"),
-        username: username.unwrap_or_default(),
-        email: email.unwrap_or_default(),
+        name: header.0,
+        username: header.1,
+        email: header.2,
         pending: false,
         jobs: Vec::new(),
         password: String::new(),
@@ -181,14 +167,7 @@ async fn show(
         Status::Ready(password) => {
             page.password = password;
             let detail = serde_json::json!({ "first_password_id": fp });
-            audit_operator(
-                &state,
-                &op,
-                crate::audit::FIRST_PASSWORD_SHOWN,
-                Some(id),
-                detail,
-            )
-            .await;
+            audit_operator(&state, &op, FIRST_PASSWORD_SHOWN, Some(id), detail).await;
         }
         Status::AlreadyShown => {
             page.error =
@@ -197,6 +176,25 @@ async fn show(
         Status::Rejected(reason) => page.error = reason,
     }
     render(&page)
+}
+
+/// (ad soyad, kullanici adi, e-posta); kullanici adi henuz uretilmemisse bos
+async fn person_header(
+    pool: &PgPool,
+    id: i64,
+) -> Result<Option<(String, String, String)>, sqlx::Error> {
+    let row: Option<(String, String, Option<String>, Option<String>)> =
+        sqlx::query_as("SELECT given_name, surname, username, email FROM identities WHERE id = $1")
+            .bind(id)
+            .fetch_optional(pool)
+            .await?;
+    Ok(row.map(|(given, surname, username, email)| {
+        (
+            format!("{given} {surname}"),
+            username.unwrap_or_default(),
+            email.unwrap_or_default(),
+        )
+    }))
 }
 // --- END FEATURE: first-password ---
 
@@ -274,6 +272,19 @@ mod tests {
         assert_eq!(r.status(), StatusCode::SEE_OTHER);
         let location = r.headers()["location"].to_str().unwrap().to_string();
         let fp: i64 = location.rsplit('/').next().unwrap().parse().unwrap();
+        // ADR-019: yardim masasi kayit, ayrilis ve rol degistiremez
+        for uri in [
+            "/identities",
+            "/identities/1/departure",
+            "/identities/1/roles",
+        ] {
+            let r = app
+                .clone()
+                .oneshot(request_with("POST", uri, &helpdesk))
+                .await
+                .unwrap();
+            assert_eq!(r.status(), StatusCode::FORBIDDEN, "{uri}");
+        }
         let jobs: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM jobs WHERE identity_id = $1")
             .bind(id)
             .fetch_one(&pool)
