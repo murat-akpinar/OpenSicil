@@ -116,7 +116,7 @@ ON audit_log TO {backend};
 GRANT INSERT (event_type, detail, identity_id, target_system_id, operation_class, emergency, \
 intent_id, outcome) ON audit_log TO {worker};
 GRANT SELECT, INSERT, UPDATE, DELETE ON departments, roles, identity_additional_roles TO {backend};
-GRANT SELECT, INSERT, DELETE ON import_batches TO {backend};
+GRANT SELECT, INSERT, DELETE ON import_batches, manage_batches TO {backend};
 GRANT SELECT ON departments, roles TO {worker};
 GRANT SELECT, DELETE ON identity_additional_roles TO {worker};
 GRANT SELECT ON identities TO {backend}, {worker};

@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}{{ lang.t("manage.title") }} — {{ target_name }} — OpenSicil{% endblock %}
+{% block content %}
+{# ADR-018/043/051/087: gozlem baglantilari, okuma seridinin hesapladigi farkla;
+   secim esigi yalnizca uygulanacak farki olanlari sayar. #}
+<div class="page-head">
+  <div>
+    <h1 class="h1">{{ lang.t("manage.title") }} — {{ target_name }}</h1>
+    <p class="sub">{{ lang.t("manage.sub") }}</p>
+  </div>
+  <div class="flex flex-wrap items-center gap-2">
+    {% if can_manage %}
+    <form method="post" action="/targets/{{ target_id }}/manage/diff">
+      <button class="btn" type="submit"{% if diff_running %} disabled{% endif %}><i class="ico ico-refresh" aria-hidden="true"></i>{{ lang.t("manage.compute_diff") }}</button>
+    </form>
+    {% endif %}
+    <a class="btn" href="/targets/{{ target_id }}/reconcile"><i class="ico ico-chart" aria-hidden="true"></i>{{ lang.t("reconcile.title") }}</a>
+  </div>
+</div>
+
+{% if !notice.info.is_empty() %}<div class="alert alert-info mb-4">{{ notice.info }}</div>{% endif %}
+{% if !notice.error.is_empty() %}<div class="alert alert-warn mb-4">{{ notice.error }}</div>{% endif %}
+{% if diff_running %}<p class="alert alert-info mb-4">{{ lang.t("manage.diff_running") }}</p>{% endif %}
+
+{% if !pending.is_empty() %}
+<div class="card mb-4">
+  <div class="card-head">
+    <span class="ico-tile ico-tile-warn"><i class="ico ico-clock" aria-hidden="true"></i></span>
+    <h2 class="h2">{{ lang.t("manage.pending_title") }}</h2>
+  </div>
+  <table class="tbl">
+    <thead><tr><th>#</th><th>{{ lang.t("import.pending_by") }}</th><th class="num">{{ lang.t("manage.selected") }}</th><th class="num">{{ lang.t("import.age") }}</th></tr></thead>
+    <tbody>
+    {% for b in pending %}
+      <tr>
+        <td><a class="link" href="/targets/{{ target_id }}/manage/{{ b.id }}">{{ b.id }}</a></td>
+        <td>{{ b.by_username }}</td>
+        <td class="num">{{ b.count }}</td>
+        <td class="num">{{ lang.t1("import.minutes", b.age_minutes) }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if rows.is_empty() %}
+<div class="empty">
+  <span class="ico-tile ico-tile-lg"><i class="ico ico-check" aria-hidden="true"></i></span>
+  <p class="empty-hint">{{ lang.t("manage.empty") }}</p>
+</div>
+{% else %}
+<form method="post" action="/targets/{{ target_id }}/manage">
+  <p class="hint mb-3">{{ lang.t1("manage.hint", threshold) }}</p>
+  <div class="card overflow-x-auto p-0 mb-4">
+    <table class="tbl">
+      <thead><tr>
+        {% if can_manage %}<th class="w-8"><input type="checkbox" data-select-all="link" aria-label="{{ lang.t("adopt.select_all") }}" title="{{ lang.t("adopt.select_all") }}"></th>{% endif %}
+        <th>{{ lang.t("field.person") }}</th>
+        <th>{{ lang.t("field.account") }}</th>
+        <th>{{ lang.t("manage.diff") }}</th>
+        <th>{{ lang.t("manage.effect") }}</th>
+        <th>{{ lang.t("manage.computed_at") }}</th>
+      </tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          {% if can_manage %}<td>{% if r.selectable() %}<input type="checkbox" name="link" value="{{ r.identity_id }}" aria-label="{{ r.person }}">{% endif %}</td>{% endif %}
+          <td><a class="link" href="/identities/{{ r.identity_id }}">{{ r.person }}</a>{% if r.requested %} <span class="badge badge-info">{{ lang.t("person.manage_requested") }}</span>{% endif %}{% if r.role_undefined %} <span class="badge badge-warn">{{ lang.t("person.role_undefined") }}</span>{% endif %}</td>
+          <td><code>{{ r.account }}</code></td>
+          <td class="text-xs">{% if r.diff.is_empty() %}<span class="muted">{{ lang.t("manage.not_computed") }}</span>{% else %}{{ r.diff }}{% endif %}</td>
+          <td><span class="badge badge-{% if r.applies == Some(true) %}warn{% else if r.applies == Some(false) %}ok{% else %}info{% endif %}">{{ lang.t(r.applies_key()) }}</span></td>
+          <td class="whitespace-nowrap muted text-xs">{{ r.diff_at }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if can_manage %}
+  <button class="btn btn-primary" type="submit"><i class="ico ico-check" aria-hidden="true"></i>{{ lang.t("manage.submit") }}</button>
+  {% endif %}
+</form>
+{% endif %}
+{% endblock %}

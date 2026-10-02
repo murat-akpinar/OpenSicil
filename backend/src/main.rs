@@ -4,6 +4,7 @@ mod audit;
 mod auth;
 mod bootstrap_account;
 mod bulk_adopt;
+mod bulk_manage;
 mod change_set;
 mod common_settings;
 mod cookie;

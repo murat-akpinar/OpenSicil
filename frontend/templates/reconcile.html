@@ -6,11 +6,15 @@
     <h1 class="h1">{{ lang.t("reconcile.title") }}</h1>
     <p class="sub">{{ lang.t("reconcile.subtitle") }}</p>
   </div>
-  {% if can_scan %}
-  <form method="post" action="/targets/{{ target_id }}/reconcile/scan">
-    <button class="btn" type="submit"><i class="ico ico-refresh" aria-hidden="true"></i>{{ lang.t("reconcile.scan") }}</button>
-  </form>
-  {% endif %}
+  <div class="flex flex-wrap items-center gap-2">
+    {% if can_scan %}
+    <form method="post" action="/targets/{{ target_id }}/reconcile/scan">
+      <button class="btn" type="submit"><i class="ico ico-refresh" aria-hidden="true"></i>{{ lang.t("reconcile.scan") }}</button>
+    </form>
+    {% endif %}
+    {# toplu yonetime alma hr/admin: tarama yetkisinden bagimsiz #}
+    <a class="btn" href="/targets/{{ target_id }}/manage"><i class="ico ico-users" aria-hidden="true"></i>{{ lang.t("manage.title") }}</a>
+  </div>
 </div>
 
 {% if !notice.info.is_empty() %}<div class="alert alert-info mb-4">{{ notice.info }}</div>{% endif %}

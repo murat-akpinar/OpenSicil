@@ -168,6 +168,7 @@ async fn run_read_lane(pool: PgPool, env: Arc<Env>, stop: Arc<AtomicBool>) {
         let outcome = match job.kind.as_str() {
             read_lane::CATALOG_REFRESH => refresh_catalog(&pool, &env, job.target_system_id).await,
             read_lane::RECONCILE => run_reconcile(&pool, &env, job.target_system_id, job.id).await,
+            read_lane::MANAGE_DIFF => run_manage_diff(&pool, &env, job.target_system_id).await,
             other => Err(format!("bilinmeyen okuma işi türü: {other}")),
         };
         match &outcome {
@@ -231,6 +232,53 @@ async fn run_reconcile(
         counts.observed,
         counts.unmanaged,
         counts.missing
+    ))
+}
+
+// Toplu yonetime almanin fark hesabi (ADR-051 ucuncu tur; ADR-087 kuru yol): hedefin
+// gozlem baglantilari icin motorun kuru yolu tek LDAP baglantisiyla calisir, metin ve
+// "esige giren fark var mi" baglantiya yazilir. Hedefe yazilmaz, sayaclar degismez;
+// hesaplanamayan baglanti nedeniyle isaretlenir, is dusmez.
+async fn run_manage_diff(pool: &PgPool, env: &Env, target: i64) -> Result<String, String> {
+    let (mut ldap, _scope, _checks) = open_ad(pool, env).await?;
+    let engine_env = engine_env_of(env, "read-lane");
+    let ids: Vec<i64> = sqlx::query_scalar(
+        "SELECT identity_id FROM account_links WHERE target_system_id = $1 \
+         AND mode = 'observed' AND deleted_by_us_at IS NULL ORDER BY identity_id",
+    )
+    .bind(target)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("gözlem bağlantıları okunamadı: {e}"))?;
+    let (mut applies, mut failed) = (0, 0);
+    for id in &ids {
+        let diff = engine::observed_diff(pool, &engine_env, &mut ldap, *id, target).await;
+        let (text, flag) = match diff {
+            Ok(d) => {
+                applies += usize::from(d.applies);
+                (d.text, Some(d.applies))
+            }
+            Err(e) => {
+                failed += 1;
+                (format!("fark hesaplanamadı: {e}"), None)
+            }
+        };
+        sqlx::query(
+            "UPDATE account_links SET observed_diff = $3, observed_diff_applies = $4, \
+             observed_diff_at = now() WHERE identity_id = $1 AND target_system_id = $2",
+        )
+        .bind(id)
+        .bind(target)
+        .bind(text)
+        .bind(flag)
+        .execute(pool)
+        .await
+        .map_err(|e| format!("gözlem farkı yazılamadı: {e}"))?;
+    }
+    ldap.unbind().await.ok();
+    Ok(format!(
+        "{} gözlem bağlantısı: {applies} uygulanacak fark, {failed} hesaplanamadı",
+        ids.len()
     ))
 }
 
@@ -361,8 +409,8 @@ fn unreachable_targets(marks: &HashMap<i64, Instant>, now: Instant) -> Vec<i64> 
 }
 
 // Doner: hedef erisilemez isaretlenmeli mi.
-async fn process_job(pool: &PgPool, job: &queue::ClaimedJob, worker_id: &str, env: &Env) -> bool {
-    let engine_env = engine::EngineEnv {
+fn engine_env_of<'a>(env: &'a Env, worker_id: &'a str) -> engine::EngineEnv<'a> {
+    engine::EngineEnv {
         time_zone: &env.time_zone,
         mode: env.write_mode,
         aead_key: &env.aead_key,
@@ -372,7 +420,11 @@ async fn process_job(pool: &PgPool, job: &queue::ClaimedJob, worker_id: &str, en
         first_login_change_required: env.first_login_change_required,
         ownership_mode_enabled: env.ownership_mode_enabled,
         limits: env.limits,
-    };
+    }
+}
+
+async fn process_job(pool: &PgPool, job: &queue::ClaimedJob, worker_id: &str, env: &Env) -> bool {
+    let engine_env = engine_env_of(env, worker_id);
     let run = engine::run_job(pool, job, &engine_env).await;
     let (outcome, unreachable) = match run {
         Ok(result) => (

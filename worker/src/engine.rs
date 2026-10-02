@@ -671,6 +671,82 @@ async fn observe(c: &AdJob<'_>, ldap: &mut Ldap, link: &LinkRow) -> Result<Strin
         "gözlem modunda, yönetime alınırsa: {diff}{pending}"
     ))
 }
+
+/// Toplu yonetime almanin fark hesabi: okuma seridi (ADR-051) her gozlem
+/// baglantisi icin motorun kuru yolunu (ADR-087) paylasilan tek LDAP baglantisiyla
+/// calistirir. `applies`: etkin/pasif gecisi ya da grup ekleme/cikarma var — esige
+/// giren fark (ADR-037/043); yalnizca oznitelik farki girmez.
+pub struct ObservedDiff {
+    pub text: String,
+    pub applies: bool,
+}
+
+pub async fn observed_diff(
+    pool: &PgPool,
+    env: &EngineEnv<'_>,
+    ldap: &mut Ldap,
+    identity_id: i64,
+    target: i64,
+) -> Result<ObservedDiff, JobError> {
+    let input = model::load(pool, identity_id, target, env.time_zone)
+        .await
+        .map_err(JobError::Failed)?;
+    let desired = desired_state(
+        &input.timeline,
+        &input.model,
+        input.link.as_ref(),
+        &input.clock,
+    );
+    let mappings = mapping::load_rows(pool, target)
+        .await
+        .map_err(JobError::Failed)?;
+    let dry = EngineEnv {
+        mode: Mode { dry_run: true },
+        ..env.clone()
+    };
+    let job = ClaimedJob {
+        id: 0,
+        identity_id,
+        target_system_id: target,
+        priority: 3,
+        attempts: 0,
+    };
+    let base_dn = ad::base_dn(ldap).await?;
+    let c = AdJob {
+        pool,
+        job: &job,
+        env: &dry,
+        base_dn: &base_dn,
+        input: &input,
+        desired: &desired,
+        mappings: &mappings,
+    };
+    let Some(link) = input.link_row.as_ref().filter(|l| l.observed) else {
+        return Err(JobError::Failed("gözlem modunda bağlantı yok".to_string()));
+    };
+    let applies = observed_applies(&c, ldap, link).await?;
+    let text = observe(&c, ldap, link).await?;
+    Ok(ObservedDiff { text, applies })
+}
+
+/// ADR-037/043: etkin/pasif gecisi ya da grup ekleme/cikarma esige girer; hesap
+/// hedefte yoksa ya da olmasi gereken "hesap yok" ise fark uygulanmaz.
+async fn observed_applies(
+    c: &AdJob<'_>,
+    ldap: &mut Ldap,
+    link: &LinkRow,
+) -> Result<bool, JobError> {
+    let account = ad_account::find_by_guid(ldap, &link.external_id).await?;
+    Ok(match (c.desired.account, account) {
+        (AccountPresence::Present { enabled }, Some(account)) => {
+            let plan = plan_existing(c, ldap, link, &account, enabled).await?;
+            plan.enabled.class().is_some()
+                || !plan.groups.to_add.is_empty()
+                || !plan.groups.to_remove.is_empty()
+        }
+        _ => false,
+    })
+}
 // --- END FEATURE: adoption ---
 
 async fn insert_link(c: &AdJob<'_>, guid: &str) -> Result<LinkRow, JobError> {
@@ -1362,6 +1438,80 @@ mod tests {
         first_password: 1000,
         emergency_quota: 1000,
     };
+
+    /// ADR-051/087: okuma seridinin fark hesabi gozlem baglantisi icin metin ve
+    /// "esige giren fark" bayragi uretir; hedefe ve denetim kaydina yazmaz.
+    #[tokio::test]
+    #[ignore = "lab Samba AD gerektirir: AD_LAB_URL, AD_LAB_BIND_DN, AD_LAB_PASSWORD, AD_CA_FILE ile çalıştır"]
+    async fn observed_diff_reports_text_and_applicability_without_writing() {
+        let var = |n: &str| std::env::var(n).unwrap_or_else(|_| panic!("{n} ayarlanmalı"));
+        let (admin_pool, pool, db_name) = test_support::fresh_migrated_db().await;
+        let seed = test_support::seed_example_model(&pool).await;
+        let key = [7u8; crate::crypto::KEY_LEN];
+        let cfg = test_support::configure_lab_ad(
+            &pool,
+            &key,
+            &var("AD_LAB_URL"),
+            &var("AD_LAB_BIND_DN"),
+            &var("AD_LAB_PASSWORD"),
+            &var("AD_CA_FILE"),
+        )
+        .await;
+        test_support::point_model_at_real_catalog(&pool, &seed, &cfg).await;
+        let mut ldap = ad::connect(&cfg).await.unwrap();
+        let base = ad::base_dn(&mut ldap).await.unwrap();
+        let existing = adoption::find_by_sam(&mut ldap, &base, "mevcut.personel", None)
+            .await
+            .unwrap()
+            .expect("seed.sh mevcut.personel hesabını açar");
+        sqlx::query(
+            "INSERT INTO account_links (identity_id, target_system_id, external_id, origin, mode) \
+             VALUES ($1, $2, $3, 'adopted', 'observed')",
+        )
+        .bind(seed.identity)
+        .bind(seed.ad)
+        .bind(&existing.guid)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let ca = var("AD_CA_FILE");
+        let env = EngineEnv {
+            time_zone: "Europe/Istanbul",
+            mode: Mode { dry_run: false },
+            aead_key: &key,
+            ad_ca_file: Some(&ca),
+            worker_id: "read-lane",
+            sensitive_mapping_enabled: false,
+            first_login_change_required: true,
+            ownership_mode_enabled: true,
+            limits: LAB_LIMITS,
+        };
+        let diff = observed_diff(&pool, &env, &mut ldap, seed.identity, seed.ad)
+            .await
+            .unwrap();
+        assert!(
+            diff.text.starts_with("gözlem modunda, yönetime alınırsa:"),
+            "{}",
+            diff.text
+        );
+        // seed modeli katalog gruplarini verir, mevcut.personel hicbirinde degil: ekleme var
+        assert!(diff.applies, "{}", diff.text);
+        let intents: i64 = sqlx::query_scalar("SELECT count(*) FROM audit_log")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(intents, 0, "kuru yol denetim kaydina yazmaz");
+        let mode: String =
+            sqlx::query_scalar("SELECT mode FROM account_links WHERE identity_id = $1")
+                .bind(seed.identity)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(mode, "observed");
+        ldap.unbind().await.ok();
+        drop(pool);
+        test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
 
     // ADR-018/086: ipuclu kayit hesap acmaz; retler mudahale (kapali, kuru, yok, kapsam disi,
     // yasakli grup, sicil, baska kimlige bagli); kabulde gozlem baglantisi + ad uyarisi;

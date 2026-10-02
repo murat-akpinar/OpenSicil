@@ -12,6 +12,8 @@ use sqlx::PgPool;
 
 pub const CATALOG_REFRESH: &str = "catalog_refresh";
 pub const RECONCILE: &str = "reconcile";
+/// Toplu yonetime almanin fark hesabi (ADR-051 ucuncu tur, ADR-094 sonuclari)
+pub const MANAGE_DIFF: &str = "manage_diff";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReadJob {

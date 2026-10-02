@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}{{ lang.t1("manage.batch_title", batch_id) }} — OpenSicil{% endblock %}
+{% block content %}
+{# Esigi asan secim: ADR-026 onay (baslatan onaylayamaz), ADR-055 madde 1 onay
+   anindaki sayim; secili olup artik gozlemde olmayan kimlik listede gorunmez. #}
+<div class="page-head">
+  <div>
+    <h1 class="h1">{{ lang.t1("manage.batch_title", batch_id) }} — {{ target_name }}</h1>
+    <p class="sub">{{ batch_sub }}</p>
+  </div>
+  <div><a class="btn" href="/targets/{{ target_id }}/manage"><i class="ico ico-users" aria-hidden="true"></i>{{ lang.t("manage.title") }}</a></div>
+</div>
+
+{% if !notice.info.is_empty() %}<div class="alert alert-info mb-4">{{ notice.info }}</div>{% endif %}
+{% if !notice.error.is_empty() %}<div class="alert alert-warn mb-4">{{ notice.error }}</div>{% endif %}
+{% if changed_since %}<p class="alert alert-warn mb-4">{{ changed_text }}</p>{% endif %}
+
+<div class="grid grid-cols-2 gap-3 mb-4">
+  <div class="stat"><p class="stat-label">{{ lang.t("manage.selected") }}</p><p class="stat-value">{{ rows.len() }}</p></div>
+  <div class="stat"><p class="stat-label">{{ lang.t("import.affected") }}</p><p class="stat-value">{{ affected }}</p></div>
+</div>
+
+<div class="card overflow-x-auto p-0 mb-4">
+  <table class="tbl">
+    <thead><tr>
+      <th>{{ lang.t("field.person") }}</th>
+      <th>{{ lang.t("field.account") }}</th>
+      <th>{{ lang.t("manage.diff") }}</th>
+      <th>{{ lang.t("manage.effect") }}</th>
+    </tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td><a class="link" href="/identities/{{ r.identity_id }}">{{ r.person }}</a>{% if r.role_undefined %} <span class="badge badge-warn">{{ lang.t("person.role_undefined") }}</span>{% endif %}</td>
+        <td><code>{{ r.account }}</code></td>
+        <td class="text-xs">{% if r.diff.is_empty() %}<span class="muted">{{ lang.t("manage.not_computed") }}</span>{% else %}{{ r.diff }}{% endif %}</td>
+        <td><span class="badge badge-{% if r.applies == Some(true) %}warn{% else if r.applies == Some(false) %}ok{% else %}info{% endif %}">{{ lang.t(r.applies_key()) }}</span></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card stack">
+  {% if approver_is_initiator %}<p class="hint">{{ lang.t("err.approver_is_initiator") }}</p>{% endif %}
+  <div class="flex flex-wrap gap-2">
+    {% if can_approve %}
+    <form method="post" action="/targets/{{ target_id }}/manage/{{ batch_id }}/approve">
+      <button class="btn btn-primary" type="submit"><i class="ico ico-check" aria-hidden="true"></i>{{ lang.t("manage.approve") }}</button>
+    </form>
+    {% endif %}
+    {% if can_reject %}
+    <form method="post" action="/targets/{{ target_id }}/manage/{{ batch_id }}/reject">
+      <button class="btn" type="submit"><i class="ico ico-trash" aria-hidden="true"></i>{{ lang.t("import.reject") }}</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

@@ -40,6 +40,10 @@ pub const IMPORT_STAGED: &str = "import.staged";
 pub const IMPORT_APPROVED: &str = "import.approved";
 pub const IMPORT_REJECTED: &str = "import.rejected";
 pub const IDENTITY_IMPORTED: &str = "identity.imported";
+// Toplu yonetime alma (ADR-018/043): esigi asan secim parti olaylariyla
+pub const MANAGE_STAGED: &str = "manage.staged";
+pub const MANAGE_APPROVED: &str = "manage.approved";
+pub const MANAGE_REJECTED: &str = "manage.rejected";
 
 pub struct Actor<'a> {
     pub subject: Option<&'a str>,

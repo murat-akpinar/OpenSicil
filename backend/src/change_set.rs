@@ -641,12 +641,16 @@ pub struct Pending {
 
 const SECONDS_PER_HOUR: i64 = 3_600;
 
+/// ADR-026: onaylayan != baslatan, YA DA kilit acik ve set yasi >= N saat. Rol/departman
+/// taslagi, CSV partisi ve toplu yonetime alma secimi ayni kurali kullanir.
+pub fn approvable(by_subject: &str, age_seconds: i64, approver: &str, timelock_hours: u32) -> bool {
+    by_subject != approver
+        || (timelock_hours > 0 && age_seconds >= i64::from(timelock_hours) * SECONDS_PER_HOUR)
+}
+
 impl Pending {
-    /// ADR-026: onaylayan != baslatan, YA DA kilit acik ve set yasi >= N saat.
     pub fn approvable_by(&self, approver_subject: &str, timelock_hours: u32) -> bool {
-        self.by != approver_subject
-            || (timelock_hours > 0
-                && self.age_seconds >= i64::from(timelock_hours) * SECONDS_PER_HOUR)
+        approvable(&self.by, self.age_seconds, approver_subject, timelock_hours)
     }
 
     /// Baslatanin kendi setini onaylayabilmesine kalan saniye; kilit kapaliysa None.

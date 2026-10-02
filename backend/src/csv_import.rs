@@ -37,7 +37,6 @@ pub const MAX_ROWS: usize = 25_000;
 const BODY_LIMIT: usize = 16 * 1024 * 1024;
 const PREVIEW_ROWS: usize = 50;
 const ROLE_SEPARATORS: [char; 2] = [';', '|'];
-const SECONDS_PER_HOUR: i64 = 3_600;
 
 /// Baslik ve secenek karsilastirmasi: Turkce harfler ASCII'ye, kucuk harf;
 /// '_', '-' ve ardisik bosluklar tek bosluk.
@@ -1260,11 +1259,13 @@ pub struct Batch {
 }
 
 impl Batch {
-    /// ADR-026: onaylayan != baslatan, YA DA kilit acik ve parti yasi >= N saat.
     pub fn approvable_by(&self, approver_subject: &str, timelock_hours: u32) -> bool {
-        self.by_subject != approver_subject
-            || (timelock_hours > 0
-                && self.age_seconds >= i64::from(timelock_hours) * SECONDS_PER_HOUR)
+        crate::change_set::approvable(
+            &self.by_subject,
+            self.age_seconds,
+            approver_subject,
+            timelock_hours,
+        )
     }
 }
 
