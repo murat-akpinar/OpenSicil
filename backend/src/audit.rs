@@ -33,6 +33,13 @@ pub const FIRST_PASSWORD_SHOWN: &str = "first_password.shown";
 pub const RECONCILE_REAPPLY: &str = "reconcile.reapply";
 /// ADR-024: saklamasi dolan hesabin silinmesi operator tarafindan onaylandi
 pub const ACCOUNT_DELETION_APPROVED: &str = "account.deletion_approved";
+// F-17 CSV ice aktarma (ADR-018): parti olaylari kimliksiz (kim, ne zaman, kac satir),
+// kimlik basina olay kisinin olay listesinde
+pub const IMPORT_APPLIED: &str = "import.applied";
+pub const IMPORT_STAGED: &str = "import.staged";
+pub const IMPORT_APPROVED: &str = "import.approved";
+pub const IMPORT_REJECTED: &str = "import.rejected";
+pub const IDENTITY_IMPORTED: &str = "identity.imported";
 
 pub struct Actor<'a> {
     pub subject: Option<&'a str>,

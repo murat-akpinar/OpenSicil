@@ -24,8 +24,9 @@ pub enum Enqueue {
     AlreadyOpen(i64),
 }
 
-pub async fn enqueue(
-    pool: &PgPool,
+// Executor generic: CSV ice aktarma isleri kimlik satirlariyla ayni transaction'da acar.
+pub async fn enqueue<'e>(
+    pool: impl sqlx::PgExecutor<'e>,
     identity_id: i64,
     target_system_id: i64,
     priority: Priority,

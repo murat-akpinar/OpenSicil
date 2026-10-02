@@ -129,4 +129,5 @@
 - Panelde tarih aralığı filtresi ve rol kırılımı halkası (ADR-076)
 - Silinmeyi bekleyenler listesi ve silme onayı (ADR-024)
 - Metrik ucu — Prometheus metni, Bearer token, worker durum satırı ve kuru çalıştırma şeridi (F-19)
+- CSV ile toplu kimlik içe aktarma — kolon ve ipucu kuralları, önizleme, tek transaction, eşiği aşan dosya şifreli sahneleme ve onay (F-17)
 

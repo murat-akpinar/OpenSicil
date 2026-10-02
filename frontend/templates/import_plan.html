@@ -1,0 +1,67 @@
+{# Onizleme ve onay sayfalarinin ortak govdesi: sayac, hatalar, mukerrer uyarisi,
+   ilk satirlar. Ust sablon summary/errors/duplicates/rows/lang verir. #}
+<div class="grid grid-cols-2 gap-3 mb-4 sm:grid-cols-5">
+  <div class="stat"><p class="stat-label">{{ lang.t("import.action.new") }}</p><p class="stat-value">{{ summary.new }}</p></div>
+  <div class="stat"><p class="stat-label">{{ lang.t("import.action.update") }}</p><p class="stat-value">{{ summary.updated }}</p></div>
+  <div class="stat"><p class="stat-label">{{ lang.t("import.action.unchanged") }}</p><p class="stat-value">{{ summary.unchanged }}</p></div>
+  <div class="stat"><p class="stat-label">{{ lang.t("import.cleared") }}</p><p class="stat-value">{{ summary.cleared }}</p></div>
+  <div class="stat"><p class="stat-label">{{ lang.t("import.affected") }}</p><p class="stat-value">{{ summary.affected }}</p></div>
+</div>
+
+{% if !errors.is_empty() %}
+<div class="card mb-4">
+  <div class="card-head">
+    <span class="ico-tile ico-tile-err"><i class="ico ico-bolt" aria-hidden="true"></i></span>
+    <h2 class="h2">{{ lang.t1("import.errors_title", errors.len()) }}</h2>
+  </div>
+  <p class="hint mb-3">{{ lang.t("import.errors_hint") }}</p>
+  <ul class="stack">
+  {% for e in errors %}
+    <li><strong>{{ lang.t1("import.line", e.line) }}</strong>{% if !e.column.is_empty() %} <code>{{ e.column }}</code>{% endif %}: {{ lang.t(e.key) }}{% if !e.detail.is_empty() %} — <code>{{ e.detail }}</code>{% endif %}</li>
+  {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+{% if !duplicates.is_empty() %}
+<div class="card mb-4">
+  <div class="card-head">
+    <span class="ico-tile ico-tile-warn"><i class="ico ico-users" aria-hidden="true"></i></span>
+    <h2 class="h2">{{ lang.t1("import.duplicates_title", duplicates.len()) }}</h2>
+  </div>
+  <p class="hint mb-3">{{ lang.t("import.duplicates_hint") }}</p>
+  <table class="tbl">
+    <thead><tr><th>{{ lang.t("import.line_col") }}</th><th>{{ lang.t("field.employee_number") }}</th><th>{{ lang.t("field.person") }}</th><th>{{ lang.t("import.existing") }}</th></tr></thead>
+    <tbody>
+    {% for d in duplicates %}
+      <tr>
+        <td class="num">{{ d.line }}</td>
+        <td>{{ d.employee_number }}</td>
+        <td>{{ d.person }}</td>
+        <td><a class="link" href="/identities/{{ d.existing_id }}">{{ d.existing_person }}</a>{% if !d.existing_number.is_empty() %} ({{ d.existing_number }}){% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if !rows.is_empty() %}
+<div class="card overflow-x-auto p-0 mb-4">
+  <table class="tbl">
+    <thead><tr><th>{{ lang.t("import.line_col") }}</th><th>{{ lang.t("field.employee_number") }}</th><th>{{ lang.t("field.person") }}</th><th>{{ lang.t("import.action") }}</th><th>{{ lang.t("import.changes") }}</th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td class="num">{{ r.line }}</td>
+        <td>{{ r.employee_number }}</td>
+        <td>{% if let Some(id) = r.identity_id %}<a class="link" href="/identities/{{ id }}">{{ r.person }}</a>{% else %}{{ r.person }}{% endif %}</td>
+        <td><span class="badge badge-{% if r.action == Action::New %}ok{% else if r.action == Action::Update %}warn{% else %}info{% endif %}">{{ lang.t(r.action.key()) }}</span></td>
+        <td class="muted text-xs">{{ r.changes_text() }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="hint mb-4">{{ lang.t("import.rows_shown") }}</p>
+{% endif %}

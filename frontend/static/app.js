@@ -120,11 +120,41 @@
     reflect();
   }
 
+  // CSV içe aktarma (F-17): dosya tarayıcıda okunur ve data-csv-into ile adı verilen
+  // metin alanına konur; sunucuya sıradan form gider, multipart yolu açılmaz.
+  // Dosya seçilemeyen tarayıcıda alan elle yapıştırmaya açık kalır.
+  function csvFileInputs() {
+    var inputs = document.querySelectorAll("input[type=file][data-csv-into]");
+    for (var i = 0; i < inputs.length; i++) {
+      bindCsvFile(inputs[i]);
+    }
+  }
+
+  function bindCsvFile(input) {
+    var form = input.form || input.closest("form");
+    var target = form && form.querySelector('textarea[name="' + input.getAttribute("data-csv-into") + '"]');
+    if (!target || typeof FileReader === "undefined") {
+      return;
+    }
+    input.addEventListener("change", function () {
+      var file = input.files && input.files[0];
+      if (!file) {
+        return;
+      }
+      var reader = new FileReader();
+      reader.onload = function () {
+        target.value = String(reader.result);
+      };
+      reader.readAsText(file, "UTF-8");
+    });
+  }
+
   apply(stored());
 
   document.addEventListener("DOMContentLoaded", function () {
     themeToggle();
     activeNav();
     selectAll();
+    csvFileInputs();
   });
 })();

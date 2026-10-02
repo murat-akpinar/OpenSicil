@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}{{ lang.t1("import.batch_title", batch_id) }} — OpenSicil{% endblock %}
+{% block content %}
+{# Esigi asan dosya: ADR-026 onay (baslatan onaylayamaz), ADR-055 madde 1 onay
+   anindaki fark; sayi sahnelendigindekinden farkliysa soylenir. #}
+<div class="page-head">
+  <div>
+    <h1 class="h1">{{ lang.t1("import.batch_title", batch_id) }}</h1>
+    <p class="sub">{{ batch_sub }}</p>
+  </div>
+  <div><a class="btn" href="/imports"><i class="ico ico-inbox" aria-hidden="true"></i>{{ lang.t("import.back") }}</a></div>
+</div>
+
+{% if !notice.info.is_empty() %}<div class="alert alert-info mb-4">{{ notice.info }}</div>{% endif %}
+{% if !notice.error.is_empty() %}<div class="alert alert-warn mb-4">{{ notice.error }}</div>{% endif %}
+
+{% if changed_since %}
+<p class="alert alert-warn mb-4">{{ changed_text }}</p>
+{% endif %}
+
+{% include "import_plan.html" %}
+
+<div class="card stack">
+  {% if !duplicates.is_empty() %}
+  <p class="hint">{% if duplicates_confirmed %}{{ lang.t("import.duplicates_confirmed") }}{% else %}{{ lang.t("import.confirm_needed") }}{% endif %}</p>
+  {% endif %}
+  {% if approver_is_initiator %}
+  <p class="hint">{{ lang.t("err.approver_is_initiator") }}</p>
+  {% endif %}
+  <div class="flex flex-wrap gap-2">
+    {% if can_approve %}
+    <form method="post" action="/imports/{{ batch_id }}/approve">
+      <button class="btn btn-primary" type="submit"><i class="ico ico-check" aria-hidden="true"></i>{{ lang.t("import.approve") }}</button>
+    </form>
+    {% endif %}
+    {% if can_reject %}
+    <form method="post" action="/imports/{{ batch_id }}/reject">
+      <button class="btn" type="submit"><i class="ico ico-trash" aria-hidden="true"></i>{{ lang.t("import.reject") }}</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}{{ lang.t("import.preview_title") }} — OpenSicil{% endblock %}
+{% block content %}
+{# ADR-018: once dogrulama ve etki onizlemesi; tek hatali satir dosyayi dusurur.
+   Metin gizli alanla geri gelir, sunucuda saklanmaz. #}
+<div class="page-head">
+  <div>
+    <h1 class="h1">{{ lang.t("import.preview_title") }}</h1>
+    <p class="sub">{{ lang.t("import.preview_sub") }}</p>
+  </div>
+  <div><a class="btn" href="/imports"><i class="ico ico-inbox" aria-hidden="true"></i>{{ lang.t("import.back") }}</a></div>
+</div>
+
+{% if !notice.info.is_empty() %}<div class="alert alert-info mb-4">{{ notice.info }}</div>{% endif %}
+{% if !notice.error.is_empty() %}<div class="alert alert-warn mb-4">{{ notice.error }}</div>{% endif %}
+
+{% include "import_plan.html" %}
+
+{% if errors.is_empty() %}
+<form class="card stack" method="post" action="/imports">
+  <textarea name="csv" hidden aria-hidden="true">{{ csv }}</textarea>
+  {% if will_stage %}
+  <p class="alert alert-info">{{ stage_text }}</p>
+  {% else if summary.affected == 0 %}
+  <p class="hint">{{ lang.t("import.nothing_to_do") }}</p>
+  {% endif %}
+  {% if !duplicates.is_empty() %}
+  <label class="check"><input type="checkbox" name="confirm_duplicates" value="1"> {{ lang.t("import.confirm_duplicates") }}</label>
+  {% endif %}
+  {% if summary.affected > 0 %}
+  <div class="flex flex-wrap gap-2">
+    <button class="btn btn-primary" type="submit"><i class="ico ico-check" aria-hidden="true"></i>{% if will_stage %}{{ lang.t("import.stage") }}{% else %}{{ lang.t("import.apply") }}{% endif %}</button>
+  </div>
+  {% endif %}
+</form>
+{% endif %}
+{% endblock %}

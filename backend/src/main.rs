@@ -8,6 +8,7 @@ mod change_set;
 mod common_settings;
 mod cookie;
 mod crypto;
+mod csv_import;
 mod dashboard;
 mod db;
 mod deletions;

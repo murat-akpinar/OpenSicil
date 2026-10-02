@@ -205,7 +205,28 @@ pub async fn create(
 ) -> Result<(i64, Option<i64>), CreateError> {
     reject_known_national_id(pool, keys, new).await?;
     let mut tx = pool.begin().await?;
-    let id: i64 = sqlx::query_scalar(
+    let id = insert_identity(&mut tx, time_zone, new).await?;
+    if let Some(nid) = &new.national_id {
+        national_id::store(&mut *tx, keys, id, nid)
+            .await
+            .map_err(|e| match e.as_database_error() {
+                Some(db) if db.is_unique_violation() => CreateError::DuplicateNationalId,
+                _ => CreateError::Db(e),
+            })?;
+    }
+    let first_password = open_jobs(&mut tx, id, first_password_by).await?;
+    tx.commit().await?;
+    Ok((id, first_password))
+}
+
+/// Kimlik satirinin kendisi; kayit formu ve CSV ice aktarma (tek transaction'da
+/// cok satir) ayni INSERT'i kullanir.
+pub(crate) async fn insert_identity(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    time_zone: &str,
+    new: &NewIdentity,
+) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar(
         "INSERT INTO identities (given_name, surname, employee_number, mobile_phone, \
          department_id, primary_role_id, manager_id, employment_type, start_date, end_at, \
          requested_username, existing_ad_account_hint) \
@@ -225,19 +246,8 @@ pub async fn create(
     .bind(time_zone)
     .bind(&new.requested_username)
     .bind(&new.existing_ad_account_hint)
-    .fetch_one(&mut *tx)
-    .await?;
-    if let Some(nid) = &new.national_id {
-        national_id::store(&mut *tx, keys, id, nid)
-            .await
-            .map_err(|e| match e.as_database_error() {
-                Some(db) if db.is_unique_violation() => CreateError::DuplicateNationalId,
-                _ => CreateError::Db(e),
-            })?;
-    }
-    let first_password = open_jobs(&mut tx, id, first_password_by).await?;
-    tx.commit().await?;
-    Ok((id, first_password))
+    .fetch_one(&mut **tx)
+    .await
 }
 
 // On kontrol operatore erken ve net cevap verir; yaris durumunda UNIQUE indeks yakalar.
@@ -312,16 +322,27 @@ pub async fn similar_name_exists(
     given_name: &str,
     surname: &str,
 ) -> Result<bool, sqlx::Error> {
-    sqlx::query_scalar(
-        "SELECT EXISTS (SELECT 1 FROM identities WHERE deleted_at IS NULL \
+    Ok(similar_person(pool, given_name, surname).await?.is_some())
+}
+
+/// Ad-soyadi (Turkce harf duyarsiz) ayni olan silinmemis ilk kimlik:
+/// (id, "Ad Soyad", sicil no). CSV onizlemesi "olasi mukerrer" listesi icin (ADR-042).
+pub async fn similar_person(
+    pool: &PgPool,
+    given_name: &str,
+    surname: &str,
+) -> Result<Option<(i64, String, String)>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT id, given_name || ' ' || surname, COALESCE(employee_number, '') \
+         FROM identities WHERE deleted_at IS NULL \
          AND lower(translate(given_name, 'IİıŞĞÜÖÇ', 'iiişğüöç')) \
            = lower(translate($1, 'IİıŞĞÜÖÇ', 'iiişğüöç')) \
          AND lower(translate(surname, 'IİıŞĞÜÖÇ', 'iiişğüöç')) \
-           = lower(translate($2, 'IİıŞĞÜÖÇ', 'iiişğüöç')))",
+           = lower(translate($2, 'IİıŞĞÜÖÇ', 'iiişğüöç')) ORDER BY id LIMIT 1",
     )
     .bind(given_name)
     .bind(surname)
-    .fetch_one(pool)
+    .fetch_optional(pool)
     .await
 }
 

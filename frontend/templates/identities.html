@@ -13,6 +13,7 @@
       <input class="input" type="search" name="q" value="{{ q }}" placeholder="{{ lang.t("identities.search") }}" aria-label="{{ lang.t("identities.search") }}">
     </form>
     {% if can_register %}
+    <a class="btn" href="/imports"><i class="ico ico-inbox" aria-hidden="true"></i>{{ lang.t("nav.imports") }}</a>
     <a class="btn btn-primary" href="/identities/new"><i class="ico ico-plus" aria-hidden="true"></i>{{ lang.t("home.new_identity") }}</a>
     {% endif %}
   </div>
