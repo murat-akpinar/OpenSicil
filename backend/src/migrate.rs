@@ -266,32 +266,49 @@ fn validate_role_name(name: &str) -> Result<(), RoleError> {
     }
 }
 
+const CREATE_ROLE_FMT: &str =
+    "CREATE ROLE %I LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE";
+const ALTER_ROLE_FMT: &str = "ALTER ROLE %I LOGIN PASSWORD %L";
+const GRANT_CONNECT_SQL: &str =
+    "SELECT format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), $1::text)";
+
+// Postgres CREATE/ALTER ROLE bind parametresi desteklemez (ADR-015), DDL metni
+// elde kurulmak zorunda. Parolayi BIZ tirnaklamayiz: metni Postgres'in kendi
+// `format('%I', '%L')`'i kurar, parola oraya bind parametresi olarak gider.
+// Elle kacirma (tek tirnagi ikileme) yetmiyordu — ifade dolar tirnagi icindeydi
+// ve icinde `$opensicil_role$` gecen bir parola bloktan cikabiliyordu.
 async fn ensure_role(pool: &PgPool, user: &str, pass: &str) -> Result<(), RoleError> {
     validate_role_name(user)?;
-    let escaped_pass = pass.replace('\'', "''");
-
-    let stmt = format!(
-        r#"
-        DO $opensicil_role$
-        BEGIN
-          IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{user}') THEN
-            EXECUTE format('CREATE ROLE %I LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE', '{user}', '{escaped_pass}');
-          ELSE
-            EXECUTE format('ALTER ROLE %I LOGIN PASSWORD %L', '{user}', '{escaped_pass}');
-          END IF;
-          EXECUTE format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), '{user}');
-        END
-        $opensicil_role$;
-        "#
-    );
-
-    // Denetlendi: kullanıcı adı validate_role_name ile sınırlandı, parola tek
-    // tırnak kaçışıyla eklendi; Postgres CREATE/ALTER ROLE bind parametresi
-    // desteklemez (ADR-015).
-    sqlx::query(sqlx::AssertSqlSafe(stmt))
-        .execute(pool)
+    let mut tx = pool.begin().await.map_err(RoleError::Db)?;
+    let exists: bool =
+        sqlx::query_scalar("SELECT EXISTS (SELECT FROM pg_roles WHERE rolname = $1)")
+            .bind(user)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(RoleError::Db)?;
+    let role_stmt: String = sqlx::query_scalar("SELECT format($1, $2::text, $3::text)")
+        .bind(if exists {
+            ALTER_ROLE_FMT
+        } else {
+            CREATE_ROLE_FMT
+        })
+        .bind(user)
+        .bind(pass)
+        .fetch_one(&mut *tx)
         .await
         .map_err(RoleError::Db)?;
+    let grant_stmt: String = sqlx::query_scalar(GRANT_CONNECT_SQL)
+        .bind(user)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(RoleError::Db)?;
+    for stmt in [role_stmt, grant_stmt] {
+        sqlx::query(sqlx::AssertSqlSafe(stmt))
+            .execute(&mut *tx)
+            .await
+            .map_err(RoleError::Db)?;
+    }
+    tx.commit().await.map_err(RoleError::Db)?;
     Ok(())
 }
 
@@ -412,6 +429,17 @@ mod tests {
         ensure_role(&pool, &role, "ikinci-parola")
             .await
             .expect("rol ikinci kez (ALTER) güncellenemedi");
+
+        // Parolayi Postgres tirnakliyor: tek tirnak da, DDL'i saran dolar
+        // tirnaginin kendisi de ifadeyi kiramaz ve parola bozulmadan yazilir
+        // (baglanabiliyorsa oldugu gibi gitmistir). URL guvenli karakterler:
+        // parola asagida baglanti adresine giriyor.
+        let nasty = "a'b$opensicil_role$c";
+        ensure_role(&pool, &role, nasty)
+            .await
+            .expect("sınır parolası ifadeyi kırmamalı");
+        let as_role = crate::test_support::connect_as(&database_url, &db_name, &role, nasty).await;
+        drop(as_role);
 
         crate::test_support::drop_role(&pool, &role).await;
         drop(pool);

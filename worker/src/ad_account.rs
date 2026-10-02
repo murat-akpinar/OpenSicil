@@ -44,23 +44,27 @@ pub fn unicode_pwd(password: &str) -> Vec<u8> {
         .collect()
 }
 
+// Rastgele bayttan harf secerken dogrudan mod almak, alfabe 256'yi tam bolmedigi
+// surece bastaki harfleri digerlerinden daha sik verir (23 harflik sinifta bes
+// harf %9 fazla cikar). 256'nin alfabe katina dusmeyen baytlar atilir — kalanin
+// dagilimi duzgun olur, beklenen deneme sayisi 1,2'yi gecmez.
+fn pick(alphabet: &[u8]) -> char {
+    let cutoff = (256 / alphabet.len() * alphabet.len()) as u32;
+    let mut byte = [0u8; 1];
+    loop {
+        OsRng.fill_bytes(&mut byte);
+        if u32::from(byte[0]) < cutoff {
+            return alphabet[usize::from(byte[0]) % alphabet.len()] as char;
+        }
+    }
+}
+
 // Kimseye gosterilmeyen rastgele parola (ADR-009); her siniftan en az bir
 // karakter, AD karmasiklik kurali icin. Ilk parola (3d) ayri ve okunabilir.
 pub fn random_password() -> String {
-    let mut bytes = [0u8; PASSWORD_LEN];
-    OsRng.fill_bytes(&mut bytes);
     let all: Vec<u8> = PASSWORD_CLASSES.concat();
-    bytes
-        .iter()
-        .enumerate()
-        .map(|(i, b)| {
-            let pool = if i < PASSWORD_CLASSES.len() {
-                PASSWORD_CLASSES[i]
-            } else {
-                &all
-            };
-            pool[*b as usize % pool.len()] as char
-        })
+    (0..PASSWORD_LEN)
+        .map(|i| pick(PASSWORD_CLASSES.get(i).copied().unwrap_or(&all)))
         .collect()
 }
 
@@ -69,11 +73,8 @@ pub fn random_password() -> String {
 // 0/O/o/1/l/I yok; her siniftan (buyuk, kucuk, rakam) en az bir karakter.
 pub fn readable_password() -> String {
     loop {
-        let mut bytes = [0u8; READABLE_PASSWORD_LEN];
-        OsRng.fill_bytes(&mut bytes);
-        let chars: Vec<char> = bytes
-            .iter()
-            .map(|b| READABLE_ALPHABET[*b as usize % READABLE_ALPHABET.len()] as char)
+        let chars: Vec<char> = (0..READABLE_PASSWORD_LEN)
+            .map(|_| pick(READABLE_ALPHABET))
             .collect();
         let has = |f: fn(&char) -> bool| chars.iter().any(f);
         if has(char::is_ascii_uppercase)
@@ -475,6 +476,21 @@ mod tests {
     fn filetime_epoch_and_unicode_pwd_encoding() {
         assert_eq!(unix_to_filetime(0), 116_444_736_000_000_000);
         assert_eq!(unicode_pwd("a"), vec![b'"', 0, b'a', 0, b'"', 0]);
+    }
+
+    // Red ornekleme: harf hep alfabeden gelir ve alfabenin tamami cikabilir
+    // (bir harf hic cikmiyorsa cutoff yanlis hesaplanmistir).
+    #[test]
+    fn pick_stays_in_the_alphabet_and_reaches_all_of_it() {
+        for alphabet in [READABLE_ALPHABET, PASSWORD_CLASSES[0], PASSWORD_CLASSES[2]] {
+            let seen: std::collections::HashSet<char> =
+                (0..alphabet.len() * 200).map(|_| pick(alphabet)).collect();
+            assert!(
+                seen.iter().all(|c| alphabet.contains(&(*c as u8))),
+                "alfabe dışı harf: {seen:?}"
+            );
+            assert_eq!(seen.len(), alphabet.len(), "erişilemeyen harf var");
+        }
     }
 
     #[test]

@@ -429,7 +429,7 @@ pub async fn load_state(
     time_zone: &str,
     id: i64,
 ) -> Result<Option<LifecycleState>, sqlx::Error> {
-    let row: Option<TimelineRow> = sqlx::query_as(timeline_sql!("id = $1"))
+    let row: Option<TimelineRow> = sqlx::query_as(concat!(timeline_sql!("id = $1"), " LIMIT 1"))
         .bind(id)
         .bind(time_zone)
         .fetch_optional(pool)

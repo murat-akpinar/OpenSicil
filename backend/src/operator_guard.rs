@@ -47,7 +47,8 @@ pub type TimelineRow = (
 );
 
 // $2 her zaman kurulum saat dilimi; WHERE kismi cagirana gore degisir
-// (operator eslesmesi burada, kisi sayfasi id ile: identity.rs).
+// (operator eslesmesi burada, kisi sayfasi id ile: identity.rs). Satir sayisini
+// cagiran belirler: id ile tek satir, ad eslesmesiyle birden fazla olabilir.
 #[macro_export]
 macro_rules! timeline_sql {
     ($where:literal) => {
@@ -59,8 +60,7 @@ macro_rules! timeline_sql {
              EXTRACT(EPOCH FROM now())::bigint, \
              to_char((now() AT TIME ZONE $2)::date, 'YYYY-MM-DD') \
              FROM identities WHERE ",
-            $where,
-            " LIMIT 1"
+            $where
         )
     };
 }
@@ -83,23 +83,30 @@ pub fn timeline_from_row(row: &TimelineRow) -> Result<(Timeline, Clock), sqlx::E
     Ok((timeline, clock))
 }
 
+// Ad eslesmesi birden fazla kimlige denk gelebilir: `username` tekil ama
+// buyuk/kucuk harf duyarli, ayrica bir satir `username`le baska bir satir
+// `upn`le eslesebilir. Tek satir cekip `LIMIT 1` demek hangisinin gelecegini
+// Postgres'e birakirdi; eslesen her satira bakilir ve biri bile reddediliyorsa
+// istek reddedilir (guvenli taraf).
 pub async fn check_operator(
     pool: &PgPool,
     time_zone: &str,
     preferred_username: &str,
 ) -> Result<Verdict, sqlx::Error> {
-    let row: Option<TimelineRow> = sqlx::query_as(timeline_sql!(
+    let rows: Vec<TimelineRow> = sqlx::query_as(timeline_sql!(
         "lower(username) = lower(split_part($1, '@', 1)) OR lower(upn) = lower($1)"
     ))
     .bind(preferred_username)
     .bind(time_zone)
-    .fetch_optional(pool)
+    .fetch_all(pool)
     .await?;
-    let Some(row) = row else {
-        return Ok(Verdict::Allowed);
-    };
-    let (timeline, clock) = timeline_from_row(&row)?;
-    Ok(verdict_for(lifecycle_state(&timeline, &clock)))
+    for row in &rows {
+        let (timeline, clock) = timeline_from_row(row)?;
+        if let Verdict::Rejected(state) = verdict_for(lifecycle_state(&timeline, &clock)) {
+            return Ok(Verdict::Rejected(state));
+        }
+    }
+    Ok(Verdict::Allowed)
 }
 
 // Her istekte calisan ara katman: gecerli operator oturumu varsa kimligi
@@ -250,6 +257,40 @@ mod tests {
             Verdict::Allowed,
             "eşleşen kimlik yoksa serbest"
         );
+
+        // Ayni operator adi iki kimlige denk gelebilir: Ayse `username`le, Ali
+        // `upn`le eslesir. Satirlarin hangi sirayla dondugu Postgres'in bilecegi
+        // is; ikisi de denenir, ayrilmis olan hangisiyse istek reddedilir.
+        // (Tek satir cekilseydi bu iki iddiadan biri mutlaka duserdi.)
+        sqlx::query("UPDATE identities SET upn = 'ayse.yilmaz@corp.example' WHERE id = $1")
+            .bind(ids[1])
+            .execute(&pool)
+            .await
+            .unwrap();
+        let depart = |id: i64, departed: bool| {
+            sqlx::query(
+                "UPDATE identities SET end_at = CASE WHEN $2 THEN now() - interval '1 hour' END \
+                 WHERE id = $1",
+            )
+            .bind(id)
+            .bind(departed)
+            .execute(&pool)
+        };
+        for departed_one in [ids[0], ids[1]] {
+            depart(ids[0], departed_one == ids[0]).await.unwrap();
+            depart(ids[1], departed_one == ids[1]).await.unwrap();
+            assert_eq!(
+                check("AYSE.YILMAZ@corp.example").await.unwrap(),
+                Verdict::Rejected(LifecycleState::Departed),
+                "eşleşenlerden biri ayrılmışsa istek reddedilir"
+            );
+        }
+        depart(ids[1], false).await.unwrap();
+        sqlx::query("UPDATE identities SET upn = NULL WHERE id = $1")
+            .bind(ids[1])
+            .execute(&pool)
+            .await
+            .unwrap();
 
         sqlx::query("UPDATE identities SET suspension_start = current_date WHERE id = $1")
             .bind(ids[1])

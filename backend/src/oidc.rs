@@ -170,12 +170,23 @@ pub async fn login_redirect(
     Ok(auth_url.to_string())
 }
 
+// Yarida birakilan girisin satirini kimse tuketmez; nonce ve PKCE dogrulayici
+// (ikisi de sir) suresiz durmasin diye her yeni istekte suresi gecmisler silinir.
+// Ayri bir zamanlayici gerekmiyor: tablo yalnizca burada buyuyor.
+async fn purge_expired_auth_requests(pool: &PgPool) -> Result<(), OidcError> {
+    sqlx::query("DELETE FROM oidc_auth_requests WHERE expires_at <= now()")
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 async fn store_auth_request(
     pool: &PgPool,
     state: &str,
     nonce: &str,
     pkce_verifier: &str,
 ) -> Result<(), OidcError> {
+    purge_expired_auth_requests(pool).await?;
     sqlx::query(
         "INSERT INTO oidc_auth_requests (state, nonce, pkce_verifier, expires_at) \
          VALUES ($1, $2, $3, now() + make_interval(mins => $4))",
@@ -332,6 +343,48 @@ mod tests {
     fn extract_groups_returns_empty_on_malformed_jwt() {
         assert!(extract_groups("not-a-jwt").is_empty());
         assert!(extract_groups("a.b").is_empty());
+    }
+
+    // State tek kullanimlik, suresi gecen satir ne eslenir ne de birikir.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn auth_requests_are_single_use_and_expired_rows_are_purged() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+
+        store_auth_request(&pool, "state-1", "nonce-1", "pkce-1")
+            .await
+            .expect("istek yazılamadı");
+        assert_eq!(
+            consume_auth_request(&pool, "state-1").await.unwrap(),
+            ("nonce-1".to_string(), "pkce-1".to_string())
+        );
+        assert!(
+            matches!(
+                consume_auth_request(&pool, "state-1").await,
+                Err(OidcError::InvalidState)
+            ),
+            "aynı state ikinci kez çalışmamalı"
+        );
+
+        // Yarida birakilmis, suresi gecmis bir satir: yeni istek onu silmeli
+        sqlx::query(
+            "INSERT INTO oidc_auth_requests (state, nonce, pkce_verifier, expires_at) \
+             VALUES ('eski', 'n', 'p', now() - interval '1 minute')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        store_auth_request(&pool, "state-2", "nonce-2", "pkce-2")
+            .await
+            .unwrap();
+        let left: Vec<String> = sqlx::query_scalar("SELECT state FROM oidc_auth_requests")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(left, vec!["state-2".to_string()], "süresi geçen kalmamalı");
+
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
     }
 }
 // --- END FEATURE: oidc-login ---

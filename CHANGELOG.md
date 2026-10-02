@@ -34,6 +34,7 @@
 - .env yedekleri artık git'e girmiyor
 - Toplu sahiplenmede departman artık AD'den gelir, form alanı isteğe bağlı
 - Hogwarts seed'i AD'deki branş departmanlarını da kuruyor
+- V1 sonrası kod taraması — rol parolası DDL kaçışı, süresi geçen oturum/OIDC satırları, operatör reddinde çoklu eşleşme, parola üretiminde mod sapması, nginx HSTS
 
 ### Testler
 

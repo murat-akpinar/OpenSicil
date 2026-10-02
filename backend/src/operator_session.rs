@@ -48,7 +48,18 @@ pub struct Operator {
     pub lang: Lang,
 }
 
+// Cikis yapmadan birakilan oturumun satiri kendiliginden gitmez; suresi gecmis
+// satirlar (operatorun adi, e-postasi, yetkileri ve token hash'i) suresiz
+// durmasin diye her yeni oturumda temizlenir. Tablo yalnizca burada buyuyor.
+async fn purge_expired_sessions(pool: &PgPool) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM operator_sessions WHERE expires_at <= now()")
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 pub async fn create_session(pool: &PgPool, operator: &Operator) -> Result<String, sqlx::Error> {
+    purge_expired_sessions(pool).await?;
     let token = generate_token();
     sqlx::query(
         "INSERT INTO operator_sessions \
@@ -164,6 +175,21 @@ mod tests {
 
         delete_session(&pool, &token).await.unwrap();
         assert!(validate_session(&pool, &token).await.unwrap().is_none());
+
+        // Cikis yapilmadan birakilan oturum: suresi gecince sonraki girisin
+        // temizligine takilir, satir birikmez.
+        let stale = create_session(&pool, &sample_operator()).await.unwrap();
+        sqlx::query("UPDATE operator_sessions SET expires_at = now() - interval '1 minute'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        create_session(&pool, &sample_operator()).await.unwrap();
+        assert!(validate_session(&pool, &stale).await.unwrap().is_none());
+        let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM operator_sessions")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(rows, 1, "yalnızca yeni oturum kalmalı");
 
         drop(pool);
         crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
