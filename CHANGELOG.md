@@ -153,4 +153,5 @@
 - Gövde fontu Inter, monospace yalnızca veri alanlarında
 - Sayaç kartları kendi renginde, kıvılcım ve değişim rozetiyle
 - Etkinlik akışı olay kategorisine göre renklenir
+- Rol bölümlerinde kişi/atama sayısı, sayı kolonunda dolu değer kalın
 

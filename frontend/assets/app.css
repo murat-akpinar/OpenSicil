@@ -1454,9 +1454,13 @@
   .tbl tbody tr[data-href] {
     @apply cursor-pointer;
   }
-  /* Sıfır soluk: dolu bir kolonda "0" göz için gürültü (app.js işaretler) */
+  /* Sayı kolonunda dolu değer kalın, sıfır soluk: göz aşağı kayarken "burada bir
+     şey var" satırları seçilsin, "0"lar gürültü yapmasın (`.zero`yu app.js koyar). */
+  .tbl td.num {
+    @apply font-bold;
+  }
   .tbl td.zero {
-    @apply text-fg-faint;
+    @apply font-normal text-fg-faint;
   }
   /* Sayi kolonu: saga dayali ve esit genislikli rakam, goz asagi kayarken
      basamaklar ustuste gelsin */

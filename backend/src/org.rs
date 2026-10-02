@@ -173,6 +173,14 @@ pub async fn backfill_slugs(pool: &PgPool) -> Result<u64, sqlx::Error> {
 pub struct RoleSection {
     pub kind: &'static str,
     pub roles: Vec<RoleRow>,
+    /// Bolum basligindaki ikinci sayi ve onun ne saydigi. Tur basina anlami
+    /// degisiyor, bu yuzden sayiyla birlikte metin anahtari da geliyor:
+    /// birincil rolde kisi (herkesin tam bir birincil rolu var), temel rolde
+    /// yine kisi (rol herkese uygulanir, satirlar ayni sayiyi tasir), ek rolde
+    /// **atama** — bir kisi birden fazla ek rol tasiyabilir, toplami "kisi"
+    /// diye yazmak sayiyi sisirirdi.
+    pub people: i64,
+    pub people_key: &'static str,
 }
 
 pub async fn list_roles(pool: &PgPool) -> Result<Vec<RoleRow>, sqlx::Error> {
@@ -217,12 +225,23 @@ pub fn role_sections(roles: Vec<RoleRow>) -> Vec<RoleSection> {
         .map(|kind| RoleSection {
             kind,
             roles: Vec::new(),
+            people: 0,
+            people_key: "",
         })
         .collect();
     for role in roles {
         if let Some(section) = sections.iter_mut().find(|s| s.kind == role.kind) {
             section.roles.push(role);
         }
+    }
+    for section in &mut sections {
+        let counts = section.roles.iter().map(|r| r.people);
+        (section.people, section.people_key) = match section.kind {
+            // Temel rol herkese uygulanir: satirlarin hepsi ayni sayiyi tasir
+            "base" => (counts.max().unwrap_or(0), "roles.people_n"),
+            "primary" => (counts.sum(), "roles.people_n"),
+            _ => (counts.sum(), "roles.assignments_n"),
+        };
     }
     sections
 }
@@ -958,6 +977,56 @@ pub async fn save_target(pool: &PgPool, t: &TargetRow) -> Result<(), SaveError> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Bolum basligindaki ikinci sayi: ek rolde "kisi" degil "atama" sayilir,
+    /// cunku bir kisi birden fazla ek rol tasiyabilir; temel rol herkese
+    /// uygulandigi icin satirlarin toplami degil en buyugu dogru sayidir.
+    #[test]
+    fn a_section_counts_people_for_primary_roles_and_assignments_for_extra_ones() {
+        let role = |kind: &str, name: &str, people: i64| RoleRow {
+            id: 0,
+            slug: name.to_string(),
+            kind: kind.to_string(),
+            name: name.to_string(),
+            title: String::new(),
+            entitlements: 0,
+            people,
+        };
+        let sections = role_sections(vec![
+            role("base", "Herkes", 12),
+            role("primary", "Ogretmen", 7),
+            role("primary", "Ogrenci", 5),
+            role("additional", "Nobetci", 4),
+            role("additional", "Kutuphane", 3),
+        ]);
+        let by = |kind: &str| sections.iter().find(|s| s.kind == kind).expect(kind);
+        // Temel rol herkese uygulanir: satirlar ayni sayiyi tasir, toplanmaz
+        assert_eq!(
+            (by("base").people, by("base").people_key),
+            (12, "roles.people_n")
+        );
+        // Herkesin tam bir birincil rolu var: toplam kisi sayisi
+        assert_eq!(
+            (by("primary").people, by("primary").people_key),
+            (12, "roles.people_n")
+        );
+        // Ek rolde toplam atamadir; "kisi" diye yazmak sayiyi sisirirdi
+        assert_eq!(
+            (by("additional").people, by("additional").people_key),
+            (7, "roles.assignments_n")
+        );
+    }
+
+    /// Bos bolum de doner: ekranda tur gorunur kalir, sayi sifir.
+    #[test]
+    fn empty_sections_report_zero_without_a_label_mismatch() {
+        let sections = role_sections(Vec::new());
+        assert_eq!(sections.len(), ROLE_KINDS.len());
+        for section in &sections {
+            assert_eq!(section.people, 0, "{}", section.kind);
+            assert!(!section.people_key.is_empty(), "{}", section.kind);
+        }
+    }
 
     /// ADR-107 madde 1: parcalar ADR-011 kuralindan gecer, `-` ile birlesir;
     /// sembolden ibaret ad slug almaz.

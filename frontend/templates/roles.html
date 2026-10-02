@@ -55,7 +55,14 @@
       <h2 class="h2">{{ lang.key("rolekind", s.kind) }} {{ lang.t("roles.role_word") }}</h2>
       <p class="hint">{{ lang.key("rolekind_hint", s.kind) }}</p>
     </div>
-    {% if !s.roles.is_empty() %}<span class="badge badge-muted">{{ lang.t1("roles.count_n", s.roles.len()) }}</span>{% endif %}
+    {% if !s.roles.is_empty() %}
+    <span class="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+      <span class="badge badge-muted">{{ lang.t1("roles.count_n", s.roles.len()) }}</span>
+      {# Ikinci sayinin ne saydigi ture gore degisir (org::role_sections): birincil
+         ve temel rolde kisi, ek rolde atama — bir kisi birden fazla ek rol tasiyabilir #}
+      <span class="badge badge-muted">{{ lang.t1(s.people_key, s.people) }}</span>
+    </span>
+    {% endif %}
   </div>
   {% if s.roles.is_empty() %}
   <p class="muted text-sm">{{ lang.t("roles.section_empty") }}</p>
@@ -76,7 +83,7 @@
             {% if r.key() == "tanimsiz" %}<span class="badge badge-warn ml-1.5">{{ lang.t("roles.placeholder") }}</span>{% endif %}
           </td>
           {% if s.kind == "primary" %}<td class="muted">{% if r.title.is_empty() %}—{% else %}{{ r.title }}{% endif %}</td>{% endif %}
-          <td class="num muted">{{ r.entitlements }}</td>
+          <td class="num">{{ r.entitlements }}</td>
           <td class="num"><span class="block tabular-nums">{{ r.people }}</span><span class="meter-thin" data-ratio></span></td>
         </tr>
       {% endfor %}

@@ -82,7 +82,7 @@
             </span>
           </td>
           <td>{% if d.code.is_empty() %}<span class="muted">—</span>{% else %}<span class="code">{{ d.code }}</span>{% endif %}</td>
-          <td class="num muted">{{ d.entitlements }}</td>
+          <td class="num">{{ d.entitlements }}</td>
           <td class="num"><span class="block tabular-nums">{{ d.people }}</span><span class="meter-thin" data-ratio></span></td>
         </tr>
       {% endfor %}
