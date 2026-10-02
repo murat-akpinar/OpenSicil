@@ -664,10 +664,19 @@ fn fold_others(rows: Vec<(String, i64)>, keep: usize) -> Vec<(String, i64)> {
     kept
 }
 
+/// Dilimler arasi bosluk, cemberin 100 biriminden (seridin yarisi kadar).
+/// Dilimin kuyrugundan kesilir, baslangici degismez: komsu renkler birbirine
+/// degmesin diye. Tek dilimde 0 — halka kapali kalir.
+const SLICE_GAP: i64 = 2;
+
 /// Halkanin dilimleri: yuzde, `stroke-dasharray` ve `stroke-dashoffset`.
 /// Saf — DB olmadan sinanir.
 fn slices(rows: Vec<(String, i64)>, total: i64) -> Vec<Slice> {
     let last = rows.len().saturating_sub(1);
+    let gap = match last {
+        0 => 0,
+        _ => SLICE_GAP,
+    };
     let mut cumulative = 0_i64;
     rows.into_iter()
         .enumerate()
@@ -682,11 +691,17 @@ fn slices(rows: Vec<(String, i64)>, total: i64) -> Vec<Slice> {
             // kaydirmak icin baslangictan ceyrek tur geri alinir
             let offset = 25 - cumulative;
             cumulative += pct;
+            // Yuzdesi sifire yuvarlanan dilim hic cizilmez; bosluk onu
+            // gorunur yapmaz, efsane satiri gerceği soyler
+            let drawn = match pct {
+                0 => 0,
+                _ => (pct - gap).max(1),
+            };
             Slice {
                 key,
                 count,
                 pct,
-                dash: format!("{pct} {}", 100 - pct),
+                dash: format!("{drawn} {}", 100 - drawn),
                 offset,
                 tone: SLICE_TONES[i % SLICE_TONES.len()],
             }
@@ -1505,8 +1520,11 @@ mod tests {
         assert_eq!(slices[0].offset, 25);
         assert_eq!(slices[1].offset, 25 - 57);
         assert_eq!(slices[2].offset, 25 - 57 - 23);
-        // dasharray dilimi + kalani; cember 100 birim
-        assert_eq!(slices[0].dash, "57 43");
+        // dasharray cizilen dilimi + kalani; cember 100 birim, kuyruktan
+        // `SLICE_GAP` kadar kesilir (komsu dilimler birbirine degmesin)
+        assert_eq!(slices[0].dash, "55 45");
+        // Bosluk yalnizca cizimden gider: siradaki dilim yine 57'de baslar
+        assert_eq!(slices[1].offset, 25 - 57);
         // Renkler paletin grafik sirasinda
         assert_eq!(slices[0].tone, "accent");
         assert_eq!(slices[3].tone, "warn");
@@ -1516,7 +1534,12 @@ mod tests {
     fn a_single_slice_fills_the_ring_and_no_data_draws_nothing() {
         let one = slices(vec![("permanent".to_string(), 7)], 7);
         assert_eq!(one[0].pct, 100);
+        // Tek dilimde bosluk yok: kesilse halkada sebepsiz bir cizik olurdu
         assert_eq!(one[0].dash, "100 0");
+        // Yuzdesi sifire yuvarlanan dilim cizilmez, bosluk onu 1 birime cikarmaz
+        let tiny = slices(vec![("a".to_string(), 9999), ("b".to_string(), 1)], 10_000);
+        assert_eq!(tiny[1].pct, 0);
+        assert_eq!(tiny[1].dash, "0 100");
         assert!(slices(Vec::new(), 0).is_empty());
     }
 

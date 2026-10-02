@@ -678,13 +678,16 @@ Kurallar:
   - Kabul: `/reports` kartları sayfayı dolduruyor, ikon renkleri anlamsal
   - Kabul: `/targets` geniş ekranda iki sütun, form 2 sütun grid, Kaydet sağ altta normal boy
   - Kabul: `/config` `.card` dili + sol bölüm menüsü + 2 sütun alanlar + parolada "kayıtlı" rozeti + yapışkan kaydet çubuğu
-- [ ] Panelin eksik verisi (salt-okunur sorgular)
+- [x] Panelin eksik verisi (salt-okunur sorgular)
   - Kutu 1–4'te veri olmadığı için **atlanan** maddeler burada tamamlanır: sayaç kartı değişim rozeti ve sparkline, kart → filtrelenmiş liste, `/identities` filtre + sıralama, `/reports` satır sayıları ve mutabakatın son tarama bilgisi, donut dilimleri arası boşluk (`Slice::dash` kısaltılır), akıştaki saatin bugünkü olaylarda yalnızca saat olması (SQL `CASE`), rol türü başlığında kişi toplamı
   - Kabul: sayaç kartlarında önceki döneme göre değişim rozeti; dördünde de son N günün sparkline'ı
   - Kabul: `/identities` departman / rol / durum filtresi + sıralanabilir sütun başlıkları (sorgu parametresi, sayfalamayla tutarlı)
   - Kabul: sayaç kartları ilgili filtrelenmiş listeye gidiyor
   - Kabul: `/reports` satırlarında bekleyen kayıt sayısı rozeti; mutabakat satırlarında son tarama zamanı ve durumu
   - Kabul: yeni migration yok, veri modeli değişmedi; kapsam ve kümülatif testler ≥ %80
+  - Not (2026-10-02): madde madde bitti — sayaç kartları kendi renginde, kıvılcımlı ve değişim rozetli (`7b70204`; `cards`/`spark`/`delta` saf fonksiyon, kartın `href`'i filtrelenmiş `/identities`'e gider), etkinlik akışı olay kategorisine göre renklenir ve bugünkü satırda yalnızca saat yazar (`ec390c2`; `when` SQL'de gün farkından türetilir), rol bölümü başlığında kişi/atama sayısı (`ae9c02c`), `/reports` kapağında özet kutuları, satır rozetleri ve mutabakatın son tarama zamanı (`c54b44d`, `4a77f34`; sayılar gidilecek ekranın kendi yardımcısından okunur, kopya SQL yok), `/identities` departman/rol/durum filtresi + sıralanabilir kolonlar (`ca6ef80`), panelde sütun yüksekliği ve eğilim çubukları (`a1da38a`), tablo/yapışkan başlık düzeltmeleri (`6f2231f`, `5feb382`, `82d5951`)
+  - Not (2026-10-02, son madde): halka dilimleri arasına boşluk girdi. `slices` yüzdeyi değil **çizilen** uzunluğu kısaltıyor (`SLICE_GAP = 2`, şerit kalınlığının yarısı kadar); `offset` kümülatif yüzdeden hesaplandığı için dilim yine bir öncekinin bittiği yerde başlar, boşluk kuyruktan gider. Tek dilimde boşluk 0 — halka sebepsiz kesik görünmesin. Yüzdesi sıfıra yuvarlanan dilim yine hiç çizilmez: bir birimlik nokta "görünür bir pay var" yanılgısı verirdi, efsane satırı gerçek sayıyı zaten söylüyor
+  - Doğrulama (2026-10-02): backend **222 test** (gerçek Postgres `--include-ignored` + lab Keycloak + lab Samba), fmt + clippy `-D warnings` temiz, kapsam satır **%94,31** (`cargo llvm-cov --fail-under-lines 80` geçti), yeni migration yok. `sh scripts/build-css.sh` (71660 bayt) ve `sh scripts/check-glyphs.sh` temiz; `sh scripts/ui-shots.sh tmp/ekran-goruntuleri/12-halka-boslugu` yedi sayfa × iki tema × 1440/390px çekti ve **"bulgu yok"** dedi (yatay taşma ve tofu kutusu yok). **Çalışan yığında:** backend yeniden kuruldu, beş servis sağlıklı, panelde rol halkasının iki dilimi arasındaki boşluk ekran görüntüsünde görünüyor
 - [ ] Kapanış: güvenlik ve test
   - (1a'daki kapanış şablonunun aynısı)
 
