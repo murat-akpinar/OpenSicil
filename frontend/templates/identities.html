@@ -43,7 +43,7 @@
   {% endfor %}
 </div>
 {% else %}
-<div class="card overflow-x-auto p-0">
+<div class="card tbl-scroll p-0">
   <table class="tbl">
     <thead>
       <tr>
@@ -63,8 +63,8 @@
             <a class="link" href="/identities/{{ i.id }}">{{ i.name }}</a>
           </span>
         </td>
-        <td class="muted whitespace-nowrap">{{ i.employee_number }}</td>
-        <td class="muted">{% if i.username.is_empty() %}—{% else %}{{ i.username }}{% endif %}</td>
+        <td class="whitespace-nowrap"><span class="code">{{ i.employee_number }}</span></td>
+        <td>{% if i.username.is_empty() %}<span class="muted">—</span>{% else %}<span class="code">{{ i.username }}</span>{% endif %}</td>
         <td class="muted">{% if i.department.is_empty() %}—{% else %}{{ i.department }}{% endif %}</td>
         <td><span class="badge badge-{{ i.state_kind }}">{{ lang.key("state", i.state) }}</span></td>
       </tr>
@@ -75,8 +75,8 @@
 
 {# Sayfalama GET formu: aramayi gizli alanda tasir, boylece sorgunun URL
    kacisi tarayiciya kalir (sablonda urlencode filtresi yok) #}
-<div class="mt-4 flex flex-wrap items-center justify-between gap-3">
-  <p class="meta">{{ range }}</p>
+<div class="pager">
+  <p class="pager-range">{{ range }}</p>
   <form method="get" action="/identities" class="flex items-center gap-2">
     <input type="hidden" name="q" value="{{ q }}">
     {% if unassigned_only %}<input type="hidden" name="unassigned" value="1">{% endif %}

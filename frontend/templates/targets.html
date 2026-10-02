@@ -6,50 +6,74 @@
 </div>
 {% if !error.is_empty() %}<p class="alert alert-err">{{ error }}</p>{% endif %}
 {% if !info.is_empty() %}<p class="alert alert-info">{{ info }}</p>{% endif %}
+
+{# ADR-114 C: genis ekranda iki sutun. Sistemler yan yana durunca hangisinin
+   ayari hangisi oldugu goruluyor; eskiden alt alta iki devasa kart vardi #}
+<div class="grid gap-4 xl:grid-cols-2 xl:items-start">
 {% for v in targets %}
-<div class="card mb-6 space-y-3">
+<section class="card space-y-4">
   <div class="card-head">
     <span class="ico-tile"><i class="ico ico-server" aria-hidden="true"></i></span>
-    <h2 class="h2">{{ v.target.name }}</h2>
-    <a class="link ml-auto text-sm" href="/targets/{{ v.target.id }}/mappings">{{ lang.t("targets.mappings_link") }}</a>
-    <a class="link text-sm" href="/targets/{{ v.target.id }}/reconcile">{{ lang.t("reconcile.link") }}</a>
-  </div>
-  <div class="kv">
-    <span>{{ lang.t("catalog.last_refresh") }}</span>
-    <span>
-      {% if v.refresh_status.is_empty() %}{{ lang.t("common.none") }}
-      {% else %}<span class="badge badge-{{ lang.key("readjobkind", v.refresh_status) }}">{{ lang.key("readjob", v.refresh_status) }}</span> {{ v.refresh_at }} {{ v.refresh_result }}{% endif %}
+    <div class="min-w-0 flex-1">
+      <h2 class="h2">{{ v.target.name }}</h2>
+      {# "Baglanti durumu" diye bir olcum yok: burada yazan son katalog
+         yenilemesinin sonucu, adi da o (ADR-114 veri notu) #}
+      {% if v.refresh_status.is_empty() %}
+      <span class="badge badge-muted">{{ lang.t("catalog.never") }}</span>
+      {% else %}
+      <span class="badge badge-{{ lang.key("readjobkind", v.refresh_status) }}">{{ lang.key("readjob", v.refresh_status) }}</span>
+      {% endif %}
+    </div>
+    <span class="flex flex-wrap items-center justify-end gap-x-3 gap-y-1">
+      <a class="link text-sm" href="/targets/{{ v.target.id }}/mappings">{{ lang.t("targets.mappings_link") }}</a>
+      <a class="link text-sm" href="/targets/{{ v.target.id }}/reconcile">{{ lang.t("reconcile.link") }}</a>
     </span>
   </div>
-  {% if can_edit %}
-  <form method="post" action="/targets/{{ v.target.id }}/catalog-refresh">
-    <button class="btn btn-sm" type="submit"><i class="ico ico-refresh" aria-hidden="true"></i>{{ lang.t("catalog.refresh") }}</button>
+
+  {# Son yenileme duzenli bir ozet satiri: etiket solda, deger ve eylem sagda #}
+  <div class="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl bg-bg-soft px-3.5 py-2.5 text-sm">
+    <span class="min-w-0 flex-1">
+      <span class="meta block">{{ lang.t("catalog.last_refresh") }}</span>
+      {% if v.refresh_status.is_empty() %}{{ lang.t("common.none") }}
+      {% else %}<span class="tabular-nums">{{ v.refresh_at }}</span> <span class="muted">{{ v.refresh_result }}</span>{% endif %}
+    </span>
+    {% if can_edit %}
+    <form method="post" action="/targets/{{ v.target.id }}/catalog-refresh">
+      <button class="btn btn-sm" type="submit"><i class="ico ico-refresh" aria-hidden="true"></i>{{ lang.t("catalog.refresh") }}</button>
+    </form>
+    {% endif %}
+  </div>
+
+  <form method="post" action="/targets/{{ v.target.id }}" class="space-y-4">
+    {# Alanlar iki sutun; anahtarlar (toggle) tam satir kaplar #}
+    <div class="grid gap-x-5 gap-y-4 sm:grid-cols-2">
+      <div>
+        <label class="label" for="ct-{{ v.target.id }}">{{ lang.t("targets.default_container") }}</label>
+        <select class="input" id="ct-{{ v.target.id }}" name="default_container_item_id">
+          <option value="">{{ lang.t("common.none") }}</option>
+          {% for c in v.containers %}<option value="{{ c.id }}"{% if c.selected %} selected{% endif %}>{{ c.label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="label" for="rd-{{ v.target.id }}">{{ lang.t("targets.retention_days") }}</label>
+        <input class="input" type="number" min="0" id="rd-{{ v.target.id }}" name="retention_days" value="{{ v.target.retention_days }}">
+      </div>
+      <div>
+        <label class="label" for="pr-{{ v.target.id }}">{{ lang.t("targets.password_reset_delay") }}</label>
+        <input class="input" type="number" min="0" id="pr-{{ v.target.id }}" name="password_reset_delay_days" value="{{ v.target.password_reset_delay_days }}">
+      </div>
+    </div>
+    <div class="space-y-3 border-t border-line pt-4">
+      <label class="check"><input class="switch" type="checkbox" name="provision_account_default" value="1"{% if v.target.provision_account_default %} checked{% endif %}> <span>{{ lang.t("targets.provision_default") }}</span></label>
+      <label class="check"><input class="switch" type="checkbox" name="delete_requires_approval" value="1"{% if v.target.delete_requires_approval %} checked{% endif %}> <span>{{ lang.t("targets.delete_requires_approval") }}</span></label>
+    </div>
+    {% if can_edit %}
+    <div class="flex justify-end">
+      <button class="btn btn-primary" type="submit">{{ lang.t("common.save") }}</button>
+    </div>
+    {% endif %}
   </form>
-  {% endif %}
-<form method="post" action="/targets/{{ v.target.id }}" class="space-y-3">
-  <label class="check"><input type="checkbox" name="provision_account_default" value="1"{% if v.target.provision_account_default %} checked{% endif %}> {{ lang.t("targets.provision_default") }}</label>
-  <div>
-    <label class="label" for="ct-{{ v.target.id }}">{{ lang.t("targets.default_container") }}</label>
-    <select class="input" id="ct-{{ v.target.id }}" name="default_container_item_id">
-      <option value="">{{ lang.t("common.none") }}</option>
-      {% for c in v.containers %}<option value="{{ c.id }}"{% if c.selected %} selected{% endif %}>{{ c.label }}</option>{% endfor %}
-    </select>
-  </div>
-  <div class="grid gap-3 sm:grid-cols-2">
-    <div>
-      <label class="label" for="rd-{{ v.target.id }}">{{ lang.t("targets.retention_days") }}</label>
-      <input class="input" type="number" min="0" id="rd-{{ v.target.id }}" name="retention_days" value="{{ v.target.retention_days }}">
-    </div>
-    <div>
-      <label class="label" for="pr-{{ v.target.id }}">{{ lang.t("targets.password_reset_delay") }}</label>
-      <input class="input" type="number" min="0" id="pr-{{ v.target.id }}" name="password_reset_delay_days" value="{{ v.target.password_reset_delay_days }}">
-    </div>
-  </div>
-  <label class="check"><input type="checkbox" name="delete_requires_approval" value="1"{% if v.target.delete_requires_approval %} checked{% endif %}> {{ lang.t("targets.delete_requires_approval") }}</label>
-  {% if can_edit %}
-  <button class="btn btn-primary w-full" type="submit">{{ lang.t("common.save") }}</button>
-  {% endif %}
-</form>
-</div>
+</section>
 {% endfor %}
+</div>
 {% endblock %}

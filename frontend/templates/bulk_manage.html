@@ -52,7 +52,7 @@
 {% else %}
 <form method="post" action="/targets/{{ target_id }}/manage">
   <p class="hint mb-3">{{ lang.t1("manage.hint", threshold) }}</p>
-  <div class="card overflow-x-auto p-0 mb-4">
+  <div class="card tbl-scroll p-0 mb-4">
     <table class="tbl">
       <thead><tr>
         {% if can_manage %}<th class="w-8"><input type="checkbox" data-select-all="link" aria-label="{{ lang.t("adopt.select_all") }}" title="{{ lang.t("adopt.select_all") }}"></th>{% endif %}

@@ -1,18 +1,16 @@
 {% extends "base.html" %}
 {% block title %}{{ lang.t("nav.departments") }} — OpenSicil{% endblock %}
 {% block content %}
-<div class="page-head">
-  <h1 class="h1">{{ lang.t("nav.departments") }}</h1>
-</div>
-{% if !error.is_empty() %}<p class="alert alert-err">{{ error }}</p>{% endif %}
-
 {% if can_edit %}
-<details class="card mb-6">
-  <summary class="summary-row">
-    <span class="ico-tile"><i class="ico ico-plus" aria-hidden="true"></i></span>
-    <span class="h2">{{ lang.t("departments.new") }}</span>
+{# ADR-114 C: birincil eylem basligin saginda; form altinda tam genislikte acilir #}
+<details class="page-head-form">
+  <summary>
+    <div class="page-head">
+      <h1 class="h1">{{ lang.t("nav.departments") }}</h1>
+      <span class="btn btn-primary"><i class="ico ico-plus" aria-hidden="true"></i>{{ lang.t("departments.new") }}</span>
+    </div>
   </summary>
-  <form method="post" action="/departments" class="mt-4 grid items-end gap-3 sm:grid-cols-3">
+  <form method="post" action="/departments" class="card mb-6 grid items-end gap-3 sm:grid-cols-3">
     <div>
       <label class="label" for="name">{{ lang.t("field.name") }}</label>
       <input class="input" type="text" id="name" name="name" required>
@@ -28,10 +26,17 @@
         {% for d in departments %}<option value="{{ d.id }}">{{ d.indent }}{{ d.name }}</option>{% endfor %}
       </select>
     </div>
-    <button class="btn btn-primary sm:col-span-3" type="submit">{{ lang.t("common.save") }}</button>
+    <div class="sm:col-span-3 flex justify-end">
+      <button class="btn btn-primary" type="submit">{{ lang.t("common.save") }}</button>
+    </div>
   </form>
 </details>
+{% else %}
+<div class="page-head">
+  <h1 class="h1">{{ lang.t("nav.departments") }}</h1>
+</div>
 {% endif %}
+{% if !error.is_empty() %}<p class="alert alert-err">{{ error }}</p>{% endif %}
 
 {% if departments.is_empty() %}
 <div class="empty">
@@ -43,13 +48,19 @@
 <section class="card">
   <div class="card-head">
     <span class="ico-tile"><i class="ico ico-sitemap" aria-hidden="true"></i></span>
-    <div>
+    <div class="min-w-0 flex-1">
       <h2 class="h2">{{ lang.t("departments.tree") }}</h2>
       <p class="hint">{{ lang.t("departments.tree_hint") }}</p>
     </div>
+    {# Agac icinde arama: app.js satirlari gizler/gosterir, sunucuya istek gitmez #}
+    <span class="search w-full sm:w-64">
+      <i class="ico ico-search" aria-hidden="true"></i>
+      <input class="input" type="search" id="tree-filter" data-tree-filter="dept-tree"
+             placeholder="{{ lang.t("departments.filter") }}" aria-label="{{ lang.t("departments.filter") }}">
+    </span>
   </div>
-  <div class="overflow-x-auto">
-    <table class="tbl">
+  <div class="tbl-scroll">
+    <table class="tbl" id="dept-tree">
       <thead><tr>
         <th>{{ lang.t("field.name") }}</th>
         <th>{{ lang.t("field.code") }}</th>
@@ -57,13 +68,22 @@
         <th class="num">{{ lang.t("def.people_subtree") }}</th>
       </tr></thead>
       <tbody>
-      {# Girinti CSS'ten (`tree-d<derinlik>`): satir ici stil CSP'de yasak #}
+      {# Girinti CSS'ten (`tree-d<derinlik>`): satir ici stil CSP'de yasak.
+         `data-depth`: app.js ac/kapa ve arama icin derinligi buradan okur,
+         alt dali olan satira ok basar ve durumu localStorage'da tutar #}
       {% for d in departments %}
-        <tr>
-          <td><span class="tree-d{{ d.depth }}"><a class="link" href="/departments/{{ d.key() }}">{{ d.name }}</a></span></td>
-          <td class="muted">{% if d.code.is_empty() %}—{% else %}{{ d.code }}{% endif %}</td>
+        <tr data-depth="{{ d.depth }}" data-key="{{ d.key() }}">
+          <td>
+            <span class="tree-d{{ d.depth }}">
+              <span class="flex items-center gap-1.5">
+                <span class="tree-spacer" data-tree-slot></span>
+                <a class="link" href="/departments/{{ d.key() }}">{{ d.name }}</a>
+              </span>
+            </span>
+          </td>
+          <td>{% if d.code.is_empty() %}<span class="muted">—</span>{% else %}<span class="code">{{ d.code }}</span>{% endif %}</td>
           <td class="num muted">{{ d.entitlements }}</td>
-          <td class="num">{{ d.people }}</td>
+          <td class="num"><span class="block tabular-nums">{{ d.people }}</span><span class="meter-thin" data-ratio></span></td>
         </tr>
       {% endfor %}
       </tbody>

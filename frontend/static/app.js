@@ -4,6 +4,10 @@
 // i18n ile gelir — JS'te çevrilecek dize kalmaz (ADR-089).
 (function () {
   var KEY = "opensicil-theme";
+  var NAV_KEY = "opensicil-nav";
+  // Bu genişliğin altındaki monitör dar sayılır ve menü daraltılmış açılır.
+  // Operatör bir kez seçim yaparsa seçimi kazanır, genişlik artık karışmaz.
+  var WIDE_MONITOR = 1280;
   var root = document.documentElement;
 
   function stored() {
@@ -28,6 +32,75 @@
       return t === "dark";
     }
     return window.matchMedia("(prefers-color-scheme: dark)").matches;
+  }
+
+  // --- kenar çubuğu daraltma (monitör genişliğine göre varsayılan) ---
+  function navStored() {
+    try {
+      return localStorage.getItem(NAV_KEY);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function navDefault() {
+    return window.innerWidth >= WIDE_MONITOR ? "expanded" : "collapsed";
+  }
+
+  // İlk çizimden önce çağrılır: sonra çağrılsa menü geniş açılıp daralırdı.
+  function navApply(state) {
+    root.setAttribute("data-nav", state === "collapsed" ? "collapsed" : "expanded");
+  }
+
+  function navCollapse() {
+    var button = document.getElementById("nav-collapse");
+    if (!button) {
+      return;
+    }
+    var icon = button.querySelector(".ico");
+    var label = button.querySelector(".nav-label");
+    function reflect() {
+      var collapsed = root.getAttribute("data-nav") === "collapsed";
+      var text = button.getAttribute(collapsed ? "data-label-expand" : "data-label-collapse");
+      if (icon) {
+        icon.classList.toggle("ico-chevron-right", collapsed);
+        icon.classList.toggle("ico-chevron-left", !collapsed);
+      }
+      if (label) {
+        label.textContent = text;
+      }
+      button.setAttribute("aria-label", text);
+      button.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    }
+    reflect();
+    button.addEventListener("click", function () {
+      var next = root.getAttribute("data-nav") === "collapsed" ? "expanded" : "collapsed";
+      navApply(next);
+      try {
+        localStorage.setItem(NAV_KEY, next);
+      } catch (e) {
+        // saklanamadı: seçim yalnızca bu sayfa için geçerli
+      }
+      reflect();
+    });
+
+    // Seçim yapılmadıysa monitör/pencere genişliği varsayılanı sürdürür:
+    // dizüstünü harici ekrana takan operatör menüyü elle açmak zorunda kalmasın.
+    if (!navStored() && window.matchMedia) {
+      var wide = window.matchMedia("(min-width: " + WIDE_MONITOR + "px)");
+      var onChange = function () {
+        if (navStored()) {
+          return;
+        }
+        navApply(navDefault());
+        reflect();
+      };
+      if (wide.addEventListener) {
+        wide.addEventListener("change", onChange);
+      } else if (wide.addListener) {
+        wide.addListener(onChange);
+      }
+    }
   }
 
   function themeToggle() {
@@ -72,6 +145,78 @@
     if (best) {
       best.classList.add("nav-link-active");
       best.setAttribute("aria-current", "page");
+    }
+  }
+
+  // Mobil gezinme çekmecesi: düğme `.side`e ve karartmaya `data-open` yazar.
+  // Satır içi `onclick` CSP'de yasak, bu yüzden bağlama burada.
+  function navDrawer() {
+    var button = document.getElementById("nav-toggle");
+    var side = document.getElementById("side");
+    var scrim = document.getElementById("nav-scrim");
+    if (!button || !side) {
+      return;
+    }
+    function open(yes) {
+      if (yes) {
+        side.setAttribute("data-open", "");
+        if (scrim) {
+          scrim.setAttribute("data-open", "");
+        }
+      } else {
+        side.removeAttribute("data-open");
+        if (scrim) {
+          scrim.removeAttribute("data-open");
+        }
+      }
+      button.setAttribute("aria-expanded", yes ? "true" : "false");
+    }
+    button.addEventListener("click", function () {
+      open(!side.hasAttribute("data-open"));
+    });
+    if (scrim) {
+      scrim.addEventListener("click", function () {
+        open(false);
+      });
+    }
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape") {
+        open(false);
+      }
+    });
+  }
+
+  // Satırın tamamı tıklanabilir: satırdaki ilk bağlantı nereye gidiyorsa oraya.
+  // Bağlantı, buton ve onay kutusu kendi işini yapar; metin seçmek engellenmez.
+  function clickableRows() {
+    var rows = document.querySelectorAll(".tbl tbody tr");
+    for (var i = 0; i < rows.length; i++) {
+      var link = rows[i].querySelector("a[href]");
+      if (!link) {
+        continue;
+      }
+      rows[i].setAttribute("data-href", link.getAttribute("href"));
+      rows[i].addEventListener("click", rowClick);
+    }
+  }
+
+  function rowClick(event) {
+    if (event.target.closest("a, button, input, label, select, textarea")) {
+      return;
+    }
+    if (String(window.getSelection())) {
+      return; // metin seçiliyor
+    }
+    window.location.href = this.getAttribute("data-href");
+  }
+
+  // Sayı kolonundaki sıfırlar solar: dolu bir listede "0" göz için gürültü.
+  function dimZeros() {
+    var cells = document.querySelectorAll(".tbl td.num");
+    for (var i = 0; i < cells.length; i++) {
+      if (cells[i].textContent.trim() === "0") {
+        cells[i].classList.add("zero");
+      }
     }
   }
 
@@ -120,6 +265,180 @@
     reflect();
   }
 
+  // Baş harf avatarının rengi kişiye göre sabit: ad hash'lenir, sekiz grafik
+  // renginden biri seçilir. Aynı kişi her listede aynı renkte görünür; renk
+  // satır içi `style` ile değil `.avatar-cN` sınıfıyla verilir (CSP).
+  var AVATAR_COLORS = 8;
+
+  function avatarColors() {
+    var avatars = document.querySelectorAll(".avatar");
+    for (var i = 0; i < avatars.length; i++) {
+      // Kabuktaki kullanıcı çipi vurgu renginde kalır: o "ben"im, listeden ayrılsın
+      if (avatars[i].closest(".userchip")) {
+        continue;
+      }
+      var seed = avatars[i].getAttribute("data-seed") || avatars[i].textContent;
+      avatars[i].classList.add("avatar-c" + (hash(seed) % AVATAR_COLORS + 1));
+    }
+  }
+
+  // djb2: kısa, çakışması önemsiz (renk seçiyor, kimlik üretmiyor)
+  function hash(text) {
+    var h = 5381;
+    for (var i = 0; i < text.length; i++) {
+      h = (h * 33 + text.charCodeAt(i)) & 0x7fffffff;
+    }
+    return h;
+  }
+
+  // `data-ratio` kutusu: aynı kolondaki en büyük sayıya göre oran çubuğu. Genişlik
+  // hazır `.v-NN` sınıflarından gelir (beşer adım), satır içi `style` CSP'de yasak.
+  function ratioBars() {
+    var tables = document.querySelectorAll(".tbl");
+    for (var t = 0; t < tables.length; t++) {
+      fillRatios(tables[t]);
+    }
+  }
+
+  function fillRatios(table) {
+    var slots = table.querySelectorAll("[data-ratio]");
+    if (!slots.length) {
+      return;
+    }
+    var values = [];
+    var max = 0;
+    for (var i = 0; i < slots.length; i++) {
+      var cell = slots[i].closest("td");
+      var n = parseInt((cell ? cell.textContent : "").replace(/[^0-9-]/g, ""), 10);
+      values[i] = isNaN(n) ? 0 : n;
+      if (values[i] > max) {
+        max = values[i];
+      }
+    }
+    for (var j = 0; j < slots.length; j++) {
+      if (max <= 0 || values[j] <= 0) {
+        slots[j].removeAttribute("data-ratio");
+        continue; // sıfır değer çubuk basmaz: 2px hayalet "bir şey var" gibi okunur
+      }
+      var pct = Math.round((values[j] / max) * 20) * 5;
+      var fill = document.createElement("span");
+      fill.className = "meter-fill v-" + pct;
+      slots[j].appendChild(fill);
+    }
+  }
+
+  // Departman ağacı: alt dalı olan satıra aç/kapa oku basar, kapalı anahtarları
+  // localStorage'da tutar. Derinlik `data-depth`ten gelir; bir satırın altları
+  // kendisinden derin olan ardışık satırlardır (liste zaten ön sıralı geliyor).
+  var TREE_KEY = "opensicil-tree-closed";
+
+  function treeClosed() {
+    try {
+      return JSON.parse(localStorage.getItem(TREE_KEY)) || {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function tree() {
+    var table = document.getElementById("dept-tree");
+    if (!table) {
+      return;
+    }
+    var rows = [].slice.call(table.querySelectorAll("tbody tr[data-depth]"));
+    var closed = treeClosed();
+
+    function depth(row) {
+      return parseInt(row.getAttribute("data-depth"), 10) || 0;
+    }
+    function children(index) {
+      var out = [];
+      for (var i = index + 1; i < rows.length && depth(rows[i]) > depth(rows[index]); i++) {
+        out.push(rows[i]);
+      }
+      return out;
+    }
+    function paint() {
+      var hiddenUntil = -1;
+      for (var i = 0; i < rows.length; i++) {
+        var d = depth(rows[i]);
+        if (hiddenUntil >= 0 && d > hiddenUntil) {
+          rows[i].hidden = true;
+          continue;
+        }
+        hiddenUntil = -1;
+        rows[i].hidden = false;
+        if (closed[rows[i].getAttribute("data-key")]) {
+          hiddenUntil = d;
+        }
+      }
+    }
+
+    for (var i = 0; i < rows.length; i++) {
+      if (!children(i).length) {
+        continue;
+      }
+      var slot = rows[i].querySelector("[data-tree-slot]");
+      if (!slot) {
+        continue;
+      }
+      var button = document.createElement("button");
+      button.type = "button";
+      button.className = "tree-toggle";
+      button.setAttribute("data-key", rows[i].getAttribute("data-key"));
+      button.setAttribute("aria-expanded", closed[button.getAttribute("data-key")] ? "false" : "true");
+      button.addEventListener("click", function () {
+        var key = this.getAttribute("data-key");
+        closed[key] = !closed[key];
+        this.setAttribute("aria-expanded", closed[key] ? "false" : "true");
+        try {
+          localStorage.setItem(TREE_KEY, JSON.stringify(closed));
+        } catch (e) {
+          // saklanamadı: açık/kapalı durumu yalnızca bu sayfa için geçerli
+        }
+        paint();
+      });
+      slot.parentNode.replaceChild(button, slot);
+    }
+    paint();
+
+    // Ağaçta arama: eşleşen satır ve bütün üstleri kalır, gerisi gizlenir.
+    var filter = document.querySelector('[data-tree-filter="' + table.id + '"]');
+    if (!filter) {
+      return;
+    }
+    filter.addEventListener("input", function () {
+      var needle = filter.value.trim().toLocaleLowerCase("tr");
+      if (!needle) {
+        for (var i = 0; i < rows.length; i++) {
+          rows[i].hidden = false;
+        }
+        paint();
+        return;
+      }
+      var keep = [];
+      for (var i = 0; i < rows.length; i++) {
+        keep[i] = rows[i].textContent.toLocaleLowerCase("tr").indexOf(needle) >= 0;
+      }
+      // Eslesen satirin atalari da kalir, yoksa dal koksuz gorunur
+      for (var i = rows.length - 1; i >= 0; i--) {
+        if (!keep[i]) {
+          continue;
+        }
+        var d = depth(rows[i]);
+        for (var up = i - 1; up >= 0 && d > 1; up--) {
+          if (depth(rows[up]) < d) {
+            keep[up] = true;
+            d = depth(rows[up]);
+          }
+        }
+      }
+      for (var i = 0; i < rows.length; i++) {
+        rows[i].hidden = !keep[i];
+      }
+    });
+  }
+
   // CSV içe aktarma (F-17): dosya tarayıcıda okunur ve data-csv-into ile adı verilen
   // metin alanına konur; sunucuya sıradan form gider, multipart yolu açılmaz.
   // Dosya seçilemeyen tarayıcıda alan elle yapıştırmaya açık kalır.
@@ -150,10 +469,18 @@
   }
 
   apply(stored());
+  navApply(navStored() || navDefault());
 
   document.addEventListener("DOMContentLoaded", function () {
     themeToggle();
     activeNav();
+    navCollapse();
+    navDrawer();
+    clickableRows();
+    dimZeros();
+    avatarColors();
+    ratioBars();
+    tree();
     selectAll();
     csvFileInputs();
   });

@@ -14,21 +14,31 @@
      kenar cubugu hic cizilmez ve icerik tum genisligi alir (ADR-068). #}
   <div class="shell">
     {% block nav %}
-    <aside class="side">
-      <a class="side-brand" href="/"><span class="brand-mark"><i class="ico ico-shield" aria-hidden="true"></i></span>OpenSicil</a>
+    {# Mobilde cekmece: app.js `.side`e ve bu karartmaya `data-open` yazar #}
+    <div class="nav-scrim" id="nav-scrim"></div>
+    <aside class="side" id="side">
+      <a class="side-brand" href="/"><span class="brand-mark"><i class="ico ico-shield" aria-hidden="true"></i></span><span class="nav-label">OpenSicil</span></a>
       {# Kullanilmis adlar ve yaklasan bitisler /reports altinda; menu mockup'taki
          gibi kisa kalir. Ayarlar yalnizca `admin`e gorunur — sayfa zaten reddediyor. #}
       <nav class="side-nav">
-        <a class="nav-link" href="/"><i class="ico ico-home" aria-hidden="true"></i>{{ lang.t("nav.home") }}<i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
-        <a class="nav-link" href="/identities"><i class="ico ico-users" aria-hidden="true"></i>{{ lang.t("nav.identities") }}<i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
-        <a class="nav-link" href="/roles"><i class="ico ico-key" aria-hidden="true"></i>{{ lang.t("nav.roles") }}<i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
-        <a class="nav-link" href="/departments"><i class="ico ico-sitemap" aria-hidden="true"></i>{{ lang.t("nav.departments") }}<i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
-        <a class="nav-link" href="/reports"><i class="ico ico-chart" aria-hidden="true"></i>{{ lang.t("nav.reports") }}<i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
-        <a class="nav-link" href="/targets"><i class="ico ico-server" aria-hidden="true"></i>{{ lang.t("nav.targets") }}<i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
+        <a class="nav-link" href="/" title="{{ lang.t("nav.home") }}"><i class="ico ico-home" aria-hidden="true"></i><span class="nav-label">{{ lang.t("nav.home") }}</span><i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
+        <a class="nav-link" href="/identities" title="{{ lang.t("nav.identities") }}"><i class="ico ico-users" aria-hidden="true"></i><span class="nav-label">{{ lang.t("nav.identities") }}</span><i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
+        <a class="nav-link" href="/roles" title="{{ lang.t("nav.roles") }}"><i class="ico ico-key" aria-hidden="true"></i><span class="nav-label">{{ lang.t("nav.roles") }}</span><i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
+        <a class="nav-link" href="/departments" title="{{ lang.t("nav.departments") }}"><i class="ico ico-sitemap" aria-hidden="true"></i><span class="nav-label">{{ lang.t("nav.departments") }}</span><i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
+        <a class="nav-link" href="/reports" title="{{ lang.t("nav.reports") }}"><i class="ico ico-chart" aria-hidden="true"></i><span class="nav-label">{{ lang.t("nav.reports") }}</span><i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
+        <a class="nav-link" href="/targets" title="{{ lang.t("nav.targets") }}"><i class="ico ico-server" aria-hidden="true"></i><span class="nav-label">{{ lang.t("nav.targets") }}</span><i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
         {% if shell.is_admin %}
-        <a class="nav-link" href="/config"><i class="ico ico-cog" aria-hidden="true"></i>{{ lang.t("nav.settings") }}<i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
+        <a class="nav-link" href="/config" title="{{ lang.t("nav.settings") }}"><i class="ico ico-cog" aria-hidden="true"></i><span class="nav-label">{{ lang.t("nav.settings") }}</span><i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
         {% endif %}
       </nav>
+      {# Daraltma dugmesi: ikon ve aria-label app.js'te degisir, iki metin de
+         sablondan gelir (ADR-089: JS'te cevrilecek dize yok) #}
+      <button class="nav-collapse" id="nav-collapse" type="button" aria-controls="side"
+              data-label-collapse="{{ lang.t("shell.nav_collapse") }}"
+              data-label-expand="{{ lang.t("shell.nav_expand") }}"
+              aria-label="{{ lang.t("shell.nav_collapse") }}">
+        <i class="ico ico-chevron-left" aria-hidden="true"></i><span class="nav-label">{{ lang.t("shell.nav_collapse") }}</span>
+      </button>
       <div class="side-foot">
         <p class="side-status"><span class="dot dot-ok" aria-hidden="true"></span>{{ lang.t("shell.system_active") }}</p>
         <p class="meta">v{{ shell.version }}</p>
@@ -38,6 +48,7 @@
     <div class="col">
       <header class="topbar">
         {% block topbar_start %}
+        <button class="nav-toggle ico-bars" id="nav-toggle" type="button" aria-controls="side" aria-expanded="false" aria-label="{{ lang.t("shell.menu") }}"></button>
         <form class="search" method="get" action="/search" role="search">
           <i class="ico ico-search" aria-hidden="true"></i>
           <input class="input" type="search" name="q" value="{{ shell.query }}" placeholder="{{ lang.t("search.placeholder") }}" aria-label="{{ lang.t("search.placeholder") }}">

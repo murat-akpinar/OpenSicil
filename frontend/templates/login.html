@@ -16,10 +16,10 @@
     <label class="label" for="password">{{ lang.t("login.password") }}</label>
     <input class="input" type="password" id="password" name="password" required>
   </div>
-  <button class="btn btn-primary w-full" type="submit"><i class="ico ico-lock" aria-hidden="true"></i>{{ lang.t("login.submit") }}</button>
+  <button class="btn btn-primary" type="submit"><i class="ico ico-lock" aria-hidden="true"></i>{{ lang.t("login.submit") }}</button>
   <p class="hint">{{ lang.t("login.hint") }}</p>
 </form>
 {% if oidc_configured %}
-<a href="/oidc/login" class="btn btn-ok mt-4 w-full">{{ lang.t("login.oidc") }}</a>
+<a href="/oidc/login" class="btn btn-ok mt-4">{{ lang.t("login.oidc") }}</a>
 {% endif %}
 {% endblock %}

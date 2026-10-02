@@ -648,6 +648,48 @@ Kurallar:
 
 ---
 
+## Arayüz: cam yüzeyli turkuaz tema ([ADR-114](decisions/114-cam-yuzeyli-turkuaz-tema.md))
+
+> Kullanıcı isteği (2026-10-02): "OpenSicil'in tüm arayüzünü bu tasarıma çevir. Renkleri ve efektleri tarayıcıda canlı deneyip onayladım; değerleri birebir uygula." Kapsam CSS + şablon + `static/app.js`; son kutucukta salt-okunur sorgular için Rust'a da dokunulur (kullanıcı onayı, veri modeli ve migration değişmez). Kısıtlar: CSP satır içi stili yasaklıyor (ADR-088 madde 4), gövde fontu değişmez (ADR-067 madde 3 — değişse `.ico` glyph'leri tofu olurdu), TR/EN birlikte.
+>
+> Doğrulama her kutucukta aynı: `sh scripts/build-css.sh` → `sh scripts/check-glyphs.sh` → `cd backend && cargo test && cargo fmt --all -- --check && cargo clippy --all-targets -- -D warnings` → `sh scripts/ui-shots.sh tmp/ekran-goruntuleri/<kutu>` (yedi sayfa × iki tema × 1440/390px; betik yatay taşmayı ve tofu kutusunu kendisi ölçer).
+
+- [x] Değişkenler ve tipografi
+  - Kabul: koyu palet kullanıcının verdiği değerlerle, açık palet ADR-114 madde 2'nin AA'lı sürümüyle; üç tema bloğu (açık, `prefers-color-scheme`, `[data-theme]`) senkron
+  - Kabul: zemin ışıması üç radyal gradyan + `background-attachment: fixed`; `.card`/`.side`/`.topbar` `backdrop-filter: blur(18px) saturate(140%)`; `.card` 18px köşe
+  - Kabul: `.page`'in `max-w-7xl` sınırı kalkar, `/config` dahil bütün sayfalar tam genişlik (16px / md 28px yan boşluk, üst bar aynı hizada)
+  - Kabul: `--chart-1 … --chart-8` iki temada tanımlı; tipografi 12/14/16/20/28; gövde `font-family` dokunulmamış
+- [x] Ortak bileşenler ve yerleşim
+  - Kabul: buton üçlüsü (birincil / ikincil cam / hayalet), hiçbiri tam genişlik değil; hover + `focus-visible` + `disabled` durumları
+  - Kabul: input/select/checkbox cam zemin, 10px köşe, odakta vurgu halkası; checkbox'lar anahtar görünümünde
+  - Kabul: tabloda yapışkan başlık, satır hover'ı, sayı sağa + `tabular-nums`, sıfır soluk; rozetler hap biçimli ve anlamsal
+  - Kabul: kenar menüde aktif öğe soft zemin + sol vurgu çizgisi (`.nav-link-active` adı korunur, `app.js` onu yazıyor), dar ekranda ikon modu, mobilde çekmece
+  - Kabul: geçişler 150–200 ms ve `prefers-reduced-motion`a uyuyor
+- [x] Ana sayfa
+  - Kabul: dört sayaç kartı kendi renginde (turkuaz / yeşil / kırmızı / kehribar), 40px ikon halkası, 32px `tabular-nums` sayı, üst kenarda ışıma çizgisi, hover'da yükselme, kart tıklanabilir
+  - Kabul: pencere seçici tek parça segmentli kontrol
+  - Kabul: etkinlik akışı zaman çizgisi (ikonları bağlayan solan dikey çizgi, son satır hariç), 36px daire + iç halka, saat hap rozet; kart yanındaki sütunla eşit yükseklikte, taşarsa kart içinde kayıyor
+  - Kabul: donut ortasındaki "Toplam" sayıyla üst üste binmiyor, tek kategoride sade özet; departman dağılımı sıralı yatay bar; grafik renkleri `--chart-*`'tan
+  - Kabul: AD bandı `--ctp-info` renkleriyle ve sağında belirgin eylem butonu
+- [x] Diğer sayfalar
+  - Kabul: `/identities` araç çubuğu + avatar renkleri (app.js adı hash'ler) + satırın tamamı tıklanabilir + düzgün sayfalama bileşeni
+  - Kabul: `/roles` ve `/departments` başlığın sağında birincil buton, kişi sütununda oran çubuğu (app.js var olan `.v-NN` sınıfını yazar, satır içi stil yok), "Tanımsız" uyarı rozetli
+  - Kabul: `/departments` ağacında bağlantı çizgileri + aç/kapa (durum hatırlanır) + ağaç içi arama; kod monospace hap
+  - Kabul: `/reports` kartları sayfayı dolduruyor, ikon renkleri anlamsal
+  - Kabul: `/targets` geniş ekranda iki sütun, form 2 sütun grid, Kaydet sağ altta normal boy
+  - Kabul: `/config` `.card` dili + sol bölüm menüsü + 2 sütun alanlar + parolada "kayıtlı" rozeti + yapışkan kaydet çubuğu
+- [ ] Panelin eksik verisi (salt-okunur sorgular)
+  - Kutu 1–4'te veri olmadığı için **atlanan** maddeler burada tamamlanır: sayaç kartı değişim rozeti ve sparkline, kart → filtrelenmiş liste, `/identities` filtre + sıralama, `/reports` satır sayıları ve mutabakatın son tarama bilgisi, donut dilimleri arası boşluk (`Slice::dash` kısaltılır), akıştaki saatin bugünkü olaylarda yalnızca saat olması (SQL `CASE`), rol türü başlığında kişi toplamı
+  - Kabul: sayaç kartlarında önceki döneme göre değişim rozeti; dördünde de son N günün sparkline'ı
+  - Kabul: `/identities` departman / rol / durum filtresi + sıralanabilir sütun başlıkları (sorgu parametresi, sayfalamayla tutarlı)
+  - Kabul: sayaç kartları ilgili filtrelenmiş listeye gidiyor
+  - Kabul: `/reports` satırlarında bekleyen kayıt sayısı rozeti; mutabakat satırlarında son tarama zamanı ve durumu
+  - Kabul: yeni migration yok, veri modeli değişmedi; kapsam ve kümülatif testler ≥ %80
+- [ ] Kapanış: güvenlik ve test
+  - (1a'daki kapanış şablonunun aynısı)
+
+---
+
 ## Ek Hedef Sistem: Zimbra
 
 > **Beklemede (kullanıcı kararı, 2026-10-02):** "Zimbra dursun, onu proje bitince bakacağım bir şey." Lab Zimbra'sı bir altyapı kararı ister (ADR-069: üçüncü taraf 10.1 derlemesi ya da ayrı VM) ve bu bölümün ilk kutucuğu ona bağlı; kullanıcı açıkça erteledi, kendi başına seçilmez.

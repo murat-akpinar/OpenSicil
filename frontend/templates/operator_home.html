@@ -60,36 +60,46 @@
   {# Isletme uyarilari yalnizca sifir degilken; temiz kurulumda ekran susmali #}
   {# Serit kisa yoldur: tek is kisi sayfasina, birden fazlasi mudahale listesine #}
   {% if dash.totals.needs_intervention > 0 %}
-  <p class="alert alert-warn">{{ lang.t1("dash.needs_intervention", dash.totals.needs_intervention) }}
-    <a class="link" href="{{ dash.totals.intervention_href() }}">{{ lang.t("dash.needs_intervention_cta") }}</a></p>
+  <p class="alert alert-warn">
+    <span class="alert-text">{{ lang.t1("dash.needs_intervention", dash.totals.needs_intervention) }}</span>
+    <a class="btn btn-sm" href="{{ dash.totals.intervention_href() }}">{{ lang.t("dash.needs_intervention_cta") }}</a>
+  </p>
   {% endif %}
   {% if dash.totals.pending_approvals > 0 %}
   <p class="alert alert-info">{{ lang.t1("dash.pending_approvals", dash.totals.pending_approvals) }}</p>
   {% endif %}
   {# ADR-103 madde 4: rolu atanmamis (yer tutucu rol) kisiler operatorun is listesidir #}
   {% if dash.totals.role_unassigned > 0 %}
-  <p class="alert alert-info">{{ lang.t1("dash.role_unassigned", dash.totals.role_unassigned) }}
-    <a class="link" href="/identities?unassigned=1">{{ lang.t("dash.role_unassigned_cta") }}</a></p>
+  <p class="alert alert-info">
+    <span class="alert-text">{{ lang.t1("dash.role_unassigned", dash.totals.role_unassigned) }}</span>
+    <a class="btn btn-sm" href="/identities?unassigned=1">{{ lang.t("dash.role_unassigned_cta") }}</a>
+  </p>
   {% endif %}
   {# ADR-103 madde 3: sahiplenmeyi bekleyen AD hesaplari. Sayi sifirsa serit yok #}
   {% for u in dash.unadopted %}
-  <p class="alert alert-info">{{ u.target_name }}: {{ lang.t1("adopt.pending", u.count) }}
-    <a class="link" href="/targets/{{ u.target_id }}/reconcile">{{ lang.t("adopt.cta") }}</a></p>
+  <p class="alert alert-info">
+    <span class="alert-text">{{ u.target_name }}: {{ lang.t1("adopt.pending", u.count) }}</span>
+    <a class="btn btn-primary btn-sm" href="/targets/{{ u.target_id }}/reconcile"><i class="ico ico-user-plus" aria-hidden="true"></i>{{ lang.t("adopt.cta") }}</a>
+  </p>
   {% endfor %}
 
   {# ADR-076: tarih araligi filtresi — sayaclar secilen pencereyi okur; secenek
      listesi Rust'ta (`dashboard::WINDOWS`), sablon karsilastirma yapmaz #}
-  <nav class="flex flex-wrap items-center gap-2" aria-label="{{ lang.t("dash.window_pick") }}">
+  {# Tek parca segmentli kontrol (ADR-114 B.1): ayrik cipler "nerede duruyorum"u
+     soylemiyordu. Secenek listesi yine Rust'ta (`dashboard::WINDOWS`) #}
+  <nav class="flex flex-wrap items-center gap-3" aria-label="{{ lang.t("dash.window_pick") }}">
     <span class="meta">{{ lang.t("dash.window_pick") }}</span>
-    {% for w in dash.windows %}
-    <a class="chip{% if w.active %} chip-active{% endif %}" href="/?days={{ w.days }}"{% if w.active %} aria-current="true"{% endif %}>{{ lang.t1("dash.window_n", w.days) }}</a>
-    {% endfor %}
+    <span class="segment">
+      {% for w in dash.windows %}
+      <a class="segment-item{% if w.active %} segment-item-active{% endif %}" href="/?days={{ w.days }}"{% if w.active %} aria-current="true"{% endif %}>{{ lang.t1("dash.window_n", w.days) }}</a>
+      {% endfor %}
+    </span>
   </nav>
 
   <section class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
     <div class="stat">
       <div class="stat-head">
-        <span class="ico-tile"><i class="ico ico-users" aria-hidden="true"></i></span>
+        <span class="stat-ico"><i class="ico ico-users" aria-hidden="true"></i></span>
         <div class="min-w-0 flex-1">
           <p class="stat-label">{{ lang.t("dash.total_identities") }}</p>
           <p class="stat-value">{{ dash.totals.identities }}</p>
@@ -97,9 +107,9 @@
         </div>
       </div>
     </div>
-    <div class="stat">
+    <div class="stat stat-ok">
       <div class="stat-head">
-        <span class="ico-tile"><i class="ico ico-user-plus" aria-hidden="true"></i></span>
+        <span class="stat-ico"><i class="ico ico-user-plus" aria-hidden="true"></i></span>
         <div class="min-w-0 flex-1">
           <p class="stat-label">{{ lang.t("dash.joined") }}</p>
           <p class="stat-value">{{ dash.totals.joined }}</p>
@@ -107,9 +117,9 @@
         </div>
       </div>
     </div>
-    <div class="stat">
+    <div class="stat stat-err">
       <div class="stat-head">
-        <span class="ico-tile"><i class="ico ico-logout" aria-hidden="true"></i></span>
+        <span class="stat-ico"><i class="ico ico-logout" aria-hidden="true"></i></span>
         <div class="min-w-0 flex-1">
           <p class="stat-label">{{ lang.t("dash.departed") }}</p>
           <p class="stat-value">{{ dash.totals.departed }}</p>
@@ -117,9 +127,9 @@
         </div>
       </div>
     </div>
-    <div class="stat">
+    <div class="stat stat-warn">
       <div class="stat-head">
-        <span class="ico-tile"><i class="ico ico-refresh" aria-hidden="true"></i></span>
+        <span class="stat-ico"><i class="ico ico-refresh" aria-hidden="true"></i></span>
         <div class="min-w-0 flex-1">
           <p class="stat-label">{{ lang.t("dash.changed") }}</p>
           <p class="stat-value">{{ dash.totals.changed }}</p>
@@ -132,7 +142,7 @@
   {# Uc sutun: akis (5) | dagilimlar (4) | hizli islemler (3) #}
   <section class="grid gap-4 xl:grid-cols-12">
 
-    <div class="card xl:col-span-5">
+    <div class="card card-fill xl:col-span-5">
       <div class="card-head">
         <i class="ico ico-bolt card-icon" aria-hidden="true"></i>
         <h2 class="h2">{{ lang.t("dash.activity") }}</h2>
@@ -164,6 +174,16 @@
         {% if dash.employment.total == 0 %}
         <p class="muted text-sm">{{ lang.t("dash.employment_empty") }}</p>
         {% else %}
+        {% if dash.employment.slices.len() == 1 %}
+        {# Tek kategori varsa halka bir sey anlatmiyor: tam daire cizip "%100"
+           yazmak gurultu (ADR-114 B.3). Sade ozet satiri #}
+        {% for s in dash.employment.slices %}
+        <p class="flex items-baseline gap-2.5">
+          <span class="stat-value">{{ s.count }}</span>
+          <span class="muted text-sm">{{ lang.key("employment", s.key) }}</span>
+        </p>
+        {% endfor %}
+        {% else %}
         <div class="flex flex-wrap items-center gap-5">
           {# Cember 100 birim (r = 15.9155): dasharray dogrudan yuzde #}
           <span class="donut">
@@ -191,6 +211,7 @@
           </div>
         </div>
         {% endif %}
+        {% endif %}
       </div>
 
       {# ADR-076 madde 3: rol kirilimi — ayni halka bileseni, rol adi veridir #}
@@ -201,6 +222,16 @@
         </div>
         {% if dash.roles.total == 0 %}
         <p class="muted text-sm">{{ lang.t("dash.roles_empty") }}</p>
+        {% else %}
+        {% if dash.roles.slices.len() == 1 %}
+        {# Tek kategori varsa halka bir sey anlatmiyor: tam daire cizip "%100"
+           yazmak gurultu (ADR-114 B.3). Sade ozet satiri #}
+        {% for s in dash.roles.slices %}
+        <p class="flex items-baseline gap-2.5">
+          <span class="stat-value">{{ s.count }}</span>
+          <span class="muted text-sm">{% if s.key.is_empty() %}{{ lang.t("dash.other") }}{% else %}{{ s.key }}{% endif %}</span>
+        </p>
+        {% endfor %}
         {% else %}
         <div class="flex flex-wrap items-center gap-5">
           <span class="donut">
@@ -228,6 +259,7 @@
           </div>
         </div>
         {% endif %}
+        {% endif %}
       </div>
 
       <div class="card">
@@ -238,12 +270,14 @@
         {% if dash.departments.is_empty() %}
         <p class="muted text-sm">{{ lang.t("dash.departments_empty") }}</p>
         {% else %}
-        <div class="vbars">
+        {# Sirali yatay bar (ADR-114 B.3): dikey sutunlarda uzun departman adlari
+           kesiliyordu ve cok departmanda tasiyordu. Siralama Rust'tan geliyor #}
+        <div class="divide-y divide-line">
           {% for d in dash.departments %}
-          <div class="vbar">
-            <span class="vbar-value">{{ d.count }}</span>
-            <span class="vbar-track"><span class="vbar-fill v-{{ d.pct }}"></span></span>
-            <span class="vbar-name" title="{{ d.name }}">{{ d.name }}</span>
+          <div class="dist-row">
+            <span class="dist-name" title="{{ d.name }}">{{ d.name }}</span>
+            <span class="tabular-nums">{{ d.count }}</span>
+            <span class="meter"><span class="meter-fill v-{{ d.pct }}"></span></span>
           </div>
           {% endfor %}
         </div>
@@ -319,7 +353,7 @@
       <a class="btn btn-primary" href="/identities/new"><i class="ico ico-plus" aria-hidden="true"></i>{{ lang.t("home.new_identity") }}</a>
     </div>
     {% else %}
-    <div class="overflow-x-auto">
+    <div class="tbl-scroll">
       <table class="tbl">
         <thead><tr><th>{{ lang.t("field.full_name") }}</th><th>{{ lang.t("field.employee_number") }}</th><th>{{ lang.t("field.department") }}</th><th>{{ lang.t("field.state") }}</th></tr></thead>
         <tbody>
@@ -331,7 +365,7 @@
                 <a class="link" href="/identities/{{ i.id }}">{{ i.name }}</a>
               </span>
             </td>
-            <td class="muted whitespace-nowrap">{{ i.employee_number }}</td>
+            <td class="whitespace-nowrap"><span class="code">{{ i.employee_number }}</span></td>
             <td class="muted">{% if i.department.is_empty() %}—{% else %}{{ i.department }}{% endif %}</td>
             <td><span class="badge badge-{{ i.state_kind }}">{{ lang.key("state", i.state) }}</span></td>
           </tr>

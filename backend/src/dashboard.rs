@@ -845,10 +845,10 @@ mod tests {
     }
 
     /// ADR-076 tarih araligi: `?days=` sayaclari ve "Son N gun" etiketini degistirir,
-    /// listede olmayan deger varsayilana duser, secili cip isaretli.
+    /// listede olmayan deger varsayilana duser, segmentli kontrolde secili oge isaretli.
     #[tokio::test]
     #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
-    async fn the_home_window_filter_changes_the_counts_and_marks_the_chip() {
+    async fn the_home_window_filter_changes_the_counts_and_marks_the_segment() {
         use axum::body::Body;
         use axum::http::{header, Request};
         use tower::ServiceExt;
@@ -896,27 +896,27 @@ mod tests {
         let lang = crate::i18n::DEFAULT;
         let label = |days: i32| lang.t1("dash.window_n", days);
 
-        // Varsayilan 30: 40 gun onceki giris sayilmaz; cip 30 secili
+        // Varsayilan 30: 40 gun onceki giris sayilmaz; segmentte 30 secili
         let home = page("/").await;
         assert!(
             home.contains(&label(30)) && !home.contains(&label(5)),
             "{home}"
         );
         assert!(
-            home.contains(r#"chip chip-active" href="/?days=30""#),
+            home.contains(r#"segment-item segment-item-active" href="/?days=30""#),
             "{home}"
         );
-        // 365: giris sayilir; cip 365 secili, 30 degil
+        // 365: giris sayilir; segmentte 365 secili, 30 degil
         let wide = page("/?days=365").await;
         assert!(
-            wide.contains(r#"chip chip-active" href="/?days=365""#),
+            wide.contains(r#"segment-item segment-item-active" href="/?days=365""#),
             "{wide}"
         );
-        assert!(!wide.contains(r#"chip chip-active" href="/?days=30""#));
+        assert!(!wide.contains(r#"segment-item segment-item-active" href="/?days=30""#));
         // Listede olmayan deger varsayilana duser
         let odd = page("/?days=5").await;
         assert!(
-            odd.contains(r#"chip chip-active" href="/?days=30""#),
+            odd.contains(r#"segment-item segment-item-active" href="/?days=30""#),
             "{odd}"
         );
         // Rol halkasi ekranda: seed rolu ve toplam

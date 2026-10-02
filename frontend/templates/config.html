@@ -1,72 +1,106 @@
 {% extends "base.html" %}
 {% block title %}{{ lang.t("config.title") }} — OpenSicil{% endblock %}
-{# ADR-095: sayfa artık Sistem yöneticisi yetkisiyle açılıyor (yerel hesap da bu
-   yetkiyle giriyor), kabuğun gezinmesi ve dil seçicisi olduğu gibi kalır. #}
-{% block page_class %}page-narrow{% endblock %}
+{# ADR-095: sayfa Sistem yöneticisi yetkisiyle açılıyor (yerel hesap da bu
+   yetkiyle giriyor), kabuğun gezinmesi ve dil seçicisi olduğu gibi kalır.
+   ADR-114 C: dar tek sütun ve fieldset çerçeveleri yerine diğer sayfalarla
+   aynı `.card` dili; solda bölüm menüsü, alanlar geniş ekranda iki sütun. #}
 {% block content %}
 <div class="page-head">
   <div>
     <h1 class="h1">{{ lang.t("config.title") }}</h1>
-    <p class="muted text-sm">{{ lang.t("config.subtitle") }}</p>
+    <p class="sub">{{ lang.t("config.subtitle") }}</p>
   </div>
 </div>
-<form method="post" action="/config" class="stack">
-  <fieldset class="box">
-    <legend>Active Directory</legend>
-    <div class="field">
-      <label class="label" for="ad_host">Host</label>
-      <input class="input" type="text" id="ad_host" name="ad_host" value="{{ ad_host }}">
+<form method="post" action="/config">
+  <div class="grid gap-5 md:grid-cols-[12rem_minmax(0,1fr)]">
+    {# Bölüm menüsü: bağlantılar sayfa içi çapa, JS gerekmiyor #}
+    <nav class="sec-nav" aria-label="{{ lang.t("config.sections") }}">
+      <a href="#ad">Active Directory</a>
+      <a href="#zimbra">Zimbra</a>
+      <a href="#oidc">OIDC</a>
+    </nav>
+
+    <div class="stack">
+      <section class="card" id="ad">
+        <div class="card-head">
+          <span class="ico-tile"><i class="ico ico-server" aria-hidden="true"></i></span>
+          <h2 class="h2">Active Directory</h2>
+        </div>
+        <div class="grid gap-x-5 gap-y-4 lg:grid-cols-2">
+          <div>
+            <label class="label" for="ad_host">Host</label>
+            <input class="input" type="text" id="ad_host" name="ad_host" value="{{ ad_host }}">
+          </div>
+          <div>
+            <label class="label" for="ad_bind_dn">Bind DN</label>
+            <input class="input" type="text" id="ad_bind_dn" name="ad_bind_dn" value="{{ ad_bind_dn }}">
+          </div>
+          <div>
+            <label class="label" for="ad_service_password">{{ lang.t("config.service_password") }}
+              {% if ad_service_password_set %}<span class="badge badge-ok ml-1.5">{{ lang.t("config.stored_badge") }}</span>{% endif %}
+            </label>
+            <input class="input" type="password" id="ad_service_password" name="ad_service_password" autocomplete="new-password">
+            {% if ad_service_password_set %}<span class="hint">{{ lang.t("config.stored_hint") }}</span>{% endif %}
+          </div>
+          {# ADR-106 madde 5: TC kimlik no AD şemasında yok; kurum koyduysa öznitelik adı buradan. Boş = okunmaz #}
+          <div>
+            <label class="label" for="ad_national_id_attribute">{{ lang.t("config.national_id_attribute") }}</label>
+            <input class="input" type="text" id="ad_national_id_attribute" name="ad_national_id_attribute" value="{{ ad_national_id_attribute }}" placeholder="extensionAttribute5">
+            <span class="hint">{{ lang.t("config.national_id_attribute_hint") }}</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="card" id="zimbra">
+        <div class="card-head">
+          <span class="ico-tile"><i class="ico ico-mail" aria-hidden="true"></i></span>
+          <h2 class="h2">Zimbra</h2>
+        </div>
+        <div class="grid gap-x-5 gap-y-4 lg:grid-cols-2">
+          <div>
+            <label class="label" for="zimbra_url">Admin URL</label>
+            <input class="input" type="text" id="zimbra_url" name="zimbra_url" value="{{ zimbra_url }}">
+          </div>
+          <div>
+            <label class="label" for="zimbra_admin_password">{{ lang.t("config.admin_password") }}
+              {% if zimbra_admin_password_set %}<span class="badge badge-ok ml-1.5">{{ lang.t("config.stored_badge") }}</span>{% endif %}
+            </label>
+            <input class="input" type="password" id="zimbra_admin_password" name="zimbra_admin_password" autocomplete="new-password">
+            {% if zimbra_admin_password_set %}<span class="hint">{{ lang.t("config.stored_hint") }}</span>{% endif %}
+          </div>
+        </div>
+      </section>
+
+      <section class="card" id="oidc">
+        <div class="card-head">
+          <span class="ico-tile"><i class="ico ico-key" aria-hidden="true"></i></span>
+          <h2 class="h2">OIDC</h2>
+        </div>
+        <div class="grid gap-x-5 gap-y-4 lg:grid-cols-2">
+          <div>
+            <label class="label" for="oidc_issuer">Issuer</label>
+            <input class="input" type="text" id="oidc_issuer" name="oidc_issuer" value="{{ oidc_issuer }}">
+          </div>
+          <div>
+            <label class="label" for="oidc_client_id">Client ID</label>
+            <input class="input" type="text" id="oidc_client_id" name="oidc_client_id" value="{{ oidc_client_id }}">
+          </div>
+          <div>
+            <label class="label" for="oidc_client_secret">Client secret
+              {% if oidc_client_secret_set %}<span class="badge badge-ok ml-1.5">{{ lang.t("config.stored_badge") }}</span>{% endif %}
+            </label>
+            <input class="input" type="password" id="oidc_client_secret" name="oidc_client_secret" autocomplete="new-password">
+            {% if oidc_client_secret_set %}<span class="hint">{{ lang.t("config.stored_hint") }}</span>{% endif %}
+          </div>
+        </div>
+      </section>
     </div>
-    <div class="field">
-      <label class="label" for="ad_bind_dn">Bind DN</label>
-      <input class="input" type="text" id="ad_bind_dn" name="ad_bind_dn" value="{{ ad_bind_dn }}">
-    </div>
-    <div class="field">
-      <label class="label" for="ad_service_password">
-        {{ lang.t("config.service_password") }}
-        {% if ad_service_password_set %}<span class="muted">{{ lang.t("config.stored_hint") }}</span>{% endif %}
-      </label>
-      <input class="input" type="password" id="ad_service_password" name="ad_service_password" autocomplete="new-password">
-    </div>
-    {# ADR-106 madde 5: TC kimlik no AD semasinda yok; kurum koyduysa oznitelik adi buradan. Bos = okunmaz #}
-    <div class="field">
-      <label class="label" for="ad_national_id_attribute">{{ lang.t("config.national_id_attribute") }}</label>
-      <input class="input" type="text" id="ad_national_id_attribute" name="ad_national_id_attribute" value="{{ ad_national_id_attribute }}" placeholder="extensionAttribute5">
-      <span class="hint">{{ lang.t("config.national_id_attribute_hint") }}</span>
-    </div>
-  </fieldset>
-  <fieldset class="box">
-    <legend>Zimbra</legend>
-    <div class="field">
-      <label class="label" for="zimbra_url">Admin URL</label>
-      <input class="input" type="text" id="zimbra_url" name="zimbra_url" value="{{ zimbra_url }}">
-    </div>
-    <div class="field">
-      <label class="label" for="zimbra_admin_password">
-        {{ lang.t("config.admin_password") }}
-        {% if zimbra_admin_password_set %}<span class="muted">{{ lang.t("config.stored_hint") }}</span>{% endif %}
-      </label>
-      <input class="input" type="password" id="zimbra_admin_password" name="zimbra_admin_password" autocomplete="new-password">
-    </div>
-  </fieldset>
-  <fieldset class="box">
-    <legend>OIDC</legend>
-    <div class="field">
-      <label class="label" for="oidc_issuer">Issuer</label>
-      <input class="input" type="text" id="oidc_issuer" name="oidc_issuer" value="{{ oidc_issuer }}">
-    </div>
-    <div class="field">
-      <label class="label" for="oidc_client_id">Client ID</label>
-      <input class="input" type="text" id="oidc_client_id" name="oidc_client_id" value="{{ oidc_client_id }}">
-    </div>
-    <div class="field">
-      <label class="label" for="oidc_client_secret">
-        Client secret
-        {% if oidc_client_secret_set %}<span class="muted">{{ lang.t("config.stored_hint") }}</span>{% endif %}
-      </label>
-      <input class="input" type="password" id="oidc_client_secret" name="oidc_client_secret" autocomplete="new-password">
-    </div>
-  </fieldset>
-  <button class="btn btn-primary w-full" type="submit">{{ lang.t("common.save") }}</button>
+  </div>
+
+  {# Yapışkan kaydet çubuğu: üç bölümlü formda düğmeyi aramak gerekmesin #}
+  <div class="save-bar">
+    <span class="save-bar-note">{{ lang.t("config.save_note") }}</span>
+    <button class="btn btn-primary" type="submit">{{ lang.t("common.save") }}</button>
+  </div>
 </form>
 {% endblock %}
