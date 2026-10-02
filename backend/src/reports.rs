@@ -9,16 +9,43 @@ use axum::extract::State;
 use axum::response::Response;
 use axum::routing::get;
 use axum::Router;
+use sqlx::PgPool;
 
 use crate::i18n::Lang;
 use crate::identity_web::{internal, OperatorSession};
 use crate::shell::Shell;
 use crate::web::{render, AppState};
 
-/// Mutabakat satiri: hedef sistem adi ve tarama ekraninin adresi.
+/// Mutabakat satiri: hedef sistem adi, tarama ekraninin adresi, sahiplenmeyi
+/// bekleyen hesap sayisi ve son taramanin zamani (ADR-117 D).
 pub struct TargetLink {
     pub id: i64,
     pub name: String,
+    /// Sahiplenmeyi bekleyen hesap; sifirsa rozet soluk
+    pub pending: i64,
+    /// Son mutabakat taramasinin zamani; hic taranmadiysa bos
+    pub scanned: String,
+}
+
+/// Kapak sayfasinin ozet kutulari ve satir rozetleri. Hepsi var olan
+/// tablolardan okunur, yeni migration yok.
+pub struct Summary {
+    /// Operatorun kuyrugu: mudahale bekleyen is + onay bekleyen silme +
+    /// sahiplenmeyi bekleyen hesap. Uc ayri ekranin isi ama tek bir soru:
+    /// "bugun yapacak ne var".
+    pub pending: i64,
+    /// Kuyrugun kirilimi, hazir cumle: sablon uc sayiyi tek tek dizmesin
+    pub pending_foot: String,
+    pub interventions: i64,
+    pub deletions: i64,
+    pub unadopted: i64,
+    /// Yaklasan bitisler ve pencerenin gun sayisi
+    pub upcoming: i64,
+    pub upcoming_days: i32,
+    /// Serbest birakilmamis kullanilmis ad
+    pub used_names: i64,
+    /// Hedefler arasindaki en yeni mutabakat taramasi; hic yoksa bos
+    pub last_reconcile: String,
 }
 
 #[derive(Template)]
@@ -27,8 +54,7 @@ struct ReportsTemplate {
     lang: Lang,
     shell: Shell,
     targets: Vec<TargetLink>,
-    /// ADR-024: silinmesi onay bekleyen hesap sayisi, listeye giden satirin rozeti
-    awaiting_deletions: i64,
+    summary: Summary,
 }
 
 pub fn routes() -> Router<AppState> {
@@ -36,25 +62,91 @@ pub fn routes() -> Router<AppState> {
 }
 
 async fn page(OperatorSession(op): OperatorSession, State(state): State<AppState>) -> Response {
+    // Sayilar gidilecek ekranlarin kendi yardimcilarindan okunur, kopya SQL yok:
+    // rozet "3" diyorsa liste uc satir gostermek zorunda.
     let loaded = tokio::try_join!(
         crate::org::list_targets(&state.pool),
+        counts(&state.pool),
+        crate::reconcile::unadopted(&state.pool),
+        crate::org::last_read_job(&state.pool, &state.time_zone, RECONCILE_JOB),
         crate::deletions::awaiting_count(&state.pool),
+        crate::upcoming::list(&state.pool, &state.time_zone, crate::upcoming::DEFAULT_DAYS),
     );
-    match loaded {
-        Ok((rows, awaiting_deletions)) => render(&ReportsTemplate {
-            lang: op.lang,
-            shell: Shell::of(&op),
-            targets: rows
-                .into_iter()
-                .map(|t| TargetLink {
-                    id: t.id,
-                    name: t.name,
-                })
-                .collect(),
-            awaiting_deletions,
-        }),
-        Err(e) => internal("raporlar sayfası okunamadı", e),
-    }
+    let (rows, counts, unadopted, scans, deletions, upcoming) = match loaded {
+        Ok(loaded) => loaded,
+        Err(e) => return internal("raporlar sayfası okunamadı", e),
+    };
+    let targets: Vec<TargetLink> = rows
+        .into_iter()
+        .map(|t| TargetLink {
+            pending: unadopted
+                .iter()
+                .find(|u| u.target_id == t.id)
+                .map_or(0, |u| u.count),
+            scanned: scans
+                .iter()
+                .find(|(id, ..)| *id == t.id)
+                .map_or(String::new(), |(_, _, at, _)| at.clone()),
+            id: t.id,
+            name: t.name,
+        })
+        .collect();
+    let unadopted: i64 = unadopted.iter().map(|u| u.count).sum();
+    // En yeni tarama: zamanlar `YYYY-MM-DD HH24:MI`, sozluk sirasi zaman sirasi
+    let last_reconcile = scans
+        .iter()
+        .map(|(_, _, at, _)| at.as_str())
+        .max()
+        .unwrap_or_default()
+        .to_string();
+    render(&ReportsTemplate {
+        lang: op.lang,
+        shell: Shell::of(&op),
+        summary: Summary {
+            pending: counts.interventions + deletions + unadopted,
+            pending_foot: op.lang.tn(
+                "reports.pending_foot",
+                &[
+                    &counts.interventions.to_string(),
+                    &deletions.to_string(),
+                    &unadopted.to_string(),
+                ],
+            ),
+            interventions: counts.interventions,
+            deletions,
+            unadopted,
+            upcoming: upcoming.len() as i64,
+            upcoming_days: crate::upcoming::DEFAULT_DAYS,
+            used_names: counts.used_names,
+            last_reconcile,
+        },
+        targets,
+    })
+}
+
+/// `read_jobs.kind`in mutabakat degeri (0016_read_jobs.sql CHECK listesi).
+const RECONCILE_JOB: &str = "reconcile";
+
+struct Counts {
+    interventions: i64,
+    used_names: i64,
+}
+
+/// Kendi yardimcisi olmayan iki sayi tek sorguda. Silme ve yaklasan bitis
+/// kendi modullerinden gelir (`deletions::awaiting_count`, `upcoming::list`):
+/// kosullari kopyalamak, ekranla rozetin sessizce ayrisma yolu olurdu.
+async fn counts(pool: &PgPool) -> Result<Counts, sqlx::Error> {
+    let row: (i64, i64) = sqlx::query_as(
+        "SELECT (SELECT count(*) FROM jobs WHERE status = $1), \
+                (SELECT count(*) FROM used_names WHERE released_at IS NULL)",
+    )
+    .bind(crate::identity::INTERVENTION_STATUS)
+    .fetch_one(pool)
+    .await?;
+    Ok(Counts {
+        interventions: row.0,
+        used_names: row.1,
+    })
 }
 // --- END FEATURE: reports ---
 

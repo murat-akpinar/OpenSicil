@@ -55,6 +55,11 @@ reports.sub = "Mutabakat taramaları ve tarihli listeler."
 reports.reconcile = "Mutabakat"
 reports.reconcile_hint = "Hedef sistemdeki hesapların OpenSicil'deki karşılığıyla karşılaştırılmış hali."
 reports.lists = "Listeler"
+reports.pending = "Bekleyen iş"
+reports.pending_foot = "{} müdahale · {} silme onayı · {} sahiplenme"
+reports.last_reconcile = "Son mutabakat"
+reports.never_scanned = "Henüz taranmadı"
+reports.scanned_at = "Son tarama: {}"
 reports.lists_hint = "Tarihe bağlı işler ve ad kayıtları."
 
 # --- müdahale bekleyen işler ---

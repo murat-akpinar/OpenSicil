@@ -17,7 +17,8 @@ use crate::identity_web::{internal, OperatorSession};
 use crate::shell::Shell;
 use crate::web::{render, AppState};
 
-const DEFAULT_DAYS: i32 = 30;
+/// Varsayilan pencere; raporlar kapagi da ayni pencereyi sayar (ADR-117 D)
+pub const DEFAULT_DAYS: i32 = 30;
 const MAX_DAYS: i32 = 365;
 
 pub struct Upcoming {

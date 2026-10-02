@@ -935,13 +935,24 @@ pub async fn last_catalog_refresh(
     pool: &PgPool,
     time_zone: &str,
 ) -> Result<Vec<(i64, String, String, String)>, sqlx::Error> {
+    last_read_job(pool, time_zone, "catalog_refresh").await
+}
+
+/// Hedef basina son okuma isi: durum anahtari + zaman + sonuc. `kind`
+/// `read_jobs`in CHECK listesinden gelir (cagiran sabit yazar, kullanici degil).
+pub async fn last_read_job(
+    pool: &PgPool,
+    time_zone: &str,
+    kind: &str,
+) -> Result<Vec<(i64, String, String, String)>, sqlx::Error> {
     sqlx::query_as(
         "SELECT DISTINCT ON (target_system_id) target_system_id, status, \
          to_char(COALESCE(finished_at, started_at, created_at) AT TIME ZONE $1, 'YYYY-MM-DD HH24:MI'), \
-         COALESCE(result, '') FROM read_jobs WHERE kind = 'catalog_refresh' \
+         COALESCE(result, '') FROM read_jobs WHERE kind = $2 \
          ORDER BY target_system_id, created_at DESC",
     )
     .bind(time_zone)
+    .bind(kind)
     .fetch_all(pool)
     .await
 }

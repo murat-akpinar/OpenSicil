@@ -55,6 +55,11 @@ reports.sub = "Reconciliation scans and dated lists."
 reports.reconcile = "Reconciliation"
 reports.reconcile_hint = "Accounts in the target system compared with their OpenSicil counterparts."
 reports.lists = "Lists"
+reports.pending = "Pending work"
+reports.pending_foot = "{} interventions · {} deletion approvals · {} adoptions"
+reports.last_reconcile = "Last reconcile"
+reports.never_scanned = "Not scanned yet"
+reports.scanned_at = "Last scan: {}"
 reports.lists_hint = "Date-driven work and name records."
 
 # --- jobs needing intervention ---
