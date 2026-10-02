@@ -8,16 +8,40 @@
     <p class="sub">{{ lang.t1("identities.total", total) }}</p>
   </div>
   <div class="flex flex-wrap items-center gap-2">
-    <form class="search w-full sm:w-72" method="get" action="/identities" role="search">
-      <i class="ico ico-search" aria-hidden="true"></i>
-      <input class="input" type="search" name="q" value="{{ q }}" placeholder="{{ lang.t("identities.search") }}" aria-label="{{ lang.t("identities.search") }}">
-    </form>
     {% if can_register %}
     <a class="btn" href="/imports"><i class="ico ico-inbox" aria-hidden="true"></i>{{ lang.t("nav.imports") }}</a>
     <a class="btn btn-primary" href="/identities/new"><i class="ico ico-plus" aria-hidden="true"></i>{{ lang.t("home.new_identity") }}</a>
     {% endif %}
   </div>
 </div>
+
+{# ADR-117 E: arama ve filtreler tek GET formu — secenek degisince form
+   gonderilir, filtreler birbirini silmez. Durum filtresi yok: yasam dongusu
+   durumu tarihlerden Rust'ta tureliyor (ADR-038), SQL'de filtrelemek o kurali
+   kopyalamak olurdu #}
+<form class="mb-4 flex flex-wrap items-end gap-3" method="get" action="/identities" role="search">
+  <span class="search min-w-0 flex-1 sm:max-w-xs">
+    <i class="ico ico-search" aria-hidden="true"></i>
+    <input class="input" type="search" name="q" value="{{ q }}" placeholder="{{ lang.t("identities.search") }}" aria-label="{{ lang.t("identities.search") }}">
+  </span>
+  <span class="min-w-0">
+    <label class="label" for="f-dep">{{ lang.t("field.department") }}</label>
+    <select class="input sm:w-56" id="f-dep" name="department">
+      <option value="">{{ lang.t("identities.filter_all") }}</option>
+      {% for d in departments %}<option value="{{ d.id }}"{% if d.selected %} selected{% endif %}>{{ d.label }}</option>{% endfor %}
+    </select>
+  </span>
+  <span class="min-w-0">
+    <label class="label" for="f-role">{{ lang.t("field.role") }}</label>
+    <select class="input sm:w-48" id="f-role" name="role">
+      <option value="">{{ lang.t("identities.filter_all") }}</option>
+      {% for r in roles %}<option value="{{ r.id }}"{% if r.selected %} selected{% endif %}>{{ r.label }}</option>{% endfor %}
+    </select>
+  </span>
+  {% if unassigned_only %}<input type="hidden" name="unassigned" value="1">{% endif %}
+  <button class="btn" type="submit"><i class="ico ico-search" aria-hidden="true"></i>{{ lang.t("identities.filter_apply") }}</button>
+  {% if filtered %}<a class="btn btn-ghost" href="/identities">{{ lang.t("identities.unassigned_clear") }}</a>{% endif %}
+</form>
 
 {# ADR-117: panelin sayac kartindan gelinmisse hangi pencerede olundugu yazar #}
 {% if !window_note.is_empty() %}
@@ -52,12 +76,13 @@
 {% else %}
 <div class="card tbl-scroll p-0">
   <table class="tbl">
+    {# Siralanabilir basliklar: ayni kolona ikinci kez tiklamak yonu cevirir.
+       Siralama anahtari `identity::SORTS` izinli listesinden gecer #}
     <thead>
       <tr>
-        <th>{{ lang.t("field.full_name") }}</th>
-        <th>{{ lang.t("field.employee_number") }}</th>
-        <th>{{ lang.t("field.username") }}</th>
-        <th>{{ lang.t("field.department") }}</th>
+        {% for h in heads %}
+        <th><a class="sort-head{% if !h.active.is_empty() %} sort-head-{{ h.active }}{% endif %}" href="{{ h.href }}">{{ lang.key("field", h.key) }}</a></th>
+        {% endfor %}
         <th>{{ lang.t("field.state") }}</th>
       </tr>
     </thead>

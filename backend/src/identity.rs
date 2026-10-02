@@ -543,7 +543,46 @@ pub fn window_filter(requested: Option<&str>) -> Option<&str> {
     requested.filter(|w| WINDOW_FILTERS.contains(w))
 }
 
-/// Personel listesinin sorgusu: arama, "rolu atanmamis" filtresi, pencere ve sayfa.
+/// Siralama secenekleri (ADR-117 E): anahtar, artan ve azalan `ORDER BY`
+/// parcasi. Parcalar derleme zamani sabit, anahtar izinli listeden secilir —
+/// kullanicinin yazdigi hicbir metin SQL'e girmez.
+pub const SORTS: [(&str, &str, &str); 4] = [
+    (
+        // Anahtar ayni zamanda baslik metninin i18n adi: `field.full_name`
+        "full_name",
+        "i.surname, i.given_name, i.id",
+        "i.surname DESC, i.given_name DESC, i.id DESC",
+    ),
+    (
+        "employee_number",
+        "i.employee_number, i.id",
+        "i.employee_number DESC, i.id DESC",
+    ),
+    (
+        "username",
+        "i.username = '', i.username, i.id",
+        "i.username = '', i.username DESC, i.id DESC",
+    ),
+    (
+        "department",
+        "d.name ASC NULLS LAST, i.surname, i.id",
+        "d.name DESC NULLS LAST, i.surname, i.id",
+    ),
+];
+
+/// `?sort=` ve `?dir=` degerlerinin `ORDER BY` parcasi; taninmayan anahtar
+/// varsayilana (soyada gore artan) duser.
+pub fn sort_clause(sort: Option<&str>, descending: bool) -> &'static str {
+    let found = sort.and_then(|key| SORTS.iter().find(|(k, ..)| *k == key));
+    let (_, asc, desc) = found.unwrap_or(&SORTS[0]);
+    if descending {
+        desc
+    } else {
+        asc
+    }
+}
+
+/// Personel listesinin sorgusu: arama, filtreler, pencere, siralama ve sayfa.
 pub struct Listing<'a> {
     pub query: &'a str,
     /// ADR-103 madde 4: yalnizca yer tutucu (`Tanimsiz`) rolu tasiyanlar
@@ -552,6 +591,11 @@ pub struct Listing<'a> {
     /// sayisiyla birlikte. `None` = filtre yok.
     pub window: Option<&'a str>,
     pub window_days: i32,
+    /// Arac cubugunun filtreleri (ADR-117 E); `None` = filtre yok
+    pub department: Option<i64>,
+    pub role: Option<i64>,
+    /// `ORDER BY` parcasi; yalnizca `sort_clause` uretir
+    pub order: &'static str,
     pub offset: i64,
     pub limit: i64,
 }
@@ -563,9 +607,22 @@ macro_rules! listed_join_placeholder {
     };
 }
 
-macro_rules! listed_order_page {
-    () => {
-        " ORDER BY i.surname, i.given_name, i.id LIMIT $2 OFFSET $3"
+/// Departman ve rol filtresi; `$d` ve `$r` NULL ise filtre yok. Numaralar
+/// cagiran sorguya gore degisir (bkz. `listed_where_window!`).
+macro_rules! listed_where_who {
+    ($d:literal, $r:literal) => {
+        concat!(
+            " AND (",
+            $d,
+            "::bigint IS NULL OR i.department_id = ",
+            $d,
+            ")",
+            " AND (",
+            $r,
+            "::bigint IS NULL OR i.primary_role_id = ",
+            $r,
+            ")"
+        )
     };
 }
 
@@ -622,14 +679,15 @@ pub async fn page(
             concat!(
                 "SELECT count(*) FROM identities i WHERE ",
                 listed_where_match!(),
-                listed_where_window!("$2", "$3", "$4", "$5")
+                listed_where_window!("$2", "$3", "$4", "$5"),
+                listed_where_who!("$6", "$7")
             ),
             concat!(
                 listed_select!(),
                 "WHERE ",
                 listed_where_match!(),
                 listed_where_window!("$4", "$5", "$6", "$7"),
-                listed_order_page!()
+                listed_where_who!("$8", "$9")
             ),
         ),
         true => (
@@ -638,7 +696,8 @@ pub async fn page(
                 listed_join_placeholder!(),
                 "WHERE ",
                 listed_where_match!(),
-                listed_where_window!("$2", "$3", "$4", "$5")
+                listed_where_window!("$2", "$3", "$4", "$5"),
+                listed_where_who!("$6", "$7")
             ),
             concat!(
                 listed_select!(),
@@ -646,16 +705,26 @@ pub async fn page(
                 "WHERE ",
                 listed_where_match!(),
                 listed_where_window!("$4", "$5", "$6", "$7"),
-                listed_order_page!()
+                listed_where_who!("$8", "$9")
             ),
         ),
     };
+    // Siralama parcasi `sort_clause`in dondurdugu derleme zamani sabiti:
+    // kullanicinin `?sort=`/`?dir=` degeri yalnizca `SORTS` icinden bir satir
+    // *secer*, metni SQL'e hic girmez. `AssertSqlSafe` bu yuzden guvenli —
+    // birlestirilen iki parcanin ikisi de literal (bkz. `sort_clause`).
+    let rows_sql = sqlx::AssertSqlSafe(format!(
+        "{rows_sql} ORDER BY {} LIMIT $2 OFFSET $3",
+        listing.order
+    ));
     let total: i64 = sqlx::query_scalar(count_sql)
         .bind(&pattern)
         .bind(listing.window)
         .bind(time_zone)
         .bind(listing.window_days)
         .bind(crate::audit::IDENTITY_CHANGED)
+        .bind(listing.department)
+        .bind(listing.role)
         .fetch_one(pool)
         .await?;
     let rows: Vec<ListedRow> = sqlx::query_as(rows_sql)
@@ -666,6 +735,8 @@ pub async fn page(
         .bind(time_zone)
         .bind(listing.window_days)
         .bind(crate::audit::IDENTITY_CHANGED)
+        .bind(listing.department)
+        .bind(listing.role)
         .fetch_all(pool)
         .await?;
     Ok((with_state(pool, time_zone, rows).await?, total))
@@ -1778,6 +1849,25 @@ mod tests {
         );
     }
 
+    /// ADR-117 E: siralama anahtari izinli listeden gecer; uydurma deger
+    /// varsayilana duser ve kullanicinin metni SQL'e hic girmez.
+    #[test]
+    fn the_sort_clause_comes_only_from_the_allow_list() {
+        let default = sort_clause(None, false);
+        assert_eq!(default, SORTS[0].1);
+        assert_eq!(sort_clause(Some("full_name"), true), SORTS[0].2);
+        assert_eq!(sort_clause(Some("department"), false), SORTS[3].1);
+        for bad in ["", "id; DROP TABLE identities", "i.national_id", "SURNAME"] {
+            assert_eq!(sort_clause(Some(bad), false), default, "{bad}");
+            assert_eq!(sort_clause(Some(bad), true), SORTS[0].2, "{bad}");
+        }
+        // Her anahtarin iki yonu de tanimli ve birbirinden farkli
+        for (key, asc, desc) in SORTS {
+            assert!(!asc.is_empty() && !desc.is_empty(), "{key}");
+            assert_ne!(asc, desc, "{key}");
+        }
+    }
+
     /// ADR-117: pencere adi izinli listeden gelir; uydurma deger filtre acmaz.
     #[test]
     fn the_window_filter_accepts_only_listed_names() {
@@ -1817,6 +1907,9 @@ mod tests {
                 unassigned_only: false,
                 window,
                 window_days: crate::dashboard::WINDOW_DAYS,
+                department: None,
+                role: None,
+                order: sort_clause(None, false),
                 offset,
                 limit,
             };
@@ -1877,6 +1970,42 @@ mod tests {
         let (both, total) = windowed(&pool, tz, "yılmaz", Some("departed"), 0, 50).await;
         assert!(both.is_empty());
         assert_eq!(total, 0);
+
+        // ADR-117 E: departman filtresi ve siralama. Iki kisi de ayni departmanda
+        let dep: i64 = sqlx::query_scalar("SELECT id FROM departments LIMIT 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        async fn filtered(
+            pool: &PgPool,
+            tz: &str,
+            department: Option<i64>,
+            order: &'static str,
+        ) -> (Vec<Listed>, i64) {
+            let listing = Listing {
+                query: "",
+                unassigned_only: false,
+                window: None,
+                window_days: crate::dashboard::WINDOW_DAYS,
+                department,
+                role: None,
+                order,
+                offset: 0,
+                limit: 50,
+            };
+            page(pool, tz, &listing).await.unwrap()
+        }
+        let (rows, total) = filtered(&pool, tz, Some(dep), sort_clause(None, false)).await;
+        assert_eq!((rows.len(), total), (2, 2), "ikisi de ayni departmanda");
+        let (none, total) = filtered(&pool, tz, Some(dep + 10_000), sort_clause(None, false)).await;
+        assert!(none.is_empty());
+        assert_eq!(total, 0, "olmayan departman: sayac da sifir");
+        // Azalan siralama: soyadi sondan basa
+        let (desc, _) = filtered(&pool, tz, None, sort_clause(Some("full_name"), true)).await;
+        assert_eq!(desc[0].name, "Ayşe Yılmaz");
+        let (by_number, _) =
+            filtered(&pool, tz, None, sort_clause(Some("employee_number"), false)).await;
+        assert!(by_number[0].employee_number <= by_number[1].employee_number);
 
         drop(pool);
         crate::test_support::drop_temp_db(&admin_pool, &db_name).await;

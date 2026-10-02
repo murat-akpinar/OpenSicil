@@ -158,4 +158,5 @@
 - Raporlar kapağında özet kutuları ve satır rozetleri
 - Uygulamalar sayfasında özel açılır liste oku ve hizalı yenileme satırı
 - Ayarlarda alan genişliği sınırlandı, bölüm menüsü üst bara göre yapışıyor
+- Personel listesinde departman/rol filtresi ve sıralanabilir kolonlar
 

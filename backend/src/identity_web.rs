@@ -97,6 +97,28 @@ struct ListQuery {
     window: Option<String>,
     /// Pencerenin gun sayisi; panelinkiyle ayni izinli liste (`dashboard::window`)
     days: Option<i32>,
+    /// ADR-117 E: arac cubugunun filtreleri ve siralama
+    department: Option<i64>,
+    role: Option<i64>,
+    sort: Option<String>,
+    /// `dir=desc` azalan; baska her deger artan
+    dir: Option<String>,
+}
+
+/// Arac cubugunun acilir listesindeki bir secenek.
+pub struct Choice {
+    pub id: i64,
+    pub label: String,
+    pub selected: bool,
+}
+
+/// Siralanabilir kolon basligi: tiklaninca yonu cevirir, acik filtreleri korur.
+pub struct SortHead {
+    pub key: &'static str,
+    /// Basligin adresi (mevcut sorgu + bu kolon, yon cevrilmis)
+    pub href: String,
+    /// `asc` | `desc` | "" (bu kolona gore siralanmiyor)
+    pub active: &'static str,
 }
 
 #[derive(Template)]
@@ -120,6 +142,12 @@ struct IdentitiesTemplate {
     role_unassigned: i64,
     /// ADR-117: acik pencere filtresinin serit metni; bos = filtre yok
     window_note: String,
+    /// ADR-117 E: arac cubugunun filtreleri ve siralanabilir basliklar
+    departments: Vec<Choice>,
+    roles: Vec<Choice>,
+    heads: Vec<SortHead>,
+    /// Filtre acik mi (serit "temizle" baglantisi icin)
+    filtered: bool,
 }
 
 /// Pencere seridinin metin anahtari. `tn` derleme zamani sabit anahtar istiyor,
@@ -146,11 +174,18 @@ async fn list_page(
     // `dashboard::window`i. Sorguya keyfi metin ya da sayi girmez.
     let window = identity::window_filter(q.window.as_deref());
     let window_days = crate::dashboard::window(q.days);
+    let descending = q.dir.as_deref() == Some("desc");
+    // Sablon `listing`i gormuyor (icinde `query`ye odunc var); acik filtre
+    // bilgisi burada bir bool'a aliniyor
+    let filtered = q.department.is_some_and(|id| id > 0) || q.role.is_some_and(|id| id > 0);
     let listing = identity::Listing {
         query: &query,
         unassigned_only,
         window,
         window_days,
+        department: q.department.filter(|id| *id > 0),
+        role: q.role.filter(|id| *id > 0),
+        order: identity::sort_clause(q.sort.as_deref(), descending),
         offset,
         limit: PAGE_SIZE,
     };
@@ -170,6 +205,35 @@ async fn list_page(
         },
         false => Vec::new(),
     };
+    // Arac cubugunun secenekleri; okuma her operatorde, yazma yetkisi gerekmez
+    let picked = match tokio::try_join!(
+        crate::org::list_departments(&state.pool),
+        crate::org::list_roles(&state.pool),
+    ) {
+        Ok(lists) => lists,
+        Err(e) => return internal("filtre listeleri okunamadı", e),
+    };
+    let departments = picked
+        .0
+        .into_iter()
+        .map(|d| Choice {
+            selected: listing.department == Some(d.id),
+            label: format!("{}{}", d.indent, d.name),
+            id: d.id,
+        })
+        .collect();
+    // Yalnizca birincil roller: filtre `primary_role_id`ye bakiyor
+    let roles = picked
+        .1
+        .into_iter()
+        .filter(|r| r.kind == "primary")
+        .map(|r| Choice {
+            selected: listing.role == Some(r.id),
+            label: r.name,
+            id: r.id,
+        })
+        .collect();
+    let heads = sort_heads(&q_string(&listing), q.sort.as_deref(), descending);
     let (range, prev_offset, next_offset) = pagination(op.lang, offset, rows.len() as i64, total);
     render(&IdentitiesTemplate {
         lang: op.lang,
@@ -183,6 +247,10 @@ async fn list_page(
         unadopted,
         unassigned_only,
         role_unassigned,
+        departments,
+        roles,
+        heads,
+        filtered,
         window_note: match window {
             Some(w) => op.lang.tn(
                 window_text_key(w),
@@ -192,6 +260,66 @@ async fn list_page(
         },
         rows,
     })
+}
+
+/// Siralama baglantilarinin tasidigi mevcut sorgu. Kolon basligina tiklamak
+/// acik filtreyi silmemeli: arama, "rolu atanmamis" ve panelin sayac kartindan
+/// gelen pencere adres satirinda kalir. Departman/rol tasinmaz — ikisi de
+/// aractaki `<select>`ten geliyor ve form gonderilince yeniden yaziliyor.
+fn q_string(listing: &identity::Listing<'_>) -> String {
+    let mut out = String::new();
+    if !listing.query.is_empty() {
+        out.push_str("&q=");
+        out.push_str(&urlencode(listing.query));
+    }
+    if listing.unassigned_only {
+        out.push_str("&unassigned=1");
+    }
+    if let Some(window) = listing.window {
+        out.push_str(&format!("&window={window}&days={}", listing.window_days));
+    }
+    out
+}
+
+/// Sorgu dizesine giden deger icin yuzde kacisi; sablonda filtre yok, burada.
+fn urlencode(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.as_bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(*byte as char)
+            }
+            b' ' => out.push('+'),
+            other => out.push_str(&format!("%{other:02X}")),
+        }
+    }
+    out
+}
+
+/// Kolon basliklarinin adresi ve o anki siralama yonu. Ayni kolona ikinci kez
+/// tiklamak yonu cevirir; baska kolona gecmek artanla baslar.
+fn sort_heads(carry: &str, sort: Option<&str>, descending: bool) -> Vec<SortHead> {
+    identity::SORTS
+        .iter()
+        .map(|(key, ..)| {
+            let active = match (sort.unwrap_or(identity::SORTS[0].0) == *key, descending) {
+                (false, _) => "",
+                (true, false) => "asc",
+                (true, true) => "desc",
+            };
+            SortHead {
+                key,
+                href: format!(
+                    "/identities?sort={key}&dir={}{carry}",
+                    match active {
+                        "asc" => "desc",
+                        _ => "asc",
+                    }
+                ),
+                active,
+            }
+        })
+        .collect()
 }
 
 /// "1–50 / 312" metni ve onceki/sonraki sayfa ofsetleri; sablon aritmetik yapmaz.

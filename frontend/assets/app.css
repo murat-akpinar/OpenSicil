@@ -1495,6 +1495,24 @@
   .tbl tbody tr[data-href] {
     @apply cursor-pointer;
   }
+  /* Sıralanabilir kolon başlığı: ok yalnızca o anki sıralama kolonunda çıkar.
+     Glyph CSS'ten (şablonda ham karakter yok, ADR-067). */
+  .sort-head {
+    @apply inline-flex items-center gap-1.5 whitespace-nowrap text-inherit no-underline
+           hover:text-accent;
+  }
+  .sort-head-asc::after,
+  .sort-head-desc::after {
+    @apply text-[0.625rem] text-accent;
+    font-family: "CaskaydiaMono Nerd Font", monospace;
+  }
+  .sort-head-asc::after {
+    content: "\f0d8"; /* caret-up */
+  }
+  .sort-head-desc::after {
+    content: "\f0d7"; /* caret-down */
+  }
+
   /* Sayı kolonunda dolu değer kalın, sıfır soluk: göz aşağı kayarken "burada bir
      şey var" satırları seçilsin, "0"lar gürültü yapmasın (`.zero`yu app.js koyar). */
   .tbl td.num {
