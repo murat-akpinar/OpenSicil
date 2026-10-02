@@ -11,8 +11,8 @@
    ayari hangisi oldugu goruluyor; eskiden alt alta iki devasa kart vardi #}
 <div class="grid gap-4 xl:grid-cols-2 xl:items-start">
 {% for v in targets %}
-<section class="card space-y-4">
-  <div class="card-head">
+<section class="card min-w-0 space-y-4">
+  <div class="card-head flex-wrap">
     <span class="ico-tile"><i class="ico ico-server" aria-hidden="true"></i></span>
     <div class="min-w-0 flex-1">
       <h2 class="h2">{{ v.target.name }}</h2>
@@ -30,16 +30,22 @@
     </span>
   </div>
 
-  {# Son yenileme duzenli bir ozet satiri: etiket solda, deger ve eylem sagda #}
+  {# Son yenileme tek hizali satir (ADR-117 D): etiket, durum rozeti, tarih ve
+     ozet yan yana; uzun ozet kirpilir, tamami `title`da. Eylem sagda ve normal
+     boyda ikincil dugme — kucuk dugme "yan is" gibi duruyordu #}
   <div class="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl bg-bg-soft px-3.5 py-2.5 text-sm">
-    <span class="min-w-0 flex-1">
-      <span class="meta block">{{ lang.t("catalog.last_refresh") }}</span>
-      {% if v.refresh_status.is_empty() %}{{ lang.t("common.none") }}
-      {% else %}<span class="tabular-nums">{{ v.refresh_at }}</span> <span class="muted">{{ v.refresh_result }}</span>{% endif %}
-    </span>
+    <span class="meta">{{ lang.t("catalog.last_refresh") }}</span>
+    {% if v.refresh_status.is_empty() %}
+    <span class="badge badge-muted">{{ lang.t("catalog.never") }}</span>
+    <span class="min-w-0 flex-1 truncate muted">{{ lang.t("common.none") }}</span>
+    {% else %}
+    <span class="badge badge-{{ lang.key("readjobkind", v.refresh_status) }}">{{ lang.key("readjob", v.refresh_status) }}</span>
+    <span class="tabular-nums">{{ v.refresh_at }}</span>
+    <span class="min-w-0 flex-1 truncate muted" title="{{ v.refresh_result }}">{{ v.refresh_result }}</span>
+    {% endif %}
     {% if can_edit %}
     <form method="post" action="/targets/{{ v.target.id }}/catalog-refresh">
-      <button class="btn btn-sm" type="submit"><i class="ico ico-refresh" aria-hidden="true"></i>{{ lang.t("catalog.refresh") }}</button>
+      <button class="btn" type="submit"><i class="ico ico-refresh" aria-hidden="true"></i>{{ lang.t("catalog.refresh") }}</button>
     </form>
     {% endif %}
   </div>

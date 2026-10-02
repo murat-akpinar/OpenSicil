@@ -156,4 +156,5 @@
 - Rol bölümlerinde kişi/atama sayısı, sayı kolonunda dolu değer kalın
 - Panelde sütunlar eşitlendi, eğilim çubukları gün başına yan yana
 - Raporlar kapağında özet kutuları ve satır rozetleri
+- Uygulamalar sayfasında özel açılır liste oku ve hizalı yenileme satırı
 

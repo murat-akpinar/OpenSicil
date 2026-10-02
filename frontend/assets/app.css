@@ -1343,6 +1343,25 @@
            placeholder:text-fg-faint focus:border-accent;
     border-radius: 10px;
   }
+  /* Açılır liste tarayıcı varsayılanı kalıyordu: kendi oku, kendi zemini.
+     `appearance: none` onu kapatır, ok iki gradyandan çizilir — `currentColor`
+     kullandığı için iki temada da doğru renkte ve data URI gerekmiyor
+     (`img-src` kuralına da takılmaz), 17 `<select>`in hiçbiri sarmalayıcı
+     istemiyor (ADR-117 D). */
+  select.input {
+    @apply cursor-pointer pr-9;
+    appearance: none;
+    background-image:
+      linear-gradient(45deg, transparent 50%, currentcolor 50%),
+      linear-gradient(135deg, currentcolor 50%, transparent 50%);
+    background-position:
+      right 1rem center,
+      right 0.7rem center;
+    background-size:
+      5px 5px,
+      5px 5px;
+    background-repeat: no-repeat;
+  }
   /* Odak halkası: `:focus-visible` outline'ı klavyeyle gelene özel, burada fare
      odağında da görünen bir halka var — alan hangi kutuya yazdığını söylemeli */
   .input:focus {
