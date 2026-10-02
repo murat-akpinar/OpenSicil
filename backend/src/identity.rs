@@ -698,6 +698,10 @@ pub struct Job {
     pub status_kind: &'static str,
     pub attempts: i32,
     pub next_attempt_at: String,
+    /// Son hareket: is bittiyse bitis, bitmediyse olusturulma ani
+    pub at: String,
+    /// Bitmemis is: deneme sayisi ve sonraki deneme anlamli, bitmiste degil
+    pub pending: bool,
     pub summary: String,
     pub detail: String,
     /// ADR-050 freni: hata degil bekleme; operator dilinde sebep (F-12)
@@ -708,9 +712,17 @@ pub struct Job {
 
 pub struct Event {
     pub at: String,
+    /// Ekran karsiligi i18n'de (`event.<tur>`)
     pub event_type: String,
-    pub outcome: String,
+    /// Olayin uzerinde oldugu sey: grup adi, oznitelik listesi, acil ayrilis
+    /// gerekcesi. Ham DN degil — operator tanidigi adi gorur.
+    pub subject: String,
+    /// Worker satirlari operator adi tasimaz; bos ise ekran "otomatik" der
     pub actor: String,
+    pub outcome: String,
+    pub outcome_kind: &'static str,
+    pub icon: &'static str,
+    pub tone: &'static str,
 }
 
 pub struct PersonPage {
@@ -1100,14 +1112,18 @@ pub struct AssignedRole {
     pub role_id: i64,
     pub name: String,
     pub ends_on: String,
+    /// ADR-020: bitisi 30 gun icinde — zamanlayici rolu kendiliginden silecek,
+    /// operator once gormus olsun
+    pub ends_soon: bool,
 }
 
 pub async fn load_additional_roles(
     pool: &PgPool,
     id: i64,
 ) -> Result<Vec<AssignedRole>, sqlx::Error> {
-    let rows: Vec<(i64, String, Option<String>)> = sqlx::query_as(
-        "SELECT a.role_id, r.name, to_char(a.ends_on, 'YYYY-MM-DD') \
+    let rows: Vec<(i64, String, Option<String>, bool)> = sqlx::query_as(
+        "SELECT a.role_id, r.name, to_char(a.ends_on, 'YYYY-MM-DD'), \
+         coalesce(a.ends_on - current_date BETWEEN 0 AND 30, false) \
          FROM identity_additional_roles a JOIN roles r ON r.id = a.role_id \
          WHERE a.identity_id = $1 ORDER BY r.name",
     )
@@ -1116,10 +1132,11 @@ pub async fn load_additional_roles(
     .await?;
     Ok(rows
         .into_iter()
-        .map(|(role_id, name, ends_on)| AssignedRole {
+        .map(|(role_id, name, ends_on, ends_soon)| AssignedRole {
             role_id,
             name,
             ends_on: ends_on.unwrap_or_default(),
+            ends_soon,
         })
         .collect())
 }
@@ -1413,6 +1430,7 @@ type JobRow = (
     String,
     i32,
     String,
+    String,
     Option<String>,
     Option<String>,
     bool,
@@ -1427,6 +1445,7 @@ pub(crate) async fn load_jobs(
     let rows: Vec<JobRow> = sqlx::query_as(
         "SELECT j.id, t.name, j.status, j.attempts, \
          to_char(j.next_attempt_at AT TIME ZONE $2, 'YYYY-MM-DD HH24:MI'), \
+         to_char(coalesce(j.finished_at, j.created_at) AT TIME ZONE $2, 'YYYY-MM-DD HH24:MI'), \
          j.last_error, j.result, j.retry_requested FROM jobs j \
          JOIN target_systems t ON t.id = j.target_system_id \
          WHERE j.identity_id = $1 ORDER BY j.created_at DESC, j.id DESC",
@@ -1439,7 +1458,7 @@ pub(crate) async fn load_jobs(
 }
 
 fn job_from(lang: Lang, row: JobRow) -> Job {
-    let (id, target, status, attempts, next, error, result, retry) = row;
+    let (id, target, status, attempts, next, at, error, result, retry) = row;
     let waiting = error
         .as_deref()
         .and_then(|e| throttle_reason(lang, e))
@@ -1454,6 +1473,8 @@ fn job_from(lang: Lang, row: JobRow) -> Job {
         status_kind: status_kind(&status),
         attempts,
         next_attempt_at: next,
+        at,
+        pending: status != "succeeded",
         summary,
         detail,
         waiting,
@@ -1463,11 +1484,45 @@ fn job_from(lang: Lang, row: JobRow) -> Job {
     }
 }
 
+/// DN'in ilk bileseninin degeri: `CN=GG-Takim,OU=Groups,...` → `GG-Takim`.
+/// Denetim kaydi DN'in tamamini tutar, operator tanidigi adi gormek ister.
+fn first_rdn(dn: &str) -> String {
+    let head = dn.split(',').next().unwrap_or(dn).trim();
+    head.split_once('=').map_or(head, |(_, value)| value).into()
+}
+
+fn outcome_kind(outcome: &str) -> &'static str {
+    match outcome {
+        "succeeded" => "ok",
+        "failed" => "err",
+        _ => "",
+    }
+}
+
+type EventRow = (
+    String,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
+
+// Worker her hedef islemi icin niyet ve sonuc olmak uzere iki satir yazar (0006).
+// Ekranda tek satir olmalari icin sonuc niyete `intent_id` ile baglanir, ciplak
+// sonuc satiri listeye hic girmez: operator "ayni olay iki kez" gormez.
 async fn load_events(pool: &PgPool, time_zone: &str, id: i64) -> Result<Vec<Event>, sqlx::Error> {
-    let rows: Vec<(String, String, String, String)> = sqlx::query_as(
-        "SELECT to_char(occurred_at AT TIME ZONE $2, 'YYYY-MM-DD HH24:MI:SS'), event_type, \
-         coalesce(outcome, ''), coalesce(actor_username, performed_by::text) FROM audit_log \
-         WHERE identity_id = $1 ORDER BY occurred_at DESC, id DESC LIMIT $3",
+    let rows: Vec<EventRow> = sqlx::query_as(
+        "SELECT to_char(a.occurred_at AT TIME ZONE $2, 'YYYY-MM-DD HH24:MI'), a.event_type, \
+         coalesce(o.outcome, a.outcome, ''), a.actor_username, \
+         coalesce(a.detail->>'group', a.detail->>'dn'), a.detail->>'reason', \
+         CASE WHEN jsonb_typeof(a.detail->'attributes') = 'array' THEN \
+           (SELECT string_agg(x->>'name', ', ' ORDER BY x->>'name') \
+            FROM jsonb_array_elements(a.detail->'attributes') x) END \
+         FROM audit_log a LEFT JOIN audit_log o ON o.intent_id = a.id \
+         WHERE a.identity_id = $1 AND a.intent_id IS NULL \
+         ORDER BY a.occurred_at DESC, a.id DESC LIMIT $3",
     )
     .bind(id)
     .bind(time_zone)
@@ -1476,11 +1531,24 @@ async fn load_events(pool: &PgPool, time_zone: &str, id: i64) -> Result<Vec<Even
     .await?;
     Ok(rows
         .into_iter()
-        .map(|(at, event_type, outcome, actor)| Event {
-            at,
-            event_type,
-            outcome,
-            actor,
+        .map(|(at, event_type, outcome, actor, dn, reason, attributes)| {
+            let subject = match (attributes, dn, reason) {
+                (Some(list), _, _) => list,
+                (None, Some(dn), _) => first_rdn(&dn),
+                (None, None, Some(reason)) => reason,
+                _ => String::new(),
+            };
+            let (icon, tone) = crate::dashboard::glyph_for(&event_type);
+            Event {
+                at,
+                subject,
+                actor: actor.unwrap_or_default(),
+                outcome_kind: outcome_kind(&outcome),
+                outcome,
+                event_type,
+                icon,
+                tone,
+            }
         })
         .collect())
 }

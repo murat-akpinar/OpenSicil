@@ -1316,8 +1316,8 @@ mod tests {
         assert!(body.contains("AD&#x27;de bağlı değil") || body.contains("AD'de bağlı değil"));
         assert!(!body.contains("Tekrar dene"));
         assert!(
-            body.contains("identity.created"),
-            "denetim satırı listelenir"
+            body.contains("Yeni kimlik kaydedildi"),
+            "denetim satırı ham olay anahtarı değil, operatör dilinde listelenir"
         );
         let body = body_string(
             app.clone()

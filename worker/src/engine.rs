@@ -112,8 +112,10 @@ pub async fn run_job(
         &input.clock,
     );
     if input.target_kind != "ad" {
+        // Ekranda operatorun okudugu satir: `DesiredState` Debug dokumu bastirmak
+        // kisi sayfasini okunmaz yapiyordu (ADR-101), hedef durumu zaten orada
         return Ok(format!(
-            "{} connector'ı yok, hedefe yazılmadı: {desired:?}",
+            "{} connector'ı yok, hedefe yazılmadı",
             input.target_kind
         ));
     }

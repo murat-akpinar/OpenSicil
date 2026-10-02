@@ -111,7 +111,7 @@
   {% for r in page.additional_roles %}
     <tr>
       <td>{{ r.name }}</td>
-      <td>{{ r.ends_on }}</td>
+      <td>{% if r.ends_on.is_empty() %}<span class="muted">{{ lang.t("person.no_end") }}</span>{% else %}{{ r.ends_on }}{% if r.ends_soon %} <span class="badge badge-warn">{{ lang.t("person.ends_soon") }}</span>{% endif %}{% endif %}</td>
       <td>{% if can_edit_names %}<form method="post" action="/identities/{{ page.person.id }}/roles/{{ r.role_id }}/delete"><button class="btn btn-sm" type="submit">{{ lang.t("common.remove") }}</button></form>{% endif %}</td>
     </tr>
   {% endfor %}
@@ -149,7 +149,10 @@
     <tr>
       <td>{{ a.target }}</td>
       <td>{{ a.external_id }}</td>
-      <td>{% if !a.origin.is_empty() %}{{ lang.key("link", a.origin) }}{% endif %} {% if !a.mode.is_empty() %}{{ lang.key("link", a.mode) }}{% endif %}</td>
+      <td>
+        {% if !a.mode.is_empty() %}<span class="badge badge-{% if a.observed %}info{% else %}ok{% endif %}">{{ lang.key("link", a.mode) }}</span>{% endif %}
+        {% if !a.origin.is_empty() %}<span class="meta">{{ lang.key("link", a.origin) }}</span>{% endif %}
+      </td>
       <td>{% if !a.applied_state.is_empty() %}{{ lang.key("state", a.applied_state) }}{% endif %}</td>
       <td>{{ a.diff }}</td>
       <td>
@@ -175,14 +178,20 @@
 <p class="mb-6 muted">{{ lang.t("person.no_jobs") }}</p>
 {% else %}
 <table class="tbl mb-6">
-  <thead><tr><th>{{ lang.t("field.target") }}</th><th>{{ lang.t("field.state") }}</th><th>{{ lang.t("person.attempts") }}</th><th>{{ lang.t("person.next_attempt") }}</th><th>{{ lang.t("person.description") }}</th><th></th></tr></thead>
+  <thead><tr><th>{{ lang.t("field.target") }}</th><th>{{ lang.t("field.state") }}</th><th>{{ lang.t("person.last_activity") }}</th><th>{{ lang.t("person.description") }}</th><th></th></tr></thead>
   <tbody>
   {% for j in page.jobs %}
     <tr>
       <td>{{ j.target }}</td>
-      <td><span class="badge badge-{{ j.status_kind }}">{{ lang.key("job", j.status) }}</span></td>
-      <td>{{ j.attempts }}</td>
-      <td>{{ j.next_attempt_at }}</td>
+      <td>
+        <span class="badge badge-{{ j.status_kind }}">{{ lang.key("job", j.status) }}</span>
+        {# Deneme sayisi ve sonraki deneme yalnizca bitmemis iste anlamli #}
+        {% if j.pending && j.attempts > 0 %}<span class="meta">{{ lang.t1("person.attempt_n", j.attempts) }}</span>{% endif %}
+      </td>
+      <td>
+        {{ j.at }}
+        {% if j.pending %}<span class="meta">{{ lang.t1("person.next_attempt_at", j.next_attempt_at) }}</span>{% endif %}
+      </td>
       <td>
         {% if !j.waiting.is_empty() %}<span class="warn">{{ j.waiting }}</span>{% endif %}
         {% if !j.summary.is_empty() %}<span class="err">{{ j.summary }}</span>{% endif %}
@@ -204,13 +213,19 @@
 {% if page.events.is_empty() %}
 <p class="muted">{{ lang.t("person.no_events") }}</p>
 {% else %}
-<table class="tbl">
-  <thead><tr><th>{{ lang.t("person.time") }}</th><th>{{ lang.t("field.event") }}</th><th>{{ lang.t("person.outcome") }}</th><th>{{ lang.t("person.who") }}</th></tr></thead>
-  <tbody>
+{# Panelin etkinlik akisiyla ayni bilesen: ham olay anahtari yerine ikon + cumle #}
+<div class="feed">
   {% for e in page.events %}
-    <tr><td>{{ e.at }}</td><td>{{ e.event_type }}</td><td>{{ e.outcome }}</td><td>{{ e.actor }}</td></tr>
+  <div class="feed-row">
+    <span class="ico-solid ico-solid-{{ e.tone }}"><i class="ico {{ e.icon }}" aria-hidden="true"></i></span>
+    <div class="feed-main">
+      <p class="feed-title">{{ lang.key("event", e.event_type) }}{% if !e.subject.is_empty() %} <span class="muted">{{ e.subject }}</span>{% endif %}</p>
+      <p class="feed-sub">{% if e.actor.is_empty() %}{{ lang.t("person.by_system") }}{% else %}{{ e.actor }}{% endif %}</p>
+    </div>
+    {% if !e.outcome.is_empty() %}<span class="badge badge-{{ e.outcome_kind }}">{{ lang.key("outcome", e.outcome) }}</span>{% endif %}
+    <span class="feed-time">{{ e.at }}</span>
+  </div>
   {% endfor %}
-  </tbody>
-</table>
+</div>
 {% endif %}
 {% endblock %}

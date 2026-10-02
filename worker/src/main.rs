@@ -544,8 +544,9 @@ mod tests {
                 .unwrap();
         assert_eq!(status, "succeeded", "kuyruktaki iş tek sırada işlenmeli");
         let result = result.unwrap_or_default();
-        assert!(result.contains("state: Active"), "{result}");
         assert!(result.contains("connector'ı yok"), "{result}");
+        // Sonuc satirini operator okur: `DesiredState` Debug dokumu basilmaz
+        assert!(!result.contains("DesiredState"), "{result}");
 
         drop(pool);
         test_support::drop_temp_db(&admin_pool, &db_name).await;

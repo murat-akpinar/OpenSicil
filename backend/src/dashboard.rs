@@ -539,9 +539,24 @@ fn percent(value: i64, peak: i64) -> i64 {
 /// Olay turunun ikonu; bilinmeyen tur notr ikon alir (ekran bozulmaz).
 /// Olay turunun ikonu ve ikon karesinin tonu (`.ico-tile-<ton>`): giris yesil,
 /// ayrilis kirmizi, bekleme sarisi, tanim degisikligi turkuaz, gerisi vurgu.
-fn glyph_for(event_type: &str) -> (&'static str, &'static str) {
+/// Kisi sayfasinin olay akisi da ayni ikonlari kullanir (`identity::load_events`).
+pub(crate) fn glyph_for(event_type: &str) -> (&'static str, &'static str) {
     match event_type {
         audit::IDENTITY_CREATED => ("ico-user-plus", "ok"),
+        // Worker'in hedef islemleri: yalnizca kisi sayfasinda gorunur
+        "ad.account.create" => ("ico-user-plus", "ok"),
+        "ad.account.adopted" => ("ico-link", "info"),
+        "ad.account.managed" => ("ico-shield", "ok"),
+        "ad.account.enable" => ("ico-check", "ok"),
+        "ad.account.disable" => ("ico-logout", "warn"),
+        "ad.account.delete" => ("ico-trash", "err"),
+        "ad.account.move" => ("ico-sitemap", "info"),
+        "ad.account.attributes" => ("ico-refresh", "accent"),
+        "ad.group.add_member" => ("ico-key", "ok"),
+        "ad.group.remove_member" => ("ico-key", "warn"),
+        "ad.account.first_password" | "ad.account.password_reset" => ("ico-lock", "warn"),
+        "ad.cancellation.verified" => ("ico-check", "warn"),
+        "ad.cancellation.rejected" => ("ico-bolt", "err"),
         audit::IDENTITY_CHANGED | audit::TARGET_CHANGED | audit::MAPPING_CHANGED => {
             ("ico-refresh", "accent")
         }
