@@ -1,6 +1,7 @@
 /* Arayüz girdi dosyası (ADR-088). Çıktı: frontend/static/app.css — `sh scripts/build-css.sh`
    ile üretilir ve commit'lenir, include_bytes! ile binary'ye gömülür (backend/src/assets.rs).
-   Renkler ADR-100 paleti (slate + blue); token adlarındaki `ctp-` öneki tarihsel. Şablonlarda satır içi renk yoktur;
+   Renkler ADR-110 paleti: hue'lar altın açı (137,508°) kafesinde, ton basamakları φ katı,
+   metin kontrastı 4,7 → 4,7φ → 4,7φ² (hepsi WCAG AA). Token adlarındaki `ctp-` öneki tarihsel. Şablonlarda satır içi renk yoktur;
    buradaki token ve bileşen sınıfları kullanılır.
 
    Yüzey düzeni: sayfa zemini, kart, kenar çubuğu ve üst bar ayrı token; koyu temada üçü üç ton.
@@ -13,102 +14,103 @@
 @source "../templates";
 @source "../static/app.js";
 
-/* --- Açık tema (ADR-100) --- */
+/* --- Açık tema (ADR-110): altın açı hue kafesi + φ ton merdiveni --- */
 :root {
-  --ctp-bg: #f8fafc;
+  --ctp-bg: #f9fbfe;
   --ctp-card: #ffffff;
   --ctp-sidebar: #ffffff;
   --ctp-topbar: #ffffff;
-  --ctp-bg-soft: #f1f5f9;
-  --ctp-bg-hard: #e2e8f0;
-  --ctp-surface: #cbd5e1;
-  --ctp-surface-2: #94a3b8;
-  --ctp-line: #e2e8f0;
-  --ctp-fg: #0f172a;
-  --ctp-fg-dim: #64748b;
-  --ctp-fg-faint: #94a3b8;
-  --ctp-accent: #3b82f6;
-  --ctp-accent-hover: #2563eb;
-  --ctp-accent-soft: #dbeafe;
-  --ctp-on-accent-soft: #3b82f6;
-  /* Grafigin ikinci serisi palette "aksan (turkuaz)" */
-  --ctp-accent-dim: #06b6d4;
-  --ctp-ok: #10b981;
-  --ctp-err: #ef4444;
-  --ctp-warn: #f59e0b;
-  --ctp-info: #8b5cf6;
+  --ctp-bg-soft: #f1f5f8;
+  --ctp-bg-hard: #e6ebef;
+  --ctp-surface: #cad3db;
+  --ctp-line: #dde4ea;
+  --ctp-fg: #263038;
+  --ctp-fg-dim: #474f56;
+  --ctp-fg-faint: #686e74;
+  --ctp-accent: #0072ba;
+  --ctp-accent-hover: #0062a0;
+  --ctp-accent-soft: #d2e9ff;
+  --ctp-on-accent-soft: #0067a8;
+  /* Grafiğin ikinci serisi: altın açı kafesinde 214° */
+  --ctp-accent-dim: #008195;
+  --ctp-ok: #007a52;
+  --ctp-err: #b93d3e;
+  --ctp-warn: #8e6000;
+  --ctp-info: #7c53bc;
   --ctp-on-accent: #ffffff;
-  --ctp-ok-soft: #d1fae5;
-  --ctp-warn-soft: #fef3c7;
-  --ctp-err-soft: #fee2e2;
-  --ctp-info-soft: #ede9fe;
-  --ctp-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 8px 24px rgb(15 23 42 / 0.06);
-  --ctp-shadow-sm: 0 1px 2px rgb(15 23 42 / 0.06);
+  --ctp-ok-soft: #cdf9e1;
+  --ctp-warn-soft: #ffe9cb;
+  --ctp-err-soft: #ffe6e4;
+  --ctp-info-soft: #efe9ff;
+  --ctp-shadow: 0 1px 2px rgb(38 48 56 / 0.04), 0 8px 24px rgb(38 48 56 / 0.07);
+  --ctp-shadow-sm: 0 1px 2px rgb(38 48 56 / 0.06);
 }
 
 /* Sistem koyu tercihi; operatör elle "light" seçmediyse */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --ctp-bg: #0b1220;
-    --ctp-card: #1e293b;
-    --ctp-sidebar: #0f172a;
-    --ctp-topbar: #111827;
-    --ctp-bg-soft: #111827;
-    --ctp-bg-hard: #0b1220;
-    --ctp-surface: #334155;
-    --ctp-surface-2: #475569;
-    --ctp-line: #334155;
-    --ctp-fg: #f8fafc;
-    --ctp-fg-dim: #cbd5e1;
-    --ctp-fg-faint: #94a3b8;
-    --ctp-accent: #3b82f6;
-    --ctp-accent-hover: #2563eb;
-    --ctp-accent-soft: #1d4ed8;
+    --ctp-bg: #070c10;
+    --ctp-card: #283138;
+    --ctp-sidebar: #0d1218;
+    --ctp-topbar: #171d23;
+    --ctp-bg-soft: #171d24;
+    --ctp-bg-hard: #353f48;
+    --ctp-surface: #3c4853;
+    --ctp-line: #353f48;
+    --ctp-fg: #f0f8ff;
+    --ctp-fg-dim: #bcc6ce;
+    --ctp-fg-faint: #949ba1;
+    --ctp-accent: #1a9ffa;
+    --ctp-accent-hover: #56b2ff;
+    --ctp-accent-soft: #00568d;
     --ctp-on-accent-soft: #ffffff;
-    --ctp-accent-dim: #22d3ee;
-    --ctp-ok: #10b981;
-    --ctp-err: #f87171;
-    --ctp-warn: #f59e0b;
-    --ctp-info: #8b5cf6;
-    --ctp-on-accent: #ffffff;
-    --ctp-ok-soft: #052e23;
-    --ctp-warn-soft: #3b2a06;
-    --ctp-err-soft: #3f1414;
-    --ctp-info-soft: #1e1340;
-    --ctp-shadow: 0 1px 2px rgb(0 0 0 / 0.5), 0 8px 24px rgb(0 0 0 / 0.35);
+    /* Grafiğin ikinci serisi: altın açı kafesinde 214° */
+    --ctp-accent-dim: #00a7c1;
+    --ctp-ok: #00af77;
+    --ctp-err: #f2716d;
+    --ctp-warn: #cd8d00;
+    --ctp-info: #ad84f2;
+    /* Koyuda dolu buton yazısı beyaz olamaz: parlak aksan üstünde 4,5'i tutmaz */
+    --ctp-on-accent: #090e12;
+    --ctp-ok-soft: #003823;
+    --ctp-warn-soft: #3f2900;
+    --ctp-err-soft: #4d1c1b;
+    --ctp-info-soft: #33244e;
+    --ctp-shadow: 0 1px 2px rgb(0 0 0 / 0.5), 0 8px 24px rgb(0 0 0 / 0.38);
     --ctp-shadow-sm: 0 1px 2px rgb(0 0 0 / 0.5);
   }
 }
 
 /* Elle koyu seçimi (static/app.js, localStorage) */
 :root[data-theme="dark"] {
-  --ctp-bg: #0b1220;
-  --ctp-card: #1e293b;
-  --ctp-sidebar: #0f172a;
-  --ctp-topbar: #111827;
-  --ctp-bg-soft: #111827;
-  --ctp-bg-hard: #0b1220;
-  --ctp-surface: #334155;
-  --ctp-surface-2: #475569;
-  --ctp-line: #334155;
-  --ctp-fg: #f8fafc;
-  --ctp-fg-dim: #cbd5e1;
-  --ctp-fg-faint: #94a3b8;
-  --ctp-accent: #3b82f6;
-  --ctp-accent-hover: #2563eb;
-  --ctp-accent-soft: #1d4ed8;
+  --ctp-bg: #070c10;
+  --ctp-card: #283138;
+  --ctp-sidebar: #0d1218;
+  --ctp-topbar: #171d23;
+  --ctp-bg-soft: #171d24;
+  --ctp-bg-hard: #353f48;
+  --ctp-surface: #3c4853;
+  --ctp-line: #353f48;
+  --ctp-fg: #f0f8ff;
+  --ctp-fg-dim: #bcc6ce;
+  --ctp-fg-faint: #949ba1;
+  --ctp-accent: #1a9ffa;
+  --ctp-accent-hover: #56b2ff;
+  --ctp-accent-soft: #00568d;
   --ctp-on-accent-soft: #ffffff;
-  --ctp-accent-dim: #22d3ee;
-  --ctp-ok: #10b981;
-  --ctp-err: #f87171;
-  --ctp-warn: #f59e0b;
-  --ctp-info: #8b5cf6;
-  --ctp-on-accent: #ffffff;
-  --ctp-ok-soft: #052e23;
-  --ctp-warn-soft: #3b2a06;
-  --ctp-err-soft: #3f1414;
-  --ctp-info-soft: #1e1340;
-  --ctp-shadow: 0 1px 2px rgb(0 0 0 / 0.5), 0 8px 24px rgb(0 0 0 / 0.35);
+  /* Grafiğin ikinci serisi: altın açı kafesinde 214° */
+  --ctp-accent-dim: #00a7c1;
+  --ctp-ok: #00af77;
+  --ctp-err: #f2716d;
+  --ctp-warn: #cd8d00;
+  --ctp-info: #ad84f2;
+  /* Koyuda dolu buton yazısı beyaz olamaz: parlak aksan üstünde 4,5'i tutmaz */
+  --ctp-on-accent: #090e12;
+  --ctp-ok-soft: #003823;
+  --ctp-warn-soft: #3f2900;
+  --ctp-err-soft: #4d1c1b;
+  --ctp-info-soft: #33244e;
+  --ctp-shadow: 0 1px 2px rgb(0 0 0 / 0.5), 0 8px 24px rgb(0 0 0 / 0.38);
   --ctp-shadow-sm: 0 1px 2px rgb(0 0 0 / 0.5);
 }
 
@@ -121,7 +123,6 @@
   --color-bg-soft: var(--ctp-bg-soft);
   --color-bg-hard: var(--ctp-bg-hard);
   --color-surface: var(--ctp-surface);
-  --color-surface-2: var(--ctp-surface-2);
   --color-line: var(--ctp-line);
   --color-fg: var(--ctp-fg);
   --color-fg-dim: var(--ctp-fg-dim);
@@ -188,7 +189,6 @@
     outline-offset: 2px;
   }
 }
-
 @layer components {
   /* --- ikonlar ---
      Glyph'ler yalnızca burada durur (şablonlarda ham karakter yok): `sh scripts/check-glyphs.sh`
@@ -233,11 +233,13 @@
   .ico-globe::before {
     content: "\f0ac";
   }
+  /* Tema ikonları Material Design setinden: FA'nın `\f185` güneşi 8 kalın ışınla
+     küçük boyda dişli çarka benziyordu (ADR-110). */
   .ico-moon::before {
-    content: "\f186";
+    content: "\f0594";
   }
   .ico-sun::before {
-    content: "\f185";
+    content: "\f0599";
   }
   .ico-inbox::before {
     content: "\f01c";
@@ -836,6 +838,16 @@
   }
   .btn-sm {
     @apply px-2.5 py-1.5 text-xs;
+  }
+  /* Tema düğmesi: yuvarlak ve ikon 16px. Eskiden metin boyunda (12px) bir hayalet
+     düğmeydi, o ölçekte güneş glyph'i ayar/dişli düğmesi gibi okunuyordu (ADR-110).
+     `.ico` sınıfı verilmez: oradaki `inline-block` buradaki `grid` ile çakışır,
+     glyph zaten `.ico-sun`/`.ico-moon` ::before içeriğinden gelir. */
+  .theme-toggle {
+    @apply grid size-9 shrink-0 cursor-pointer place-items-center rounded-full
+           border border-line bg-card text-base leading-none text-fg-dim
+           hover:border-accent hover:bg-bg hover:text-accent;
+    box-shadow: var(--ctp-shadow-sm);
   }
   .btn .ico {
     @apply w-4 text-center;

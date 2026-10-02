@@ -138,4 +138,5 @@
 - CSV ile toplu kimlik içe aktarma — kolon ve ipucu kuralları, önizleme, tek transaction, eşiği aşan dosya şifreli sahneleme ve onay (F-17)
 - CSV'de sicil no değişimi önerisi — kimlik no eşleşen satır mevcut kaydı günceller, onay kutusu ve denetimde önce/sonra (ADR-055)
 - Toplu yönetime alma — okuma şeridinde gözlem farkı hesabı, seçim ekranı, eşik ve onay (ADR-018/043/051)
+- Altın oran paleti ve yuvarlak tema düğmesi
 
