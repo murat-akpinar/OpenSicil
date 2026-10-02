@@ -15,6 +15,13 @@ const JS: &[u8] = include_bytes!("../../frontend/static/app.js");
 const FONT_REGULAR: &[u8] =
     include_bytes!("../../frontend/static/CaskaydiaMonoNerdFont-Regular.ttf");
 const FONT_BOLD: &[u8] = include_bytes!("../../frontend/static/CaskaydiaMonoNerdFont-Bold.ttf");
+// Govde fontu Inter (ADR-115), degisken agirlikli woff2: tek dosya 100-900
+// arasini tasir, Regular/Bold diye iki dosya gerekmez. Iki alt kume var cunku
+// Turkce `g`/`s`/`I` Latin Extended-A'da: `unicode-range` hangisinin
+// indirilecegini tarayiciya birakir (ASCII sayfada ext dosyasi hic cekilmez).
+const FONT_SANS_LATIN: &[u8] = include_bytes!("../../frontend/static/InterVariable-latin.woff2");
+const FONT_SANS_LATIN_EXT: &[u8] =
+    include_bytes!("../../frontend/static/InterVariable-latin-ext.woff2");
 
 // Fontun adı sürümünü taşır ve içeriği değişmez: bir yıl, sorulmadan.
 const CACHE_IMMUTABLE: &str = "public, max-age=31536000, immutable";
@@ -24,7 +31,7 @@ const CACHE_IMMUTABLE: &str = "public, max-age=31536000, immutable";
 const CACHE_REVALIDATE: &str = "public, no-cache";
 
 // Varlık adı derlemede sabit; istenen ad listede yoksa 404 (dizin gezinmesi imkânsız).
-const ASSETS: [(&str, &str, &[u8], &str); 4] = [
+const ASSETS: [(&str, &str, &[u8], &str); 6] = [
     ("app.css", "text/css; charset=utf-8", CSS, CACHE_REVALIDATE),
     (
         "app.js",
@@ -42,6 +49,18 @@ const ASSETS: [(&str, &str, &[u8], &str); 4] = [
         "CaskaydiaMonoNerdFont-Bold.ttf",
         "font/ttf",
         FONT_BOLD,
+        CACHE_IMMUTABLE,
+    ),
+    (
+        "InterVariable-latin.woff2",
+        "font/woff2",
+        FONT_SANS_LATIN,
+        CACHE_IMMUTABLE,
+    ),
+    (
+        "InterVariable-latin-ext.woff2",
+        "font/woff2",
+        FONT_SANS_LATIN_EXT,
         CACHE_IMMUTABLE,
     ),
 ];
@@ -135,12 +154,13 @@ mod tests {
             "text/css; charset=utf-8"
         );
         assert_eq!(get_asset("app.js").await.status(), StatusCode::OK);
-        assert_eq!(
-            get_asset("CaskaydiaMonoNerdFont-Regular.ttf")
-                .await
-                .status(),
-            StatusCode::OK
-        );
+        for font in [
+            "CaskaydiaMonoNerdFont-Regular.ttf",
+            "InterVariable-latin.woff2",
+            "InterVariable-latin-ext.woff2",
+        ] {
+            assert_eq!(get_asset(font).await.status(), StatusCode::OK, "{font}");
+        }
         for unknown in ["yok.css", "../Cargo.toml", "app.css.map"] {
             assert_eq!(
                 get_asset(unknown).await.status(),
@@ -184,7 +204,16 @@ mod tests {
     #[test]
     fn compiled_css_has_tokens_and_components() {
         let css = std::str::from_utf8(CSS).expect("CSS utf-8");
-        for needle in ["--ctp-bg", "data-theme=dark", ".btn", ".tbl", ".badge"] {
+        for needle in [
+            "--ctp-bg",
+            "data-theme=dark",
+            ".btn",
+            ".tbl",
+            ".badge",
+            // ADR-115: govde fontu Inter, ikon fontu yerinde kalir
+            "InterVariable-latin.woff2",
+            "CaskaydiaMono Nerd Font",
+        ] {
             assert!(css.contains(needle), "derlenmiş CSS'te {needle} yok");
         }
     }

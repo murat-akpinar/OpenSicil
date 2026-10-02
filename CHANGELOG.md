@@ -144,4 +144,5 @@
 - Kişi sayfasında olaylar, işler ve ek roller operatör diline çevrildi
 - Mutabakat sonrası AD'den boş alan dolumu
 - Cam yüzeyli turkuaz tema ve daraltılabilir kenar menüsü
+- Gövde fontu Inter, monospace yalnızca veri alanlarında
 
