@@ -26,6 +26,7 @@
 - Tekil sahiplenmede sicil ve telefon kutucuğu
 - Devreye alma akışına DRY_RUN=false adımı ve gözlem modu notu (ADR-106 madde 6)
 - Hogwarts AD'de bekleyen ölçümler alındı (whenCreated 29/29, sicil employeeNumber'dan, manage_diff 3 fark)
+- TC özniteliği kurulum ayarı olarak cevaplandı, Zimbra bölümü kullanıcı kararıyla beklemede
 
 ### Düzeltmeler
 
