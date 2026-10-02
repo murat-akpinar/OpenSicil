@@ -154,4 +154,5 @@
 - Sayaç kartları kendi renginde, kıvılcım ve değişim rozetiyle
 - Etkinlik akışı olay kategorisine göre renklenir
 - Rol bölümlerinde kişi/atama sayısı, sayı kolonunda dolu değer kalın
+- Panelde sütunlar eşitlendi, eğilim çubukları gün başına yan yana
 

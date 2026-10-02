@@ -175,7 +175,7 @@
       {% endif %}
     </div>
 
-    <div class="stack xl:col-span-4">
+    <div class="stack-fill xl:col-span-4">
       <div class="card">
         <div class="card-head">
           <i class="ico ico-chart card-icon" aria-hidden="true"></i>
@@ -201,7 +201,9 @@
               <circle class="donut-ring" cx="21" cy="21" r="15.9155"></circle>
               {% for s in dash.employment.slices %}
               <circle class="donut-seg seg-{{ s.tone }}" cx="21" cy="21" r="15.9155"
-                      stroke-dasharray="{{ s.dash }}" stroke-dashoffset="{{ s.offset }}"></circle>
+                      stroke-dasharray="{{ s.dash }}" stroke-dashoffset="{{ s.offset }}">
+                <title>{{ lang.key("employment", s.key) }}: {{ s.count }} (%{{ s.pct }})</title>
+              </circle>
               {% endfor %}
             </svg>
             <span class="donut-center">
@@ -249,7 +251,9 @@
               <circle class="donut-ring" cx="21" cy="21" r="15.9155"></circle>
               {% for s in dash.roles.slices %}
               <circle class="donut-seg seg-{{ s.tone }}" cx="21" cy="21" r="15.9155"
-                      stroke-dasharray="{{ s.dash }}" stroke-dashoffset="{{ s.offset }}"></circle>
+                      stroke-dasharray="{{ s.dash }}" stroke-dashoffset="{{ s.offset }}">
+                <title>{% if s.key.is_empty() %}{{ lang.t("dash.other") }}{% else %}{{ s.key }}{% endif %}: {{ s.count }} (%{{ s.pct }})</title>
+              </circle>
               {% endfor %}
             </svg>
             <span class="donut-center">
@@ -284,8 +288,8 @@
            kesiliyordu ve cok departmanda tasiyordu. Siralama Rust'tan geliyor #}
         <div class="divide-y divide-line">
           {% for d in dash.departments %}
-          <div class="dist-row">
-            <span class="dist-name" title="{{ d.name }}">{{ d.name }}</span>
+          <div class="dist-row" title="{{ d.name }}: {{ d.count }}">
+            <span class="dist-name">{{ d.name }}</span>
             <span class="tabular-nums">{{ d.count }}</span>
             <span class="meter"><span class="meter-fill v-{{ d.pct }}"></span></span>
           </div>
@@ -295,7 +299,7 @@
       </div>
     </div>
 
-    <div class="stack xl:col-span-3">
+    <div class="stack-fill xl:col-span-3">
       <div class="card">
         <div class="card-head">
           <i class="ico ico-bolt card-icon" aria-hidden="true"></i>
@@ -329,10 +333,12 @@
           </div>
           <div class="chart-plot">
             {% for d in dash.trend %}
-            {# Sifir degerli gun cubuk basmaz: bos sutun "o gun hicbir sey olmadi" demek #}
-            <div class="chart-stack">
-              {% if d.joined_pct > 0 %}<span class="bar v-{{ d.joined_pct }}" title="{{ d.joined }}"></span>{% endif %}
-              {% if d.departed_pct > 0 %}<span class="bar bar-soft v-{{ d.departed_pct }}" title="{{ d.departed }}"></span>{% endif %}
+            {# Gunun iki serisi yan yana (ADR-117 C). Sifir degerli seri cubuk
+               basmaz: 2px'lik hayalet cizgi "o gun bir sey oldu" gibi okunurdu.
+               Deger `title`da — tarayicinin kendi ipucu, JS gerekmiyor #}
+            <div class="chart-day" title="{{ d.label }} · {{ lang.t("dash.trend_joined") }}: {{ d.joined }} · {{ lang.t("dash.trend_departed") }}: {{ d.departed }}">
+              {% if d.joined_pct > 0 %}<span class="bar v-{{ d.joined_pct }}"></span>{% endif %}
+              {% if d.departed_pct > 0 %}<span class="bar bar-soft v-{{ d.departed_pct }}"></span>{% endif %}
             </div>
             {% endfor %}
           </div>

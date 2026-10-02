@@ -15,7 +15,9 @@ pub const WINDOW_DAYS: i32 = 30;
 /// deger varsayilana duser — sorguya keyfi sayi girmez.
 pub const WINDOWS: [i32; 4] = [7, 30, 90, 365];
 const TREND_DAYS: i32 = 7;
-const ACTIVITY_LIMIT: i64 = 8;
+/// Akis karti yanindaki sutun kadar uzuyor; sekiz satir altinda genis bir
+/// bosluk birakiyordu (ADR-117 C).
+const ACTIVITY_LIMIT: i64 = 12;
 const DISTRIBUTION_LIMIT: i64 = 5;
 /// Rol halkasinda ayri dilim olan en kalabalik rol sayisi; kalani "diger"
 const ROLE_SLICES: usize = 4;
@@ -573,12 +575,12 @@ async fn trend(pool: &PgPool, time_zone: &str) -> Result<(Vec<TrendDay>, i64), s
     .bind(TREND_DAYS)
     .fetch_all(pool)
     .await?;
-    // Iki seri ayni sutunda ust uste yigiliyor: olcek gunluk *toplamin* zirvesi
-    // olmali. Serilerin ayri ayri zirvesine gore yuzdelenmesi iki dolu gunde
-    // %100 + %100 ediyor ve sutun kartin disina tasiyordu.
+    // Iki seri gun basina yan yana iki cubuk (ADR-117 C): olcek gunluk toplamin
+    // degil serilerin **kendi** zirvesidir. Toplama gore olcekleyince tek serinin
+    // dolu oldugu gun yarim yukseklikte cikiyor ve "yarisi kadar" diye okunuyordu.
     let peak = rows
         .iter()
-        .map(|(_, joined, departed)| joined + departed)
+        .flat_map(|(_, joined, departed)| [*joined, *departed])
         .max()
         .unwrap_or(0);
     let days = rows
@@ -1087,16 +1089,13 @@ mod tests {
         assert_eq!(folded[0].0, "Rol 1");
     }
 
+    /// Yan yana iki cubuk (ADR-117 C): olcek serilerin kendi zirvesi, bu yuzden
+    /// hicbir cubuk cizim alanini asamaz — yigilmada iki %100 ust uste geliyordu.
     #[test]
-    fn a_stacked_column_never_overflows_the_plot() {
-        // Iki seri ayni sutunda yigiliyor ve olcek gunluk toplamin zirvesi.
-        // Yuvarlama ve "gorunur kalsin" tabani birlikte en fazla bir adim
-        // tasirabilir; `.chart-stack` bu yuzden `overflow-hidden`.
+    fn a_grouped_column_never_overflows_the_plot() {
         for peak in 1..60i64 {
-            for joined in 0..=peak {
-                let departed = peak - joined;
-                let total = percent(joined, peak) + percent(departed, peak);
-                assert!(total <= 105, "{joined}+{departed}/{peak} -> {total}");
+            for value in 0..=peak {
+                assert!(percent(value, peak) <= 100, "{value}/{peak}");
             }
         }
     }

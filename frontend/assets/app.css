@@ -1090,6 +1090,16 @@
   .card-fill {
     @apply flex flex-col;
   }
+  /* Sütunu dolduran yığın: kartlar doğal yüksekliğinde durur, sondaki kalan
+     boşluğu alır. Izgara satırı en uzun sütun kadar uzuyor ve kısa sütunun
+     altında geniş bir boşluk kalıyordu (ADR-117 C). Kartları eşit paylaştırmak
+     (`grid-auto-rows: 1fr`) halka kartlarını gereksiz şişiriyordu. */
+  .stack-fill {
+    @apply flex flex-col gap-5;
+  }
+  .stack-fill > :last-child {
+    @apply flex-1;
+  }
 
   /* Çubuk grafik. İki satırlı ızgara: üstte y ekseni + çizim alanı (aynı
      yüksekliği paylaşırlar, böylece eksen yazıları kılavuz çizgileriyle
@@ -1116,21 +1126,24 @@
       transparent 1px 50%
     );
   }
-  /* `overflow-hidden`: yığının iki dilimi yuvarlama yüzünden bir adım taşabilir
-     (`dashboard::a_stacked_column_never_overflows_the_plot`) */
-  .chart-stack {
-    @apply flex h-full w-full max-w-7 flex-col-reverse justify-start gap-0.5
-           justify-self-center overflow-hidden;
+  /* Günün iki çubuğu yan yana (ADR-117 C): üst üste yığılmış hâlde "bugün iki
+     kayıt mı, bir kayıt bir ayrılış mı" ayırt edilemiyordu. Hover'da günün
+     değerleri `title` ile çıkar — JS yok. */
+  .chart-day {
+    @apply flex h-full w-full items-end justify-center gap-1 justify-self-center;
   }
   /* `min-height` yok: sifir degerli gun icin sablon cubugu hic basmaz, 2px'lik
      hayalet cizgi "o gun bir sey oldu" gibi okunurdu */
   .bar {
-    @apply w-full rounded-t-md;
+    @apply w-full max-w-3.5 rounded-t-md;
     background-color: var(--chart-1);
     height: calc(var(--v, 0) * 1%);
   }
   .bar-soft {
     background-color: var(--chart-2);
+  }
+  .chart-day:hover .bar {
+    filter: brightness(1.15);
   }
   .chart-axis {
     @apply col-start-2 row-start-2 grid auto-cols-fr grid-flow-col gap-2 pt-2;
@@ -1187,8 +1200,17 @@
   .seg-warn {
     stroke: var(--chart-4);
   }
+  /* Dilimin üstüne gelince kalınlaşır; değeri `<title>` ile tarayıcı gösterir */
+  .donut-seg {
+    transition: stroke-width 160ms ease;
+  }
   .donut-seg:hover {
     stroke-width: 6;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .donut-seg {
+      transition: none;
+    }
   }
   /* Halkanın ortası: etiket ve sayı ayrı satır. Eskiden `leading-tight` ile iki
      `inline` kardeş üst üste biniyordu (ADR-114 B.3). */
@@ -1226,7 +1248,7 @@
 
   /* Dağılım satırı: etiket + sayı + ölçek çubuğu + yüzde */
   .dist-row {
-    @apply flex items-center gap-3 py-2 text-sm;
+    @apply -mx-2 flex items-center gap-3 rounded-lg px-2 py-2 text-sm hover:bg-bg-soft;
   }
   .dist-name {
     @apply min-w-0 flex-1 truncate;
