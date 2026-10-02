@@ -1687,10 +1687,21 @@
     @apply mr-auto text-xs text-fg-faint;
   }
 
-  /* Bölüm menüsü (Ayarlar): solda yapışkan sütun, sağda form */
+  /* Bölüm menüsü (Ayarlar): solda yapışkan sütun, sağda form. Ofset üst barın
+     ölçülen yüksekliğinden gelir (app.js `--topbar-h`), sabit `top-20` dar
+     ekranda üst barın altına giriyordu. */
   .sec-nav {
-    @apply flex flex-row gap-1 overflow-x-auto md:sticky md:top-20 md:flex-col
-           md:overflow-visible;
+    @apply flex flex-row gap-1 overflow-x-auto md:sticky md:flex-col md:overflow-visible;
+    top: calc(var(--topbar-h) + 1rem);
+  }
+  /* Ayarların alan ızgarası: geniş ekranda iki sütun ama bir alan 520px'ten
+     geniş olmaz — 1920px'te tek satırlık bir host adresi ekranın yarısını
+     kaplıyor ve göz satır başını bulamıyordu. */
+  .field-grid {
+    @apply grid gap-x-5 gap-y-4 lg:grid-cols-2;
+  }
+  .field-grid > * {
+    max-width: 32.5rem;
   }
   .sec-nav a {
     @apply rounded-lg px-3 py-2 text-sm font-bold whitespace-nowrap text-fg-dim

@@ -157,4 +157,5 @@
 - Panelde sütunlar eşitlendi, eğilim çubukları gün başına yan yana
 - Raporlar kapağında özet kutuları ve satır rozetleri
 - Uygulamalar sayfasında özel açılır liste oku ve hizalı yenileme satırı
+- Ayarlarda alan genişliği sınırlandı, bölüm menüsü üst bara göre yapışıyor
 
