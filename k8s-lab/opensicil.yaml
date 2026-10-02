@@ -1,0 +1,151 @@
+# N-14 lab doğrulaması (ADR-061, docs/09 "compose → Kubernetes eşlemesi").
+# Ürün bileşeni DEĞİL: chart/manifest yayımlanmaz; bu dosya eşlemenin tek node'lu
+# bir kümede (kind) bir kez sınanması içindir. Secret ve ConfigMap'leri
+# scripts/k8s-lab.sh üretir (değer burada yok); __HOST_GATEWAY__ kind ağının
+# geçidiyle değiştirilir (lab Samba'ya host portundan ulaşım, cert SAN'ı samba-ad).
+# Migration Job'ı ayrı dosyada (migrate-job.yaml): servisler ondan ÖNCE açılır,
+# şema yokken hazır olmadıkları böyle gözlenir.
+---
+apiVersion: v1
+kind: Service
+metadata: { name: db }
+spec:
+  selector: { app: db }
+  ports: [{ port: 5432, targetPort: 5432 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: db }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: db } }
+  template:
+    metadata: { labels: { app: db } }
+    spec:
+      containers:
+        - name: postgres
+          # kind load çok platformlu bu imajı içe aktaramıyor (ctr "content digest not found");
+          # node kendisi çeker
+          image: postgres:18.6-alpine
+          imagePullPolicy: IfNotPresent
+          env:
+            - { name: POSTGRES_USER, valueFrom: { secretKeyRef: { name: db-owner, key: user } } }
+            - { name: POSTGRES_PASSWORD, valueFrom: { secretKeyRef: { name: db-owner, key: password } } }
+            - { name: POSTGRES_DB, valueFrom: { secretKeyRef: { name: db-owner, key: db } } }
+          ports: [{ containerPort: 5432 }]
+          readinessProbe:
+            exec: { command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""] }
+            periodSeconds: 5
+          volumeMounts: [{ name: data, mountPath: /var/lib/postgresql }]
+      volumes: [{ name: data, emptyDir: {} }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: backend }
+spec:
+  selector: { app: backend }
+  ports: [{ port: 8000, targetPort: 8000 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: backend }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: backend } }
+  template:
+    metadata: { labels: { app: backend } }
+    spec:
+      terminationGracePeriodSeconds: 30
+      hostAliases: [{ ip: "__HOST_GATEWAY__", hostnames: ["samba-ad"] }]
+      containers:
+        - name: backend
+          image: opensicil-backend:latest
+          imagePullPolicy: Never
+          envFrom:
+            - configMapRef: { name: common }
+            - configMapRef: { name: backend-config }
+            - secretRef: { name: backend-env }
+          ports: [{ containerPort: 8000 }]
+          # ADR-061 madde 2: hazır olma /api/health (veritabanına bakar), canlılık TCP
+          readinessProbe:
+            httpGet: { path: /api/health, port: 8000 }
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket: { port: 8000 }
+            periodSeconds: 10
+          securityContext: { readOnlyRootFilesystem: true, allowPrivilegeEscalation: false }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+            - { name: ad-ca, mountPath: /etc/opensicil/ad-ca.pem, subPath: ad-ca.pem, readOnly: true }
+      volumes:
+        - { name: tmp, emptyDir: {} }
+        - { name: ad-ca, configMap: { name: ad-ca } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: worker }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: worker } }
+  template:
+    metadata: { labels: { app: worker } }
+    spec:
+      terminationGracePeriodSeconds: 30
+      hostAliases: [{ ip: "__HOST_GATEWAY__", hostnames: ["samba-ad"] }]
+      containers:
+        - name: worker
+          image: opensicil-worker:latest
+          imagePullPolicy: Never
+          envFrom:
+            - configMapRef: { name: common }
+            - configMapRef: { name: worker-config }
+            - secretRef: { name: worker-env }
+          # Port yok (N-08); canlılık aynı ikilinin worker-health alt komutu
+          livenessProbe:
+            exec: { command: ["/usr/local/bin/worker", "worker-health"] }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          securityContext: { readOnlyRootFilesystem: true, allowPrivilegeEscalation: false }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+            - { name: ad-ca, mountPath: /etc/opensicil/ad-ca.pem, subPath: ad-ca.pem, readOnly: true }
+      volumes:
+        - { name: tmp, emptyDir: {} }
+        - { name: ad-ca, configMap: { name: ad-ca } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: nginx }
+spec:
+  selector: { app: nginx }
+  ports:
+    - { name: http, port: 8080, targetPort: 8080 }
+    - { name: https, port: 8443, targetPort: 8443 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: nginx }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: nginx } }
+  template:
+    metadata: { labels: { app: nginx } }
+    spec:
+      containers:
+        - name: nginx
+          image: opensicil-nginx:latest
+          imagePullPolicy: Never
+          ports: [{ containerPort: 8080 }, { containerPort: 8443 }]
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            periodSeconds: 5
+          volumeMounts:
+            - { name: tls, mountPath: /etc/nginx/tls, readOnly: true }
+            # resolver satırı Docker DNS'i yerine küme DNS'i, upstream adı FQDN (betik üretir)
+            - { name: conf, mountPath: /etc/nginx/nginx.conf, subPath: nginx.conf, readOnly: true }
+            - { name: conf, mountPath: /etc/nginx/proxy.conf, subPath: proxy.conf, readOnly: true }
+      volumes:
+        - { name: tls, secret: { secretName: nginx-tls } }
+        - { name: conf, configMap: { name: nginx-conf } }

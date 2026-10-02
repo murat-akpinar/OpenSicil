@@ -101,7 +101,7 @@ Dört topolojide de imajlar ve `compose.yaml` aynıdır; B ve C'de aynı dosyada
 
 | compose | Kubernetes |
 |---|---|
-| `nginx` ve `ports:` | Deployment + Service, önünde Ingress; TLS Ingress'te sonlanır, `PUBLIC_URL` dış adrestir |
+| `nginx` ve `ports:` | Deployment + Service, önünde Ingress; TLS Ingress'te sonlanır, `PUBLIC_URL` dış adrestir. İmajdaki `nginx.conf` upstream adını `resolver 127.0.0.11` (Docker'ın gömülü DNS'i) ile çözer; kümede `nginx.conf` ve `proxy.conf`'u ConfigMap'ten verip resolver'ı küme DNS'inin Service IP'sine (`kube-dns`) çevirin ve upstream'i FQDN yazın (`backend.<namespace>.svc.cluster.local:8000`) — nginx resolver'ı `search` alanı uygulamaz, çıplak `backend` adı çözülmez |
 | `backend` | Deployment, bir ya da daha çok kopya. Hazır olma yoklaması `GET /api/health`, canlılık yoklaması TCP |
 | `worker` | Deployment, **`replicas: 1`, `strategy: Recreate`**, Service yok. Varsayılan `RollingUpdate` tek kopyada yenisini eskisi ölmeden başlatır; `Recreate` de elle silinen pod'da "en fazla bir" garantisi vermez. İkisi de güvenlidir, yalnızca saatlik sayaç bir iş aşabilir ([ADR-062](decisions/062-is-kirasi-ve-yarida-kalan-is.md)). Canlılık yoklaması `exec: worker-health`. `terminationGracePeriodSeconds` 30'un altına inmesin |
 | tek seferlik `migrate` servisi | Job; sahip rolünün Secret'ı yalnızca burada. Servisler şema eskiyse çıkıp yeniden dener, sıralama gerekmez |
@@ -110,6 +110,8 @@ Dört topolojide de imajlar ve `compose.yaml` aynıdır; B ve C'de aynı dosyada
 | CA sertifikası dosyası | ConfigMap volume |
 | `/tmp` | `readOnlyRootFilesystem: true` ise `emptyDir` |
 | `stop_grace_period: 30s` | varsayılan zaten 30 sn |
+
+Eşleme tek node'lu bir kind kümesinde bir kez sınandı (N-14, 2026-10-02): `k8s-lab/opensicil.yaml` + `migrate-job.yaml` tablonun birebir karşılığıdır ve `scripts/k8s-lab.sh` onu uygulayıp kabul ölçütlerini (backend iki kopya, worker tek kopya; Job bitmeden servisler hazır olmuyor; worker pod'u silinince yenisi kuyruğu sürdürüyor) kontrol eder. Bunlar doğrulama örneğidir, ürün bileşeni değil: chart yayımlanmaz, kurum kendi Ingress/sır/ağ tercihine göre yazar. Labda Ingress yerine `port-forward` kullanıldı; Secret'lar servis başına ayrı (`db-owner` ve `migrate-env` yalnızca Job'da), ortak ayarlar tek ConfigMap'te.
 
 ### Kubernetes'e özel ön koşullar
 

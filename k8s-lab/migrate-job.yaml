@@ -1,0 +1,20 @@
+# Aynı backend imajının `migrate` alt komutu, şema sahibi rolüyle tek seferlik Job
+# (ADR-015, ADR-061 madde 4). Sahip rolünün sırrı yalnızca bu Job'da (migrate-env).
+# Veritabanı henüz yoksa süreç sıfır olmayan kodla çıkar, Job yeniden dener.
+apiVersion: batch/v1
+kind: Job
+metadata: { name: migrate }
+spec:
+  backoffLimit: 20
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: migrate
+          image: opensicil-backend:latest
+          imagePullPolicy: Never
+          args: ["migrate"]
+          envFrom: [{ secretRef: { name: migrate-env } }]
+          securityContext: { readOnlyRootFilesystem: true, allowPrivilegeEscalation: false }
+          volumeMounts: [{ name: tmp, mountPath: /tmp }]
+      volumes: [{ name: tmp, emptyDir: {} }]
