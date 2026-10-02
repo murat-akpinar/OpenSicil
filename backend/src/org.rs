@@ -585,6 +585,9 @@ pub struct DepartmentRow {
     /// Alt agac dahil silinmemis kimlik sayisi — `affected_identities`'in
     /// departman kuralinin (`down` CTE) saydigi kume.
     pub people: i64,
+    /// Kardeslerinin sonuncusu mu: agacin dikey kilavuz cizgisi burada biter
+    /// (ADR-119 B.7), yoksa cizgi dalin altindan bosluga sarkiyor.
+    pub last_sibling: bool,
 }
 
 // Agac, kokten yapraga; ayni seviyede ada gore (recursive CTE, ADR-017).
@@ -619,7 +622,7 @@ pub async fn list_departments(pool: &PgPool) -> Result<Vec<DepartmentRow>, sqlx:
     .bind(MAX_DEPTH)
     .fetch_all(pool)
     .await?;
-    Ok(rows
+    let mut rows: Vec<DepartmentRow> = rows
         .into_iter()
         .map(
             |(id, slug, name, code, depth, entitlements, people)| DepartmentRow {
@@ -631,9 +634,39 @@ pub async fn list_departments(pool: &PgPool) -> Result<Vec<DepartmentRow>, sqlx:
                 depth,
                 entitlements,
                 people,
+                last_sibling: false,
             },
         )
-        .collect())
+        .collect();
+    mark_last_siblings(&mut rows);
+    Ok(rows)
+}
+
+/// Siralanmis agacta bir satir, kendi derinliginde kendisinden sonra ve
+/// ustune donmeden baska satir yoksa son kardestir. Tek geriye donuk gecis:
+/// her derinlik icin "daha sonra ayni derinlikte satir gordum mu" tutulur ve
+/// daha sig bir satira inilince daha derin isaretler temizlenir.
+fn mark_last_siblings(rows: &mut [DepartmentRow]) {
+    let mut seen: Vec<bool> = Vec::new();
+    for row in rows.iter_mut().rev() {
+        let depth = row.depth.max(1) as usize;
+        if seen.len() < depth {
+            seen.resize(depth, false);
+        }
+        row.last_sibling = !seen[depth - 1];
+        seen[depth - 1] = true;
+        seen.truncate(depth);
+    }
+}
+
+/// Departman sayfasinin ozet kutulari (ADR-119 B.7): toplam departman, agactaki
+/// toplam kisi ve bos departman sayisi. Kisi sayisi alt agac dahil geldigi icin
+/// butun satirlar toplanamaz — kokler birbirinden ayrik, yalnizca onlar toplanir.
+/// Departmani olmayan kimlik agacta hic yok, bu sayiya da girmez.
+pub fn department_summary(rows: &[DepartmentRow]) -> (i64, i64, i64) {
+    let people = rows.iter().filter(|d| d.depth == 1).map(|d| d.people).sum();
+    let empty = rows.iter().filter(|d| d.people == 0).count() as i64;
+    (rows.len() as i64, people, empty)
 }
 
 pub async fn create_department(
@@ -1067,6 +1100,57 @@ mod tests {
             ["Ogrenci", "Ogretmen", "Asistan", "Zumrut", "Bos"],
             "kisi sayisi azalan, esitlikte ad artan"
         );
+    }
+
+    /// ADR-119 B.7: kilavuz cizgisi son kardeste biter, ozet kutulari agacin
+    /// kendi sayilarini soyler. Kisi sayisi alt agac dahil geldigi icin butun
+    /// satirlar toplanamaz — yalnizca birbirinden ayrik kokler toplanir.
+    #[test]
+    fn the_tree_marks_last_siblings_and_sums_only_the_roots() {
+        let dept = |name: &str, depth: i64, people: i64| DepartmentRow {
+            id: 0,
+            slug: name.to_string(),
+            name: name.to_string(),
+            code: String::new(),
+            indent: String::new(),
+            depth,
+            entitlements: 0,
+            people,
+            last_sibling: false,
+        };
+        //  Hogwarts(1)           → tek kok, son kardes
+        //    Teachers(2)         → kardesi Houses var, son degil
+        //      Charms(3)         → son kardes
+        //    Houses(2)           → son kardes
+        //      Hufflepuff(3)     → kardesi Ravenclaw var, son degil
+        //      Ravenclaw(3)      → son kardes
+        let mut rows = vec![
+            dept("Hogwarts", 1, 7),
+            dept("Teachers", 2, 2),
+            dept("Charms", 3, 1),
+            dept("Houses", 2, 5),
+            dept("Hufflepuff", 3, 0),
+            dept("Ravenclaw", 3, 2),
+        ];
+        mark_last_siblings(&mut rows);
+        let marks: Vec<(&str, bool)> = rows
+            .iter()
+            .map(|d| (d.name.as_str(), d.last_sibling))
+            .collect();
+        assert_eq!(
+            marks,
+            [
+                ("Hogwarts", true),
+                ("Teachers", false),
+                ("Charms", true),
+                ("Houses", true),
+                ("Hufflepuff", false),
+                ("Ravenclaw", true),
+            ]
+        );
+        // Toplam kisi kokten okunur (7); satirlarin toplami 17 olurdu
+        assert_eq!(department_summary(&rows), (6, 7, 1));
+        assert_eq!(department_summary(&[]), (0, 0, 0));
     }
 
     /// Bos bolum de doner: ekranda tur gorunur kalir, sayi sifir.

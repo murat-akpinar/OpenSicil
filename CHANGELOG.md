@@ -163,4 +163,5 @@
 - Personel listesinde departman/rol filtresi ve sıralanabilir kolonlar
 - Halka grafiğinin dilimleri arasına boşluk
 - Roller sayfası tür renkli bölümler ve kart ızgarası
+- Departman ağacı seviye renkli tek parça satır şeridi
 

@@ -48,15 +48,15 @@
 </div>
 {% else %}
 {# ADR-119 A.7: tur basina ozet kutusu, kendi renginde; capa ilgili bolume kaydirir #}
-<div class="role-sum">
+<div class="sum-row">
   {% for s in sections %}
-  <a class="role-sum-box role-kind--{{ s.kind }}" href="#role-{{ s.kind }}">
-    <span class="ico-tile role-tile"><i class="ico ico-key" aria-hidden="true"></i></span>
+  <a class="sum-box role-kind--{{ s.kind }}" href="#role-{{ s.kind }}">
+    <span class="ico-tile tile-tone"><i class="ico ico-key" aria-hidden="true"></i></span>
     <span class="min-w-0 flex-1">
-      <span class="role-sum-t">{{ lang.key("rolekind", s.kind) }} {{ lang.t("roles.role_word") }}</span>
-      <span class="role-sum-h">{{ lang.t1(s.people_key, s.people) }}</span>
+      <span class="sum-t">{{ lang.key("rolekind", s.kind) }} {{ lang.t("roles.role_word") }}</span>
+      <span class="sum-h">{{ lang.t1(s.people_key, s.people) }}</span>
     </span>
-    <span class="role-sum-n">{{ s.roles.len() }}</span>
+    <span class="sum-n">{{ s.roles.len() }}</span>
   </a>
   {% endfor %}
 </div>
@@ -66,7 +66,7 @@
 {% for s in sections %}
 <section class="card mb-6 role-sec role-kind--{{ s.kind }}" id="role-{{ s.kind }}">
   <div class="card-head">
-    <span class="ico-tile role-tile"><i class="ico ico-key" aria-hidden="true"></i></span>
+    <span class="ico-tile tile-tone"><i class="ico ico-key" aria-hidden="true"></i></span>
     <div class="min-w-0 flex-1">
       <h2 class="h2">{{ lang.key("rolekind", s.kind) }} {{ lang.t("roles.role_word") }}</h2>
       <p class="hint">{{ lang.key("rolekind_hint", s.kind) }}</p>
@@ -90,7 +90,7 @@
   </div>
   {% if s.roles.is_empty() %}
   <div class="empty">
-    <span class="ico-tile ico-tile-lg role-tile"><i class="ico ico-key" aria-hidden="true"></i></span>
+    <span class="ico-tile ico-tile-lg tile-tone"><i class="ico ico-key" aria-hidden="true"></i></span>
     {# Turun aciklamasi bolum basliginda zaten duruyor, burada tekrar edilmez #}
     <p class="empty-title">{{ lang.t("roles.section_empty") }}</p>
     {% if can_edit %}

@@ -869,13 +869,13 @@
     @apply pointer-events-none absolute inset-y-0 left-0 w-[3px];
     background: linear-gradient(to bottom, var(--rc), transparent);
   }
-  .role-tile {
+  .tile-tone {
     @apply size-10 rounded-xl;
     color: var(--rc);
     background-color: color-mix(in srgb, var(--rc) 18%, transparent);
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--rc) 40%, transparent);
   }
-  .ico-tile-lg.role-tile {
+  .ico-tile-lg.tile-tone {
     @apply size-12 rounded-2xl text-xl;
   }
   .role-badge {
@@ -884,28 +884,41 @@
     background-color: color-mix(in srgb, var(--rc) 16%, transparent);
   }
 
-  /* Özet kutuları: sayıyı söyler ve `#role-<tür>` çapasıyla bölüme kaydırır */
-  .role-sum {
+  /* Kutunun tonu: `--rc` hangi rengi tutuyorsa ikon karesi, sayı ve hover
+     kenarlığı ondan okur. Rol bölümü tonu türden alıyor, departman özeti
+     aşağıdaki sınıflardan — ortak yardımcı, iki sayfada da aynı kutu. */
+  .tone-accent {
+    --rc: var(--ctp-accent);
+  }
+  .tone-info {
+    --rc: var(--ctp-info);
+  }
+  .tone-dim {
+    --rc: var(--ctp-accent-dim);
+  }
+
+  /* Özet kutuları: sayıyı söyler, bağlantıysa hedefine kaydırır */
+  .sum-row {
     @apply mb-6 grid gap-3 sm:grid-cols-3;
   }
-  .role-sum-box {
+  .sum-box {
     @apply flex items-center gap-3 rounded-2xl border border-line bg-card px-4 py-3 no-underline;
     box-shadow: var(--ctp-shadow-sm);
     transition:
       transform 0.15s,
       border-color 0.15s;
   }
-  .role-sum-box:hover {
+  a.sum-box:hover {
     transform: translateY(-2px);
     border-color: color-mix(in srgb, var(--rc) 45%, transparent);
   }
-  .role-sum-t {
+  .sum-t {
     @apply block truncate text-sm font-bold text-fg;
   }
-  .role-sum-h {
+  .sum-h {
     @apply block text-xs text-fg-faint;
   }
-  .role-sum-n {
+  .sum-n {
     @apply shrink-0 text-2xl font-extrabold tabular-nums;
     color: var(--rc);
   }
@@ -1015,6 +1028,24 @@
   .role-card[hidden] {
     display: none;
   }
+
+  /* Basılı kalan hayalet düğme ("Boşları gizle"): durumu `aria-pressed` söylüyor,
+     bu sınıf onu gözle de gösteriyor. */
+  .btn-on {
+    border-color: color-mix(in srgb, var(--ctp-accent) 45%, transparent);
+    background-color: var(--ctp-accent-soft);
+    color: var(--ctp-accent);
+  }
+
+  /* Ağaç araç çubuğu: dar ekranda kendi satırına iner (rol araç çubuğuyla
+     aynı sebep — `shrink-0` başlık metnini sıkıştırıyor). */
+  .tree-tools {
+    @apply flex w-full flex-wrap items-center justify-end gap-1.5 sm:w-auto sm:shrink-0;
+  }
+  .card-head:has(.tree-tools) {
+    @apply flex-wrap;
+  }
+
 
   /* --- gösterge paneli (ADR-076, ADR-096 madde 3) ---
      Grafikler native CSS: çubuk yüksekliği ve dağılım çizgisi genişliği `--v`
@@ -1936,6 +1967,130 @@
   /* Okun yeri sabit: alt dalı olmayan satır da aynı girintiden başlar */
   .tree-spacer {
     @apply inline-block size-5 shrink-0;
+  }
+
+  /* --- Departman ağacı (ADR-119 B) ---
+     Seviye rengi `--dc`den gelir; satır tek parça yuvarlak şerit. */
+  .dept-tree {
+    border-collapse: separate;
+    border-spacing: 0 4px;
+  }
+  .dept-tree tbody tr {
+    --dc: var(--ctp-accent-dim);
+  }
+  .dept-tree tbody tr[data-depth="1"] {
+    --dc: var(--ctp-accent);
+  }
+  .dept-tree tbody tr[data-depth="2"] {
+    --dc: var(--ctp-info);
+  }
+  /* Zemin hücrelere aynı değerle veriliyor: `<tr>`ye `border-radius` hiçbir
+     tarayıcıda uygulanmıyor, köşe ancak ilk/son hücreden çıkıyor. Yatay
+     `border-spacing` sıfır olduğu için hücreler bitişik — ton farkı ya da ek
+     yeri görünmüyor, satır tek şerit okunuyor. */
+  .dept-tree td {
+    @apply border-b-0 px-3 py-2.5 align-middle;
+    background-color: transparent;
+  }
+  .dept-tree td:first-child {
+    @apply rounded-l-xl;
+  }
+  .dept-tree td:last-child {
+    @apply rounded-r-xl;
+  }
+  .dept-tree tbody tr[data-depth="1"] td {
+    @apply py-3.5;
+    background-color: color-mix(in srgb, var(--dc) 13%, transparent);
+  }
+  .dept-tree tbody tr[data-depth="2"] td {
+    background-color: color-mix(in srgb, var(--dc) 6%, transparent);
+  }
+  .dept-tree tbody tr:hover td {
+    background-color: color-mix(in srgb, var(--dc) 9%, transparent);
+  }
+  /* Başlık: zemin rengi sayfanın kendi zemini — yapışkan başlığın altından
+     satır geçmesin diye opak olmak zorunda (ADR-119 B.6). */
+  .dept-tree th {
+    @apply border-b-0;
+    /* Kartin ekrandaki rengi = opak sayfa zemini + yari saydam kart ortusu.
+       Tek renk yazmak basligi kartin geri kalanindan koyu/acik gosteriyordu. */
+    background-color: var(--ctp-bg);
+    background-image: linear-gradient(var(--ctp-card), var(--ctp-card));
+    color: var(--ctp-fg-faint);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .dept-name {
+    @apply text-sm no-underline;
+    color: var(--ctp-fg-dim);
+    font-weight: 500;
+  }
+  .dept-tree tbody tr[data-depth="1"] .dept-name {
+    @apply text-base text-fg;
+    font-weight: 700;
+  }
+  .dept-tree tbody tr[data-depth="2"] .dept-name {
+    @apply text-fg;
+    font-weight: 650;
+  }
+  /* Adın önündeki seviye noktası; ilk iki seviyede haleli ve bir tık büyük */
+  .dept-dot {
+    @apply inline-block shrink-0 rounded-full;
+    width: 6px;
+    height: 6px;
+    background-color: var(--dc);
+  }
+  .dept-tree tbody tr[data-depth="1"] .dept-dot,
+  .dept-tree tbody tr[data-depth="2"] .dept-dot {
+    width: 8px;
+    height: 8px;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--dc) 22%, transparent);
+  }
+  .dept-tree .code {
+    @apply rounded-full;
+    color: var(--dc);
+    background-color: color-mix(in srgb, var(--dc) 13%, transparent);
+    border: 1px solid color-mix(in srgb, var(--dc) 28%, transparent);
+    font-size: 10.5px;
+    letter-spacing: 0.04em;
+  }
+  .dept-tree .meter-fill {
+    background-color: var(--dc);
+  }
+  /* Sıfırda yalnızca metin solar: `opacity`yi hücreye vermek satırın zeminini
+     de soldururdu, şerit kesik görünürdü. */
+  .dept-tree td.zero {
+    @apply font-normal;
+  }
+  .dept-tree td.zero .num-v {
+    opacity: 0.35;
+  }
+  .dept-tree td.zero .meter-thin {
+    opacity: 0.4;
+  }
+  .num-unit {
+    @apply ml-1 text-xs font-normal text-fg-faint;
+  }
+  /* Kılavuz çizgisi son kardeşte yarıda biter, yoksa dalın altından boşluğa
+     sarkıyor (ADR-119 B.7). */
+  .tree-last {
+    @apply relative;
+    border-left-color: transparent;
+  }
+  .tree-last::before {
+    content: "";
+    @apply absolute top-0 w-px;
+    left: -1px;
+    height: 50%;
+    background-color: var(--ctp-line);
+  }
+  /* Aramada eşleşen metin; renk değil zemin vurgular, kontrast bozulmasın */
+  .tbl mark {
+    @apply rounded-sm px-0.5 text-inherit;
+    background-color: color-mix(in srgb, var(--ctp-warn) 35%, transparent);
   }
 
   /* Yapışkan kaydet çubuğu (Ayarlar): uzun formda düğmeyi aramak gerekmesin */

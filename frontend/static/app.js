@@ -355,6 +355,25 @@
   // localStorage'da tutar. Derinlik `data-depth`ten gelir; bir satırın altları
   // kendisinden derin olan ardışık satırlardır (liste zaten ön sıralı geliyor).
   var TREE_KEY = "opensicil-tree-closed";
+  var EMPTY_KEY = "opensicil-tree-hide-empty";
+
+  // localStorage her yerde ayni iki satirla sarmalaniyor: gizli pencerede ve
+  // site verisi kapaliyken erisim hata atiyor, tercih yalnizca o sayfada kalir.
+  function stored_(key) {
+    try {
+      return localStorage.getItem(key);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function save_(key, value) {
+    try {
+      localStorage.setItem(key, value);
+    } catch (e) {
+      // saklanamadı: tercih yalnızca bu sayfa için geçerli
+    }
+  }
 
   function treeClosed() {
     try {
@@ -371,6 +390,7 @@
     }
     var rows = [].slice.call(table.querySelectorAll("tbody tr[data-depth]"));
     var closed = treeClosed();
+    var hideEmpty = stored_(EMPTY_KEY) === "1";
 
     function depth(row) {
       return parseInt(row.getAttribute("data-depth"), 10) || 0;
@@ -391,7 +411,9 @@
           continue;
         }
         hiddenUntil = -1;
-        rows[i].hidden = false;
+        // Kişi sayısı alt ağaç dahil geliyor: boş satırın altındakiler de boş,
+        // bu yüzden gizlemek kimseyi ağacın dışında bırakmıyor.
+        rows[i].hidden = hideEmpty && rows[i].hasAttribute("data-empty");
         if (closed[rows[i].getAttribute("data-key")]) {
           hiddenUntil = d;
         }
@@ -426,16 +448,76 @@
     }
     paint();
 
+    // Tumunu ac / kapat: alt dali olan her satirin anahtari yazilir (ADR-119 B.7)
+    var allButtons = document.querySelectorAll("[data-tree-all]");
+    for (var a = 0; a < allButtons.length; a++) {
+      allButtons[a].addEventListener("click", function () {
+        var close = this.getAttribute("data-tree-all") === "close";
+        closed = {};
+        if (close) {
+          for (var i = 0; i < rows.length; i++) {
+            if (children(i).length) {
+              closed[rows[i].getAttribute("data-key")] = true;
+            }
+          }
+        }
+        var toggles = table.querySelectorAll(".tree-toggle");
+        for (var t = 0; t < toggles.length; t++) {
+          toggles[t].setAttribute("aria-expanded", close ? "false" : "true");
+        }
+        save_(TREE_KEY, JSON.stringify(closed));
+        paint();
+      });
+    }
+
+    var emptyButton = document.querySelector("[data-tree-hide-empty]");
+    if (emptyButton) {
+      emptyButton.setAttribute("aria-pressed", hideEmpty ? "true" : "false");
+      emptyButton.classList.toggle("btn-on", hideEmpty);
+      emptyButton.addEventListener("click", function () {
+        hideEmpty = !hideEmpty;
+        this.setAttribute("aria-pressed", hideEmpty ? "true" : "false");
+        this.classList.toggle("btn-on", hideEmpty);
+        save_(EMPTY_KEY, hideEmpty ? "1" : "0");
+        paint();
+      });
+    }
+
     // Ağaçta arama: eşleşen satır ve bütün üstleri kalır, gerisi gizlenir.
     var filter = document.querySelector('[data-tree-filter="' + table.id + '"]');
     if (!filter) {
       return;
     }
+    // Eslesen metni vurgular. Metin yalnizca `textContent` ile yazilir;
+    // `innerHTML` departman adini HTML olarak yorumlardi.
+    function highlight(row, needle) {
+      var link = row.querySelector(".dept-name");
+      if (!link) {
+        return;
+      }
+      var full = link.getAttribute("data-name");
+      if (full === null) {
+        full = link.textContent;
+        link.setAttribute("data-name", full);
+      }
+      var at = needle ? full.toLocaleLowerCase("tr").indexOf(needle) : -1;
+      link.textContent = "";
+      if (at < 0) {
+        link.textContent = full;
+        return;
+      }
+      link.appendChild(document.createTextNode(full.slice(0, at)));
+      var hit = document.createElement("mark");
+      hit.textContent = full.slice(at, at + needle.length);
+      link.appendChild(hit);
+      link.appendChild(document.createTextNode(full.slice(at + needle.length)));
+    }
+
     filter.addEventListener("input", function () {
       var needle = filter.value.trim().toLocaleLowerCase("tr");
       if (!needle) {
         for (var i = 0; i < rows.length; i++) {
-          rows[i].hidden = false;
+          highlight(rows[i], "");
         }
         paint();
         return;
@@ -457,8 +539,10 @@
           }
         }
       }
+      // Eslesmenin ustleri de kaldigi icin kapali dal aramada acik davranir
       for (var i = 0; i < rows.length; i++) {
         rows[i].hidden = !keep[i];
+        highlight(rows[i], needle);
       }
     });
   }

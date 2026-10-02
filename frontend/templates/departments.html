@@ -45,22 +45,57 @@
   <p class="empty-hint">{{ lang.t("departments.empty_hint") }}</p>
 </div>
 {% else %}
+{# ADR-119 B.7: agacin kendi sayilari. Kisi alt agac dahil geldigi icin
+   `department_summary` yalnizca kokleri topluyor, satirlari degil #}
+<div class="sum-row">
+  <div class="sum-box tone-accent">
+    <span class="ico-tile tile-tone"><i class="ico ico-sitemap" aria-hidden="true"></i></span>
+    <span class="min-w-0 flex-1">
+      <span class="sum-t">{{ lang.t("nav.departments") }}</span>
+      <span class="sum-h">{{ lang.t("departments.sum_total_hint") }}</span>
+    </span>
+    <span class="sum-n">{{ total }}</span>
+  </div>
+  <div class="sum-box tone-info">
+    <span class="ico-tile tile-tone"><i class="ico ico-users" aria-hidden="true"></i></span>
+    <span class="min-w-0 flex-1">
+      <span class="sum-t">{{ lang.t("departments.sum_people") }}</span>
+      <span class="sum-h">{{ lang.t("departments.sum_people_hint") }}</span>
+    </span>
+    <span class="sum-n">{{ people }}</span>
+  </div>
+  <div class="sum-box tone-dim">
+    <span class="ico-tile tile-tone"><i class="ico ico-inbox" aria-hidden="true"></i></span>
+    <span class="min-w-0 flex-1">
+      <span class="sum-t">{{ lang.t("departments.sum_empty") }}</span>
+      <span class="sum-h">{{ lang.t("departments.sum_empty_hint") }}</span>
+    </span>
+    <span class="sum-n">{{ empty }}</span>
+  </div>
+</div>
+
 <section class="card">
   <div class="card-head">
-    <span class="ico-tile"><i class="ico ico-sitemap" aria-hidden="true"></i></span>
+    <span class="ico-tile tile-tone tone-accent"><i class="ico ico-sitemap" aria-hidden="true"></i></span>
     <div class="min-w-0 flex-1">
       <h2 class="h2">{{ lang.t("departments.tree") }}</h2>
       <p class="hint">{{ lang.t("departments.tree_hint") }}</p>
     </div>
-    {# Agac icinde arama: app.js satirlari gizler/gosterir, sunucuya istek gitmez #}
-    <span class="search w-full sm:w-64">
-      <i class="ico ico-search" aria-hidden="true"></i>
-      <input class="input" type="search" id="tree-filter" data-tree-filter="dept-tree"
-             placeholder="{{ lang.t("departments.filter") }}" aria-label="{{ lang.t("departments.filter") }}">
+    {# Agac icinde arama ve toplu ac/kapa: app.js satirlari gizler/gosterir,
+       sunucuya istek gitmez. Satir ici `onclick` CSP'de yasak, baglama app.js'te #}
+    <span class="tree-tools">
+      <button class="btn btn-ghost btn-sm" type="button" data-tree-all="open">{{ lang.t("departments.expand_all") }}</button>
+      <button class="btn btn-ghost btn-sm" type="button" data-tree-all="close">{{ lang.t("departments.collapse_all") }}</button>
+      <button class="btn btn-ghost btn-sm" type="button" data-tree-hide-empty aria-pressed="false">{{ lang.t("departments.hide_empty") }}</button>
+      <span class="search w-full sm:w-56">
+        <i class="ico ico-search" aria-hidden="true"></i>
+        <input class="input" type="search" id="tree-filter" data-tree-filter="dept-tree"
+               placeholder="{{ lang.t("departments.filter") }}" aria-label="{{ lang.t("departments.filter") }}">
+      </span>
     </span>
   </div>
   <div class="tbl-page">
-    <table class="tbl" id="dept-tree">
+    <table class="tbl dept-tree" id="dept-tree">
       <thead><tr>
         <th>{{ lang.t("field.name") }}</th>
         <th>{{ lang.t("field.code") }}</th>
@@ -70,20 +105,23 @@
       <tbody>
       {# Girinti CSS'ten (`tree-d<derinlik>`): satir ici stil CSP'de yasak.
          `data-depth`: app.js ac/kapa ve arama icin derinligi buradan okur,
-         alt dali olan satira ok basar ve durumu localStorage'da tutar #}
+         alt dali olan satira ok basar ve durumu localStorage'da tutar.
+         `data-empty`: "bos departmanlari gizle" dugmesi bunu suzer — kisi
+         sayisi alt agac dahil oldugu icin bos satirin altindakiler de bos #}
       {% for d in departments %}
-        <tr data-depth="{{ d.depth }}" data-key="{{ d.key() }}">
+        <tr data-depth="{{ d.depth }}" data-key="{{ d.key() }}"{% if d.people == 0 %} data-empty{% endif %}>
           <td>
-            <span class="tree-d{{ d.depth }}">
+            <span class="tree-d{{ d.depth }}{% if d.last_sibling %} tree-last{% endif %}">
               <span class="flex items-center gap-1.5">
                 <span class="tree-spacer" data-tree-slot></span>
-                <a class="link" href="/departments/{{ d.key() }}">{{ d.name }}</a>
+                <span class="dept-dot" aria-hidden="true"></span>
+                <a class="dept-name" href="/departments/{{ d.key() }}">{{ d.name }}</a>
               </span>
             </span>
           </td>
           <td>{% if d.code.is_empty() %}<span class="muted">—</span>{% else %}<span class="code">{{ d.code }}</span>{% endif %}</td>
-          <td class="num">{{ d.entitlements }}</td>
-          <td class="num"><span class="block tabular-nums">{{ d.people }}</span><span class="meter-thin" data-ratio></span></td>
+          <td class="num"><span class="num-v">{{ d.entitlements }}</span>{% if d.entitlements > 0 %}<span class="num-unit">{{ lang.t("departments.group_unit") }}</span>{% endif %}</td>
+          <td class="num"><span class="num-v block tabular-nums">{{ d.people }}</span><span class="meter-thin" data-ratio="{{ d.people }}"></span></td>
         </tr>
       {% endfor %}
       </tbody>

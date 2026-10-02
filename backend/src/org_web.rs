@@ -500,6 +500,10 @@ struct DepartmentsTemplate {
     shell: Shell,
     lang: Lang,
     departments: Vec<org::DepartmentRow>,
+    /// Ozet kutulari (ADR-119 B.7): toplam departman, agactaki kisi, bos departman
+    total: i64,
+    people: i64,
+    empty: i64,
     error: String,
     can_edit: bool,
 }
@@ -1014,13 +1018,19 @@ async fn enqueue_affected(state: &AppState, owner: Owner, id: i64) {
 
 async fn render_departments(state: &AppState, op: &Operator, error: String) -> Response {
     match org::list_departments(&state.pool).await {
-        Ok(departments) => render(&DepartmentsTemplate {
-            lang: op.lang,
-            shell: Shell::of(op),
-            departments,
-            error,
-            can_edit: allowed(op, WRITE_AUTHORITIES),
-        }),
+        Ok(departments) => {
+            let (total, people, empty) = org::department_summary(&departments);
+            render(&DepartmentsTemplate {
+                lang: op.lang,
+                shell: Shell::of(op),
+                departments,
+                total,
+                people,
+                empty,
+                error,
+                can_edit: allowed(op, WRITE_AUTHORITIES),
+            })
+        }
         Err(e) => internal("departmanlar okunamadı", e),
     }
 }
@@ -1693,10 +1703,12 @@ mod tests {
             body_string(send("GET", "/departments".into(), String::new(), auditor.clone()).await)
                 .await;
         // Girinti artik `— ` on eki degil derinlik sinifi (CSP: satir ici stil yok).
-        // Sinif ile baglanti arasinda ac/kapa okunun yuvasi duruyor (ADR-114 C).
+        // Sinif ile baglanti arasinda ac/kapa okunun yuvasi ve seviye noktasi
+        // duruyor (ADR-114 C, ADR-119 B.3); "son kardes" isareti sinifa eklenir.
+        assert!(page.contains("<span class=\"tree-d2"), "{page}");
         assert!(
             page.contains(
-                "<span class=\"tree-d2\">\n              <span class=\"flex items-center gap-1.5\">\n                <span class=\"tree-spacer\" data-tree-slot></span>\n                <a class=\"link\" href=\"/departments/bt\">BT"
+                "<span class=\"tree-spacer\" data-tree-slot></span>\n                <span class=\"dept-dot\" aria-hidden=\"true\"></span>\n                <a class=\"dept-name\" href=\"/departments/bt\">BT"
             ),
             "{page}"
         );
