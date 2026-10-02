@@ -50,6 +50,49 @@
   {% endfor %}
 </div>
 
+{# "AD'de farklı" (ADR-112 madde 2): ikisi de dolu ve farklı alanlar. Boş alan
+   burada hiç çıkmaz — onu gece taraması onaysız doldurur (madde 1). Seçim ve
+   düğme yalnızca yetkide: auditor listeyi görür, eylemi göremez. #}
+{% if !ad_diffs.is_empty() %}
+<section class="card mb-6">
+  <div class="card-head">
+    <i class="ico ico-refresh card-icon" aria-hidden="true"></i>
+    <h2 class="h2">{{ lang.t("addiff.title") }}</h2>
+  </div>
+  <p class="sub mt-0 mb-4">{{ lang.t("addiff.hint") }}</p>
+  <form method="post" action="/targets/{{ target_id }}/reconcile/take-ad">
+    <div class="tbl-page card-tight mb-4">
+      <table class="tbl tbl-static">
+        <thead><tr>
+          {% if can_take %}<th class="w-8"><input type="checkbox" data-select-all="diff" aria-label="{{ lang.t("addiff.select_all") }}" title="{{ lang.t("addiff.select_all") }}"></th>{% endif %}
+          <th>{{ lang.t("field.full_name") }}</th>
+          <th>{{ lang.t("reconcile.account") }}</th>
+          <th>{{ lang.t("addiff.field") }}</th>
+          <th>{{ lang.t("addiff.ad_value") }}</th>
+          <th>{{ lang.t("addiff.our_value") }}</th>
+        </tr></thead>
+        <tbody>
+        {% for d in ad_diffs %}
+          <tr>
+            {% if can_take %}<td><input type="checkbox" name="diff" value="{{ d.key() }}" aria-label="{{ d.person }} — {{ lang.t(d.label()) }}"></td>{% endif %}
+            <td><a href="/identities/{{ d.identity_id }}">{{ d.person }}</a></td>
+            <td class="meta">{{ d.account_name }}</td>
+            <td>{{ lang.t(d.label()) }}</td>
+            {# `.mono` blok seviyesinde: `<td>`ye verilirse hücre satırdan düşer #}
+            <td><span class="mono">{{ d.ad }}</span></td>
+            <td><span class="mono">{{ d.ours }}</span></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if can_take %}
+    <button class="btn btn-primary" type="submit"><i class="ico ico-sign-in" aria-hidden="true"></i>{{ lang.t("addiff.submit") }}</button>
+    {% endif %}
+  </form>
+</section>
+{% endif %}
+
 {# Toplu sahiplenme: yonetilmeyen hesaplar secilip kimlige cevrilir.
    Hedefe yazma yok — baglantiyi worker `observed` modunda kurar. #}
 {% if can_adopt && !candidates.is_empty() %}

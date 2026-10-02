@@ -31,6 +31,8 @@ pub const FIRST_PASSWORD_REQUESTED: &str = "first_password.requested";
 pub const FIRST_PASSWORD_SHOWN: &str = "first_password.shown";
 /// F-13: mutabakat bulgusundan "yeniden uygula" — kimlik icin is acildi
 pub const RECONCILE_REAPPLY: &str = "reconcile.reapply";
+/// ADR-112 madde 2: operator AD'deki degeri kimlige aldi (once/sonra detayda)
+pub const IDENTITY_FIELD_TAKEN: &str = "identity.field_taken";
 /// ADR-024: saklamasi dolan hesabin silinmesi operator tarafindan onaylandi
 pub const ACCOUNT_DELETION_APPROVED: &str = "account.deletion_approved";
 // F-17 CSV ice aktarma (ADR-018): parti olaylari kimliksiz (kim, ne zaman, kac satir),
@@ -100,6 +102,24 @@ pub fn settings_change_detail(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Etiketi olmayan olay ekranda "?" basar (`Lang::key` yoksa "?" doner).
+    /// Liste elle tutulmaz, bu dosyanin kendi kaynagi taranir; worker'in yazdigi
+    /// ama buradan basilan olaylar `WORKER_EVENTS`'te durur.
+    #[test]
+    fn every_event_type_has_a_screen_label() {
+        const WORKER_EVENTS: [&str; 2] = ["identity.fields_filled", "identity.role_expired"];
+        let source = include_str!("audit.rs");
+        let declared = source
+            .lines()
+            .filter(|line| line.starts_with("pub const "))
+            .filter_map(|line| line.split('"').nth(1));
+        for event in declared.chain(WORKER_EVENTS) {
+            for lang in [crate::i18n::Lang::Tr, crate::i18n::Lang::En] {
+                assert_ne!(lang.key("event", event), "?", "event.{event} eksik");
+            }
+        }
+    }
 
     fn settings(host: &str, secret_set: bool) -> crate::settings::AppSettings {
         crate::settings::AppSettings {

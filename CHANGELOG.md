@@ -164,4 +164,5 @@
 - Halka grafiğinin dilimleri arasına boşluk
 - Roller sayfası tür renkli bölümler ve kart ızgarası
 - Departman ağacı seviye renkli tek parça satır şeridi
+- Mutabakatta "AD'de farklı" listesi ve toplu "AD'dekini al"
 

@@ -609,13 +609,18 @@ Kurallar:
   - Kabul: dolum kutucuğu bittikten **sonra** Eşlemeler ekranında satır silinip `employeeNumber` ile eklenir; iki öznitelik de izinli listede (`worker/src/mapping_rules.rs:19-20`)
   - Kabul: değişiklikten sonra Hogwarts hesaplarında sicil değeri silinmiyor (yönetime almadan önce `manage_diff` ile doğrulanır)
   - Not: varsayılan eşleme (`0011_attribute_mappings.sql`) değişmez — hangi özniteliğin sicil tuttuğu kurum kararıdır
-- [ ] "AD'de farklı" listesi + toplu "AD'dekini al" ([ADR-112](decisions/112-alan-bazli-yetki-ve-geri-dolum.md) madde 2)
+- [x] "AD'de farklı" listesi + toplu "AD'dekini al" ([ADR-112](decisions/112-alan-bazli-yetki-ve-geri-dolum.md) madde 2)
   - Kabul: mutabakat ekranında kişi · alan · AD'deki değer · OpenSicil'deki değer satırları; yalnızca ikisi de dolu ve farklı olanlar listelenir
   - Kabul: satırlar seçilip tek eylemle alınır; seçilmeyen satır değişmez, otomatik yazma hiç yok
   - Kabul: `auditor` listeyi görür, eylemi göremez (403)
   - Kabul: her alınan değer denetime önce/sonra olarak girer
   - Kabul: sicilde baştaki sıfırlar fark sayılmaz — `adoption::employee_number_matches` zaten bu kuralı yazıyor, liste onu çağırır
   - Not (2026-10-02 ölçümü, Hogwarts): dolumdan sonra tek gerçek fark Draco Malfoy'da — AD sicil `00000000009` ↔ OpenSicil `9` (baştaki sıfır, fark **değil**) ve AD cep `+447700900009` ↔ OpenSicil `+905000000000` (gerçek fark, listeye girecek tek satır). Cedric ve Cho'da fark yok
+  - Not (2026-10-03): `backend/src/ad_diff.rs` — `diffs` saf karşılaştırma, `list` bulgu ↔ kimlik çiftlerini tek sorguda okur, `take` seçilenleri yazar. **Değer formdan gelmez:** onay kutusu yalnızca `<kimlik>.<alan>` anahtarı taşır, yazılacak değer o anda veritabanındaki bulgudan okunur. Sicil tekilliği `NOT EXISTS` koşuluyla SQL'de duruyor — kontrol-sonra-yaz yarışı yok, `rows_affected() == 0` "atlandı" demek. Hedefe yazma ve iş açma yok: değer artık AD'dekiyle aynı, motorun göreceği fark kalmıyor. Baştaki sıfır kuralı `ad_diff.rs`'te **ikiz** olarak duruyor — `adoption::employee_number_matches` worker'da, iki crate bağımsız ([ADR-070](decisions/070-bagimsiz-crate-per-crate-komut.md)), fonksiyon paylaşılamıyor; `normalize.rs`/`desired_state.rs` ile aynı muamele
+  - Not (alan kümesi): liste **sicil** ve **cep** alanlarını kapsıyor — operatörün sahip olduğu, kayıt formunda da elle girilen iki alan. `username`/`email` bilerek dışarıda: ikisini OpenSicil üretiyor (ADR-011/022/042) ve silmede `used_names`'te yakılıyor, AD'dekini "almak" o kaydı atlardı — ayrı bir iş, gerekirse ayrı kutucuk
+  - Not (iki yan bulgu): `.mono` `@apply block` olduğu için `<td>`ye verilince hücre satırdan düşüyordu, değer `<span>`e alındı (ekran görüntüsünde yakalandı). Bir de `identity.fields_filled` (önceki kutucuk) ekranda "?" basıyordu — `Lang::key` olmayan anahtara "?" döner; iki olay etiketi de i18n'e girdi ve `audit.rs` artık kendi kaynağını tarayıp her olay sabitinin ekran karşılığı var mı diye bakan bir test taşıyor
+  - Doğrulama (2026-10-03): backend **229 test** (gerçek Postgres `--include-ignored` + lab Keycloak + lab Samba; +4: saf fark kuralı, telefon yedeği ve E.164 süzgeci, uçtan uca liste/403/alım/denetim, olay etiketi tamlığı), worker **102 test** (dokunulmadı, geriletme kontrolü), fmt + clippy `-D warnings` iki crate'te temiz, `cargo audit` yalnızca [ADR-073](decisions/073-cargo-audit-rsa-bulgusu-kabul-edilen-risk.md) `rsa` (worker 0), yeni migration ve yeni bağımlılık yok. `sh scripts/build-css.sh` (81849 bayt — **değişmedi**, yeni sınıf yok) ve `sh scripts/check-glyphs.sh` temiz; `sh scripts/ui-shots.sh tmp/ekran-goruntuleri/16-ad-farki` **"bulgu yok"**
+  - Doğrulama (**çalışan yığın + gerçek Hogwarts AD, tarayıcıda ölçüldü**): backend yeniden kuruldu; `/targets/1/reconcile` "AD'de farklı" bölümünde **tek satır** — Draco Malfoy · dmalfoy · Cep telefonu · AD `+447700900009` ↔ OpenSicil `+905000000000` (ölçüm notundaki beklentiyle birebir; baştaki sıfırlı sicil ve kimlikte boş olan alanlar listeye girmedi). Başlık kutusu satırı seçti (app.js `data-select-all="diff"` ile buluyor), "Seçilenlerde AD'dekini al" → "1 alan AD'deki değerle güncellendi.", liste boşaldı, konsolda JS hatası yok. Kişi sayfası (`/identities/4`) cebi `+447700900009` basıyor ve akışta **"AD'deki değer alındı"** satırı var; `audit_log` satırı `{"field": "mobile_phone", "from": "+905000000000", "to": "+447700900009", "source": "ad", "target_system_id": 1}`. İki temada da satır tek parça (ekran görüntüleri `tmp/ekran-goruntuleri/16-ad-farki`)
 - [ ] TC kimlik no: öznitelik ayarı + toplu dolum ([ADR-112](decisions/112-alan-bazli-yetki-ve-geri-dolum.md) madde 5, [ADR-106](decisions/106-sahiplenmede-ad-kisi-alanlari.md))
   - Kabul: `ad_national_id_attribute` Yapılandırma'da girilince tarama değeri okur; boşken hiç okunmaz (bugünkü davranış korunur)
   - Kabul: dolum backend toplu eylemidir — AEAD + blind index backend'de üretilir ([ADR-010](decisions/010-kisisel-veri-kimlik-no-telefon.md)); worker düz değeri kimliğe yazmaz
@@ -626,6 +631,8 @@ Kurallar:
   - Kabul: ayrılış formunda serbest metin `departure_note`; `description` eşleme satırı `template` ile `{end_date}` ve `{departure_note}` token'larını çözer
   - Kabul: varsayılan `description` eşleme satırı gelmez; `docs/09`'a örnek girer
   - Kabul: ayrılış işinden sonra lab/gerçek AD'de hesap pasif OU'da, devre dışı ve `description` dolu
+- [ ] `docs/03` ve `docs/09`'a "AD'den geri dolum" bölümü ([ADR-112](decisions/112-alan-bazli-yetki-ve-geri-dolum.md) Sonuçları)
+  - Kabul: hangi alan kendiliğinden dolar, hangisi karar bekler, denetimde ne görünür — iki ekran da anlatılır
 - [ ] Kapanış: güvenlik ve test
   - (1a'daki kapanış şablonunun aynısı)
 

@@ -80,6 +80,14 @@ impl Fields {
             .unwrap_or("")
     }
 
+    pub(crate) fn all(&self, key: &str) -> Vec<&str> {
+        self.0
+            .iter()
+            .filter(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
+            .collect()
+    }
+
     pub(crate) fn all_i64(&self, key: &str) -> Vec<i64> {
         self.0
             .iter()

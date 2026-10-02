@@ -155,7 +155,10 @@ pub fn routes() -> Router<AppState> {
         )
         // --- START FEATURE: bulk-adoption ---
         .route("/targets/{id}/reconcile/adopt", post(adopt))
-    // --- END FEATURE: bulk-adoption ---
+        // --- END FEATURE: bulk-adoption ---
+        // --- START FEATURE: ad-field-diff ---
+        .route("/targets/{id}/reconcile/take-ad", post(take_ad))
+    // --- END FEATURE: ad-field-diff ---
 }
 
 #[derive(Template)]
@@ -177,6 +180,9 @@ struct ReconcileTemplate {
     /// Formun varsayilan rolu: yer tutucu `Tanimsiz` (ADR-103 madde 4); yoksa bos
     default_role: String,
     today: String,
+    /// ADR-112 madde 2: "AD'de farkli" listesi; `auditor` gorur, alamaz
+    ad_diffs: Vec<crate::ad_diff::Diff>,
+    can_take: bool,
 }
 
 async fn render_page(
@@ -191,9 +197,10 @@ async fn render_page(
         crate::identity::form_options(&state.pool),
         crate::identity::today(&state.pool, &state.time_zone),
         crate::identity::placeholder_role_id(&state.pool),
+        crate::ad_diff::list(&state.pool, target),
     );
     match loaded {
-        Ok((v, candidates, options, today, placeholder)) => render(&ReconcileTemplate {
+        Ok((v, candidates, options, today, placeholder, ad_diffs)) => render(&ReconcileTemplate {
             lang: op.lang,
             shell: Shell::of(op),
             target_id: target,
@@ -207,6 +214,8 @@ async fn render_page(
             roles: options.roles,
             default_role: placeholder.map(|id| id.to_string()).unwrap_or_default(),
             today,
+            ad_diffs,
+            can_take: allowed(op, crate::ad_diff::AUTHORITIES),
         }),
         Err(e) => internal("mutabakat bulguları okunamadı", e),
     }
@@ -415,6 +424,60 @@ fn adoption_notice(lang: Lang, outcome: &crate::bulk_adopt::Outcome) -> Notice {
 }
 // --- END FEATURE: bulk-adoption ---
 
+// --- START FEATURE: ad-field-diff ---
+/// Secilen "AD'de farkli" satirlarinda AD'deki degeri kimlige yazar (ADR-112
+/// madde 2). Hedefe yazma yok, is acilmaz: deger artik AD'dekiyle ayni. Her
+/// alinan deger denetime once/sonra olarak girer (docs/07 "once/sonra").
+async fn take_ad(
+    OperatorSession(op): OperatorSession,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    axum::extract::Form(form): axum::extract::Form<Vec<(String, String)>>,
+) -> Response {
+    if !allowed(&op, crate::ad_diff::AUTHORITIES) {
+        return forbidden(op.lang);
+    }
+    let f = crate::org_web::Fields(form);
+    let outcome = match crate::ad_diff::take(&state.pool, id, &f.all("diff")).await {
+        Ok(outcome) => outcome,
+        Err(e) => return internal("AD'deki değer alınamadı", e),
+    };
+    for taken in &outcome.taken {
+        let detail = serde_json::json!({
+            "source": "ad", "target_system_id": id, "field": taken.field,
+            "from": taken.from, "to": taken.to,
+        });
+        audit_operator(
+            &state,
+            &op,
+            crate::audit::IDENTITY_FIELD_TAKEN,
+            Some(taken.identity_id),
+            detail,
+        )
+        .await;
+    }
+    render_page(&state, &op, id, take_notice(op.lang, &outcome)).await
+}
+
+fn take_notice(lang: Lang, outcome: &crate::ad_diff::Outcome) -> Notice {
+    let info = lang.t1("addiff.taken", outcome.taken.len());
+    if outcome.skipped.is_empty() {
+        return Notice::info(info);
+    }
+    // Atlananlar ad ve degeriyle yazilir: mukerrer sicil operatorun isi
+    Notice {
+        info,
+        error: lang.tn(
+            "addiff.skipped",
+            &[
+                &outcome.skipped.len().to_string(),
+                &outcome.skipped.join(", "),
+            ],
+        ),
+    }
+}
+// --- END FEATURE: ad-field-diff ---
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -534,6 +597,209 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(audited, 1);
+
+        drop(app);
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
+    /// ADR-112 madde 2: liste yalnizca ikisi de dolu ve **gercekten** farkli
+    /// alanlari basar, `auditor` okur ama alamaz, secilmeyen satir degismez ve
+    /// alinan deger denetime once/sonra girer. Mukerrer sicil yazilmaz.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn ad_diff_list_is_read_by_everyone_but_only_authority_takes_the_value() {
+        use axum::body::Body;
+        use axum::http::{header, Request, StatusCode};
+        use tower::ServiceExt;
+
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        let [ayse, ali] = crate::test_support::seed_two_identities(&pool).await;
+        let app = crate::web::routes()
+            .with_state(crate::web::test_state(pool.clone(), "https://localhost"));
+        let target: i64 = sqlx::query_scalar("SELECT id FROM target_systems WHERE kind = 'ad'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "UPDATE identities SET employee_number = CASE id WHEN $1 THEN '7' \
+             ELSE '00000000009' END, mobile_phone = CASE id WHEN $1 \
+             THEN '+905000000000' ELSE NULL END WHERE id IN ($1, $2)",
+        )
+        .bind(ayse)
+        .bind(ali)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let read_job: i64 = sqlx::query_scalar(
+            "INSERT INTO read_jobs (kind, target_system_id, requested_by) \
+             VALUES ('reconcile', $1, 'test') RETURNING id",
+        )
+        .bind(target)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        // Ayse: iki alanda da gercek fark. Ali: sicil bastaki sifir farkiyla ayni,
+        // cep kimlikte bos (dolumun isi) ve AD'deki deger sabit hat biciminde.
+        sqlx::query(
+            "INSERT INTO reconcile_findings (target_system_id, read_job_id, kind, external_id, \
+             account_name, identity_id, employee_number, mobile, telephone_number) VALUES \
+             ($1, $2, 'managed', 'g1', 'ayse.yilmaz', $3, '00000000009', '+447700900009', NULL), \
+             ($1, $2, 'observed', 'g2', 'ali.kaya', $4, '00000000009', NULL, '01632 960001')",
+        )
+        .bind(target)
+        .bind(read_job)
+        .bind(ayse)
+        .bind(ali)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let cookie = |authority: &'static str| {
+            let pool = pool.clone();
+            async move {
+                let operator = crate::operator_session::Operator {
+                    subject: "sub-x".to_string(),
+                    username: "ik.operatoru".to_string(),
+                    email: "ik@example.org".to_string(),
+                    authorities: vec![authority.to_string()],
+                    auth_source: crate::operator_session::AuthSource::Oidc,
+                    lang: crate::i18n::DEFAULT,
+                };
+                let token = crate::operator_session::create_session(&pool, &operator)
+                    .await
+                    .unwrap();
+                format!("{}={token}", crate::cookie::OPERATOR_SESSION_COOKIE_NAME)
+            }
+        };
+        let send = |method: &'static str, cookie: String, body: String| {
+            let app = app.clone();
+            async move {
+                let uri = match method {
+                    "POST" => format!("/targets/{target}/reconcile/take-ad"),
+                    _ => format!("/targets/{target}/reconcile"),
+                };
+                let r = app
+                    .oneshot(
+                        Request::builder()
+                            .method(method)
+                            .uri(uri)
+                            .header("content-type", "application/x-www-form-urlencoded")
+                            .header(header::COOKIE, cookie)
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                let status = r.status();
+                let bytes = axum::body::to_bytes(r.into_body(), usize::MAX)
+                    .await
+                    .unwrap();
+                (status, String::from_utf8(bytes.to_vec()).unwrap())
+            }
+        };
+        let phone_of = |id: i64| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_scalar::<_, Option<String>>(
+                    "SELECT mobile_phone FROM identities WHERE id = $1",
+                )
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+            }
+        };
+
+        // auditor listeyi gorur, secim kutusunu ve dugmeyi gormez
+        let (_, auditor) = send("GET", cookie("auditor").await, String::new()).await;
+        assert!(
+            auditor.contains("+447700900009"),
+            "AD'deki değer listede yok"
+        );
+        assert!(
+            auditor.contains("+905000000000"),
+            "bizdeki değer listede yok"
+        );
+        assert!(
+            !auditor.contains(r#"name="diff""#),
+            "auditor seçim kutusu görmez"
+        );
+        assert!(
+            !auditor.contains(crate::i18n::DEFAULT.t("addiff.submit")),
+            "auditor eylem düğmesi görmez"
+        );
+        // Ali hic listeye girmez: sicilde yalnizca bastaki sifir farki var,
+        // AD'deki sabit hat kimligin cep alanina yazilamaz
+        assert!(!auditor.contains("01632"), "yazılamayan numara listede");
+
+        let (_, hr_page) = send("GET", cookie("hr").await, String::new()).await;
+        assert!(
+            hr_page.contains(r#"data-select-all="diff""#),
+            "başlık kutusu yok"
+        );
+        assert!(
+            hr_page.contains(&format!(r#"value="{ayse}.mobile_phone""#)),
+            "satır kutusunun değeri kimlik+alan anahtarı değil"
+        );
+        // Tam iki satir: Ayse'nin iki alani. Ali hic girmez — sicilinde yalnizca
+        // bastaki sifir farki var, cebi kimlikte bos (onu dolum halleder).
+        assert_eq!(
+            hr_page.matches(r#"name="diff""#).count(),
+            2,
+            "listede olmaması gereken satır var"
+        );
+
+        // auditor yazamaz; 403 ve deger yerinde kalir
+        let body = format!("diff={ayse}.mobile_phone");
+        let (status, _) = send("POST", cookie("auditor").await, body.clone()).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(phone_of(ayse).await.as_deref(), Some("+905000000000"));
+
+        // hr yalnizca secili satiri alir; secilmeyen sicil degismez
+        let (status, _) = send("POST", cookie("hr").await, body).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(phone_of(ayse).await.as_deref(), Some("+447700900009"));
+        let employee: Option<String> =
+            sqlx::query_scalar("SELECT employee_number FROM identities WHERE id = $1")
+                .bind(ayse)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(employee.as_deref(), Some("7"), "seçilmeyen alan değişti");
+        let audited: (String, String, String) = sqlx::query_as(
+            "SELECT detail->>'field', detail->>'from', detail->>'to' FROM audit_log \
+             WHERE event_type = $1",
+        )
+        .bind(crate::audit::IDENTITY_FIELD_TAKEN)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            audited,
+            (
+                "mobile_phone".into(),
+                "+905000000000".into(),
+                "+447700900009".into()
+            )
+        );
+
+        // Sicil tekil: AD'deki deger Ali'de duruyor, yazilmaz ve atlandi denir
+        let (status, page) = send(
+            "POST",
+            cookie("hr").await,
+            format!("diff={ayse}.employee_number"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let employee: Option<String> =
+            sqlx::query_scalar("SELECT employee_number FROM identities WHERE id = $1")
+                .bind(ayse)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(employee.as_deref(), Some("7"), "mükerrer sicil yazıldı");
+        assert!(page.contains("atlandı"), "atlanan satır duyurulmadı");
 
         drop(app);
         drop(pool);
