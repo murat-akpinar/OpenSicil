@@ -186,6 +186,26 @@
     });
   }
 
+  // Yapışkan tablo başlığı üst barın altına oturmalı; üst barın yüksekliği
+  // sabit değil (dar ekranda iki satıra sarıyor), bu yüzden ölçülüp
+  // `--topbar-h`e yazılır. CSSOM'a yazmak CSP'ye takılmaz: yasak olan
+  // HTML'deki `style` özniteliği. Ölçüm başarısızsa CSS'teki yedek değer kalır.
+  function topbarHeight() {
+    var bar = document.querySelector(".topbar");
+    if (!bar) {
+      return;
+    }
+    function set() {
+      root.style.setProperty("--topbar-h", bar.offsetHeight + "px");
+    }
+    set();
+    if (window.ResizeObserver) {
+      new ResizeObserver(set).observe(bar);
+    } else {
+      window.addEventListener("resize", set);
+    }
+  }
+
   // Satırın tamamı tıklanabilir: satırdaki ilk bağlantı nereye gidiyorsa oraya.
   // Bağlantı, buton ve onay kutusu kendi işini yapar; metin seçmek engellenmez.
   function clickableRows() {
@@ -473,6 +493,7 @@
 
   document.addEventListener("DOMContentLoaded", function () {
     themeToggle();
+    topbarHeight();
     activeNav();
     navCollapse();
     navDrawer();

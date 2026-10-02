@@ -252,6 +252,20 @@
   html {
     color-scheme: light dark;
   }
+  /* Tarayıcının eski oklu kaydırma çubuğu temanın yanında yabancı duruyordu.
+     İki standart özellik yeter; `::-webkit-scrollbar` eklenmedi, desteklemeyen
+     tarayıcı kendi çubuğunu çizer ve hiçbir şey bozulmaz. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--ctp-surface) transparent;
+  }
+  /* Yapışkan tablo başlığı üst barın altına oturur. Gerçek yükseklik ekranda
+     ölçülür (dar ekranda üst bar iki satıra sarıyor); app.js `--topbar-h`i
+     CSSOM üzerinden yazar — CSP'nin yasakladığı şey HTML'deki `style`
+     özniteliği, CSSOM değil. JS yoksa buradaki yedek değer geçerli kalır. */
+  :root {
+    --topbar-h: 3.75rem;
+  }
   /* Elle tema seçimi tarayıcı widget'larını (onay kutusu, açılır liste, kaydırma çubuğu)
      da çevirmeli: aksi halde sistem koyuyken "light" seçen operatör siyah onay kutusu görür. */
   :root[data-theme="light"] {
@@ -1397,17 +1411,35 @@
     @apply w-full border-collapse text-sm;
   }
   .tbl th {
-    @apply sticky top-0 z-1 border-b border-line bg-card px-3 py-2.5 text-left text-xs
+    @apply sticky z-1 border-b border-line bg-card px-3 py-2.5 text-left text-xs
            font-bold tracking-wide text-fg-faint;
+    top: var(--topbar-h);
     -webkit-backdrop-filter: blur(18px) saturate(140%);
     backdrop-filter: blur(18px) saturate(140%);
   }
-  /* Yapışkan başlığın işe yaraması için tablonun kendi kaydırma kutusu olmalı:
-     `overflow-x`li bir sarmalayıcıda `top: 0` o kutuya göre çözülür ve kutu
-     içerik kadar uzun olduğu için başlık hiç yapışmaz. Uzun listeler bunu alır. */
+  /* Kendi kaydırma kutusundaki tabloda yapışkanlık o kutuya göre çözülür:
+     ofset üst bar değil kutunun kendi tepesi, yoksa başlık gövdenin içine iner. */
+  .tbl-scroll .tbl th {
+    top: 0;
+  }
+  @media (width < 48rem) {
+    .tbl-page .tbl th {
+      top: 0;
+    }
+  }
+  /* Yatay kaydırma kutusu. `max-height` yok: tablonun kendi içinde dikey
+     kaydırma, sayfanın kaydırma çubuğunun yanında ikinci bir çubuk çıkarıyordu
+     ve uzun listede operatör nerede olduğunu kaybediyordu — sayfa kayar.
+     Dar ekranda tablo gerçekten taşıyor (390px'te 486px isteyen tablo var),
+     bu yüzden yatay kutu duruyor. */
   .tbl-scroll {
-    @apply overflow-auto;
-    max-height: min(70vh, 44rem);
+    @apply overflow-x-auto;
+  }
+  /* Uzun liste sayfaları (departman ağacı, roller): geniş ekranda sarmalayıcı
+     kaydırma kutusu olmaktan çıkar, böylece sayfa kayar ve başlık üst barın
+     altına yapışır. Dar ekranda yine yatay kutu — tablo oraya sığmıyor. */
+  .tbl-page {
+    @apply overflow-x-auto md:overflow-visible;
   }
   .tbl td {
     @apply border-b border-line px-3 py-3.5 align-top;
