@@ -177,6 +177,12 @@
   a {
     color: var(--ctp-accent);
   }
+  /* Onay kutusu her yerde ayni boy ve metin satirina oturur: tarayici varsayilani
+     13px ve `margin: 3px 3.5px` idi, `align-top` hucrede kutu komsu hucrenin ilk
+     satirindan kayiyordu (bkz. `.tbl td`). */
+  input[type="checkbox"] {
+    @apply m-0 size-4 shrink-0 align-middle;
+  }
   :focus-visible {
     outline: 2px solid var(--ctp-accent);
     outline-offset: 2px;
@@ -849,8 +855,13 @@
   .hint {
     @apply mt-1.5 block text-xs text-fg-faint;
   }
+  /* Kutu ilk satira hizalanir: `items-center` uzun etiket iki satira sarinca
+     kutuyu iki satirin ortasina kaydiriyordu. mt-0.5, 16px kutuyu 20px satirda ortalar. */
   .check {
-    @apply flex items-center gap-2 text-sm;
+    @apply flex items-start gap-2 text-sm;
+  }
+  .check > input[type="checkbox"] {
+    @apply mt-0.5;
   }
   fieldset.box {
     @apply rounded-xl border border-line p-4;

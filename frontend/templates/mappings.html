@@ -49,7 +49,7 @@
   </div>
   <label class="check"><input type="checkbox" name="write_if_empty" value="1"> {{ lang.t("mappings.write_if_empty") }}</label>
   {% if can_sensitive %}
-  <label class="text-sm warn"><input type="checkbox" name="sensitive_ack" value="1"> {{ lang.t("mappings.sensitive_ack") }}</label>
+  <label class="check warn"><input type="checkbox" name="sensitive_ack" value="1"> {{ lang.t("mappings.sensitive_ack") }}</label>
   {% endif %}
   <button class="btn btn-primary col-span-3" type="submit">{{ lang.t("common.add") }}</button>
 </form>
