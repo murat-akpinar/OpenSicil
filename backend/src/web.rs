@@ -1071,7 +1071,9 @@ mod tests {
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         let body = body_string(response).await;
-        assert!(!body.contains("kayıtlı"));
+        // "kayıtlı" metni yapışkan kaydet çubuğunun notunda da geçiyor (ADR-114 C);
+        // aranan şey alanın yanındaki rozet, bu yüzden iddia rozetin işaretine bakar.
+        assert!(!body.contains("badge badge-ok"), "{body}");
 
         // Ayarlari sirlarla kaydet.
         let form = "ad_host=dc1.example.org&ad_bind_dn=CN%3Dsvc&ad_service_password=cok-gizli-ad&\

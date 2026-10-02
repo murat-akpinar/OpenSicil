@@ -19,6 +19,13 @@
   </div>
 </div>
 
+{# ADR-117: panelin sayac kartindan gelinmisse hangi pencerede olundugu yazar #}
+{% if !window_note.is_empty() %}
+<p class="alert alert-info">
+  <span class="alert-text">{{ window_note }}</span>
+  <a class="btn btn-sm" href="/identities">{{ lang.t("identities.unassigned_clear") }}</a>
+</p>
+{% endif %}
 {# ADR-103 madde 4: rolu atanmamis kisiler; filtre acikken kaldirma baglantisi #}
 {% if unassigned_only %}
 <p class="alert alert-info">{{ lang.t1("identities.unassigned_filter", total) }}

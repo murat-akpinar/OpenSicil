@@ -30,6 +30,7 @@
 - TC özniteliği kurulum ayarı olarak cevaplandı, Zimbra bölümü kullanıcı kararıyla beklemede
 - AD'den geri dolum ve ayrılışta silmeme kutucukları
 - AD'de farklı listesine sicil ve ölçüm notu
+- MAP'ten Inter satırları çıktı (ADR-116)
 
 ### Düzeltmeler
 
@@ -149,4 +150,5 @@
 - Mutabakat sonrası AD'den boş alan dolumu
 - Cam yüzeyli turkuaz tema ve daraltılabilir kenar menüsü
 - Gövde fontu Inter, monospace yalnızca veri alanlarında
+- Sayaç kartları kendi renginde, kıvılcım ve değişim rozetiyle
 

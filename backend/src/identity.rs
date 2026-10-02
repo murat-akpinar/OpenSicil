@@ -534,11 +534,24 @@ pub async fn search(
     with_state(pool, time_zone, rows).await
 }
 
-/// Personel listesinin sorgusu: arama, "rolu atanmamis" filtresi ve sayfa.
+/// Panelin sayac kartlarinin isaret ettigi pencere filtreleri (ADR-117).
+/// Deger izinli listeden gelir; baska bir metin filtre acmaz.
+pub const WINDOW_FILTERS: [&str; 3] = ["joined", "departed", "changed"];
+
+/// `?window=` degeri: yalnizca `WINDOW_FILTERS`tan biri, aksi halde filtre yok.
+pub fn window_filter(requested: Option<&str>) -> Option<&str> {
+    requested.filter(|w| WINDOW_FILTERS.contains(w))
+}
+
+/// Personel listesinin sorgusu: arama, "rolu atanmamis" filtresi, pencere ve sayfa.
 pub struct Listing<'a> {
     pub query: &'a str,
     /// ADR-103 madde 4: yalnizca yer tutucu (`Tanimsiz`) rolu tasiyanlar
     pub unassigned_only: bool,
+    /// ADR-117: panelin sayac kartindan gelen pencere (`WINDOW_FILTERS`), gun
+    /// sayisiyla birlikte. `None` = filtre yok.
+    pub window: Option<&'a str>,
+    pub window_days: i32,
     pub offset: i64,
     pub limit: i64,
 }
@@ -556,6 +569,44 @@ macro_rules! listed_order_page {
     };
 }
 
+/// Pencere filtresi (ADR-117): kosullar panelin `dashboard::totals` sorgusuyla
+/// ayni — kart "son 30 gunde 7 kayit" diyorsa liste de yedi satir gostermeli.
+/// Placeholder numaralari cagiran sorguya gore degisir (sayma sorgusunda $2'den,
+/// satir sorgusunda $4'ten baslar), bu yuzden parametre olarak verilir:
+/// `$w` pencere adi (NULL = filtre yok), `$tz` saat dilimi, `$d` gun sayisi,
+/// `$c` `identity.changed` olay turu.
+macro_rules! listed_where_window {
+    ($w:literal, $tz:literal, $d:literal, $c:literal) => {
+        concat!(
+            " AND (",
+            $w,
+            "::text IS NULL",
+            " OR (",
+            $w,
+            " = 'joined' AND i.start_date > (now() AT TIME ZONE ",
+            $tz,
+            ")::date - ",
+            $d,
+            "::int)",
+            " OR (",
+            $w,
+            " = 'departed' AND i.end_at IS NOT NULL AND i.end_at <= now()",
+            "      AND i.end_at > now() - make_interval(days => ",
+            $d,
+            "::int))",
+            " OR (",
+            $w,
+            " = 'changed' AND EXISTS (SELECT 1 FROM audit_log a",
+            "      WHERE a.identity_id = i.id AND a.event_type = ",
+            $c,
+            "      AND a.occurred_at > now() - make_interval(days => ",
+            $d,
+            "::int)))",
+            ")"
+        )
+    };
+}
+
 /// Personel sayfasinin bir sayfasi (`/identities`): toplam sayi + satirlar.
 /// Ust bardaki arama kutusu en fazla `RECENT_LIMIT` satir dondururken burada
 /// liste sayfalanir — 20.000 kimlikte (N-03) tek sayfada basmak olmazdi.
@@ -570,12 +621,14 @@ pub async fn page(
         false => (
             concat!(
                 "SELECT count(*) FROM identities i WHERE ",
-                listed_where_match!()
+                listed_where_match!(),
+                listed_where_window!("$2", "$3", "$4", "$5")
             ),
             concat!(
                 listed_select!(),
                 "WHERE ",
                 listed_where_match!(),
+                listed_where_window!("$4", "$5", "$6", "$7"),
                 listed_order_page!()
             ),
         ),
@@ -584,25 +637,35 @@ pub async fn page(
                 "SELECT count(*) FROM identities i ",
                 listed_join_placeholder!(),
                 "WHERE ",
-                listed_where_match!()
+                listed_where_match!(),
+                listed_where_window!("$2", "$3", "$4", "$5")
             ),
             concat!(
                 listed_select!(),
                 listed_join_placeholder!(),
                 "WHERE ",
                 listed_where_match!(),
+                listed_where_window!("$4", "$5", "$6", "$7"),
                 listed_order_page!()
             ),
         ),
     };
     let total: i64 = sqlx::query_scalar(count_sql)
         .bind(&pattern)
+        .bind(listing.window)
+        .bind(time_zone)
+        .bind(listing.window_days)
+        .bind(crate::audit::IDENTITY_CHANGED)
         .fetch_one(pool)
         .await?;
     let rows: Vec<ListedRow> = sqlx::query_as(rows_sql)
         .bind(&pattern)
         .bind(listing.limit)
         .bind(listing.offset)
+        .bind(listing.window)
+        .bind(time_zone)
+        .bind(listing.window_days)
+        .bind(crate::audit::IDENTITY_CHANGED)
         .fetch_all(pool)
         .await?;
     Ok((with_state(pool, time_zone, rows).await?, total))
@@ -1714,6 +1777,17 @@ mod tests {
         );
     }
 
+    /// ADR-117: pencere adi izinli listeden gelir; uydurma deger filtre acmaz.
+    #[test]
+    fn the_window_filter_accepts_only_listed_names() {
+        assert_eq!(window_filter(Some("joined")), Some("joined"));
+        assert_eq!(window_filter(Some("changed")), Some("changed"));
+        assert_eq!(window_filter(None), None);
+        for bad in ["", "JOINED", "1; DROP TABLE identities", "deleted"] {
+            assert_eq!(window_filter(Some(bad)), None, "{bad}");
+        }
+    }
+
     #[tokio::test]
     #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
     async fn the_personnel_page_searches_paginates_and_reports_the_total() {
@@ -1727,9 +1801,21 @@ mod tests {
             offset: i64,
             limit: i64,
         ) -> (Vec<Listed>, i64) {
+            windowed(pool, tz, q, None, offset, limit).await
+        }
+        async fn windowed(
+            pool: &PgPool,
+            tz: &str,
+            q: &str,
+            window: Option<&str>,
+            offset: i64,
+            limit: i64,
+        ) -> (Vec<Listed>, i64) {
             let listing = Listing {
                 query: q,
                 unassigned_only: false,
+                window,
+                window_days: crate::dashboard::WINDOW_DAYS,
                 offset,
                 limit,
             };
@@ -1760,6 +1846,35 @@ mod tests {
         // Joker karakter harf sayilir: `%` kimseyi getirmez
         let (none, total) = listed(&pool, tz, "%", 0, 50).await;
         assert!(none.is_empty());
+        assert_eq!(total, 0);
+
+        // ADR-117: panelin sayac kartlarindan gelen pencere filtreleri. Iki kisi
+        // de bugun ise girdi; biri 40 gun once girip bugun ayrildi.
+        sqlx::query(
+            "UPDATE identities SET start_date = current_date - 40, \
+                                   end_at = now() - interval '1 hour' \
+             WHERE surname = 'Kaya'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let (joined, total) = windowed(&pool, tz, "", Some("joined"), 0, 50).await;
+        assert_eq!(
+            (joined.len(), total),
+            (1, 1),
+            "pencerede yalnizca bugun giren"
+        );
+        assert_eq!(joined[0].name, "Ayşe Yılmaz");
+        let (left, total) = windowed(&pool, tz, "", Some("departed"), 0, 50).await;
+        assert_eq!((left.len(), total), (1, 1));
+        assert_eq!(left[0].name, "Ali Kaya");
+        // Degisiklik olayi olmayan kimse: liste bos, toplam sifir
+        let (changed, total) = windowed(&pool, tz, "", Some("changed"), 0, 50).await;
+        assert!(changed.is_empty());
+        assert_eq!(total, 0);
+        // Pencere arama kutusuyla birlikte calisir
+        let (both, total) = windowed(&pool, tz, "yılmaz", Some("departed"), 0, 50).await;
+        assert!(both.is_empty());
         assert_eq!(total, 0);
 
         drop(pool);

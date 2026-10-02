@@ -10,7 +10,7 @@
    `sh scripts/check-glyphs.sh` ile varlığı doğrulanmış kod noktaları).
 
    Tipografi ölçeği 12 / 14 / 16 / 20 / 28; sayılarda `tabular-nums`. Gövde fontu
-   değişmez (ADR-116): değişseydi `.ico` glyph'leri tofu kutusuna dönerdi. */
+   değişmez (ADR-117): değişseydi `.ico` glyph'leri tofu kutusuna dönerdi. */
 @import "tailwindcss";
 
 /* Tailwind'in kaynak taraması: bu dosya assets/ altında, şablonlar bir üstteki templates/;
@@ -67,6 +67,13 @@
   --chart-6: #047857;
   --chart-7: #c2410c;
   --chart-8: #475569;
+  /* Sayaç kartı renkleri (ADR-117): Catppuccin Latte karşılıkları. Peach
+     (#fe640b 2,9:1) ve yellow açık kartta 3:1'in altında kaldığı için bir ton
+     koyusu alındı; mauve/green/red Latte'nin kendisi. */
+  --stat-total: #8839ef;
+  --stat-joined: #40a02b;
+  --stat-left: #d20f39;
+  --stat-moved: #c2410c;
 }
 
 /* Sistem koyu tercihi; operatör elle "light" seçmediyse */
@@ -108,6 +115,11 @@
     --chart-6: #34d399;
     --chart-7: #fb923c;
     --chart-8: #94a3b8;
+    /* Sayaç kartı renkleri (ADR-117): Catppuccin Mocha */
+    --stat-total: #cba6f7;
+    --stat-joined: #a6e3a1;
+    --stat-left: #f38ba8;
+    --stat-moved: #fab387;
     --ctp-glow:
       radial-gradient(900px 600px at 10% -10%, rgba(20, 184, 166, 0.25), transparent 60%),
       radial-gradient(800px 600px at 100% 0%, rgba(59, 130, 246, 0.16), transparent 60%),
@@ -153,6 +165,11 @@
   --chart-6: #34d399;
   --chart-7: #fb923c;
   --chart-8: #94a3b8;
+  /* Sayaç kartı renkleri (ADR-117): Catppuccin Mocha */
+  --stat-total: #cba6f7;
+  --stat-joined: #a6e3a1;
+  --stat-left: #f38ba8;
+  --stat-moved: #fab387;
   --ctp-glow:
     radial-gradient(900px 600px at 10% -10%, rgba(20, 184, 166, 0.25), transparent 60%),
     radial-gradient(800px 600px at 100% 0%, rgba(59, 130, 246, 0.16), transparent 60%),
@@ -378,6 +395,12 @@
   }
   .ico-chevron-left::before {
     content: "\f053";
+  }
+  .ico-caret-up::before {
+    content: "\f0d8";
+  }
+  .ico-caret-down::before {
+    content: "\f0d7";
   }
 
   /* Yuvarlak köşeli ikon karesi: kart başlığı, liste satırı, boş durum */
@@ -869,60 +892,105 @@
     @apply flex flex-wrap items-center gap-2;
   }
 
-  /* Sayaç kutusu: her kart kendi renginde (ADR-114). Renk tek yerden gelir:
-     `--tone` yazı/çizgi, `--tone-soft` ikon zemini. `color-mix` kullanılmadı —
-     desteklemeyen tarayıcıda düz renge düşüp glyph'i zemine gömüyordu. */
+  /* Sayaç kartı (ADR-117). Renk tek değişkenden gelir: `--stat-c`, kartın tür
+     sınıfı (`.stat--total` …) yazar; zemin, kenarlık, ikon karesi, sayı ve
+     kıvılcım hepsi ondan türer. Alt dolgu 46px — kıvılcım kartın tabanında
+     42px yer kaplıyor. Kartın tamamı bağlantı; odak halkası `:focus-visible`ten. */
   .stat {
-    @apply relative flex flex-col overflow-hidden border border-line bg-card p-4
-           text-fg no-underline;
+    @apply relative flex flex-col overflow-hidden border border-line text-fg no-underline;
+    padding: 18px 18px 46px;
     border-radius: 18px;
     box-shadow: var(--ctp-shadow);
-    --tone: var(--ctp-accent);
-    --tone-soft: var(--ctp-accent-soft);
+    background-image: linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--stat-c) 14%, transparent),
+      var(--ctp-card) 55%
+    );
+    border-color: color-mix(in srgb, var(--stat-c) 28%, transparent);
   }
-  /* Üst kenarda kendi renginde ışıma çizgisi */
-  .stat::before {
-    @apply absolute inset-x-0 top-0 h-px;
-    content: "";
-    background-image: linear-gradient(90deg, transparent, var(--tone), transparent);
+  @media (prefers-reduced-motion: no-preference) {
+    .stat {
+      transition:
+        transform 180ms ease,
+        box-shadow 180ms ease;
+    }
   }
   a.stat:hover {
-    @apply border-surface;
+    transform: translateY(-3px);
     box-shadow:
       var(--ctp-shadow),
-      0 0 0 1px var(--tone-soft);
-    transform: translateY(-2px);
+      0 14px 34px color-mix(in srgb, var(--stat-c) 18%, transparent);
   }
-  .stat-ok {
-    --tone: var(--ctp-ok);
-    --tone-soft: var(--ctp-ok-soft);
+  .stat--total {
+    --stat-c: var(--stat-total);
   }
-  .stat-err {
-    --tone: var(--ctp-err);
-    --tone-soft: var(--ctp-err-soft);
+  .stat--joined {
+    --stat-c: var(--stat-joined);
   }
-  .stat-warn {
-    --tone: var(--ctp-accent-dim);
-    --tone-soft: var(--ctp-warn-soft);
+  .stat--left {
+    --stat-c: var(--stat-left);
+  }
+  .stat--moved {
+    --stat-c: var(--stat-moved);
   }
   .stat-head {
     @apply flex items-start gap-3;
   }
-  /* 40px yuvarlak ikon: rengin soft zemini + iç halka */
   .stat-ico {
-    @apply grid size-10 shrink-0 place-items-center rounded-full text-base;
-    color: var(--tone);
-    background-color: var(--tone-soft);
-    box-shadow: inset 0 0 0 1px var(--tone-soft);
+    @apply grid shrink-0 place-items-center text-base;
+    width: 44px;
+    height: 44px;
+    border-radius: 14px;
+    color: var(--stat-c);
+    background-color: color-mix(in srgb, var(--stat-c) 20%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--stat-c) 40%, transparent);
   }
   .stat-label {
-    @apply text-[0.8125rem] text-fg-dim;
+    @apply text-xs uppercase;
+    color: var(--ctp-fg-dim);
+    letter-spacing: 0.06em;
   }
+  /* Sayı ve değişim rozeti aynı taban çizgisinde */
+  .stat-row {
+    @apply mt-1 flex flex-wrap items-baseline gap-2;
+  }
+  /* `--stat-c` yoksa (halka kartlarındaki tek kategori özeti) gövde rengi */
   .stat-value {
-    @apply mt-1 text-[2rem] leading-none font-bold tracking-tight tabular-nums;
+    @apply font-bold tabular-nums;
+    font-size: 36px;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    color: var(--stat-c, var(--ctp-fg));
   }
   .stat-foot {
     @apply mt-1.5 text-xs text-fg-faint;
+  }
+  /* Kıvılcım: kartın tabanında tam genişlik. `preserveAspectRatio="none"` ile
+     yatayda esner, çizgi kalınlığını `vector-effect` sabit tutar. */
+  .stat-spark {
+    @apply pointer-events-none absolute inset-x-0 bottom-0 block w-full;
+    height: 42px;
+    color: var(--stat-c);
+  }
+  /* Değişim rozeti: önceki eşit uzunluktaki döneme göre. Artışın iyi mi kötü mü
+     olduğuna kart karar verir (`dashboard::delta`), ton buradan gelir. */
+  .delta {
+    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[0.6875rem]
+           font-bold tabular-nums;
+  }
+  .delta .ico {
+    @apply text-[0.625rem];
+  }
+  .delta-ok {
+    color: var(--ctp-ok);
+    background-color: var(--ctp-ok-soft);
+  }
+  .delta-err {
+    color: var(--ctp-err);
+    background-color: var(--ctp-err-soft);
+  }
+  .delta-muted {
+    @apply bg-bg-hard text-fg-faint;
   }
 
   /* Etkinlik akışı zaman çizgisi: alt kenarlık yok, ikonları dikey bir çizgi

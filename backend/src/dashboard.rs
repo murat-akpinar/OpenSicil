@@ -39,6 +39,9 @@ pub struct Dashboard {
     pub window_days: i32,
     pub windows: Vec<WindowChip>,
     pub totals: Totals,
+    /// Dort sayac karti (ADR-117): sayi + onceki doneme gore degisim + pencerenin
+    /// gunluk serisi. Sablon dort bloku tekrarlamaz, listeyi gezer.
+    pub cards: Vec<StatCard>,
     /// Birincil role gore dagilim (halka): en kalabalik dort rol + "diger"
     pub roles: Donut,
     pub activity: Vec<Event>,
@@ -121,6 +124,56 @@ pub struct Slice {
 /// `employment_type` dort degerle sinirli (0004_identity_model.sql), liste yeter.
 const SLICE_TONES: [&str; 4] = ["accent", "cyan", "info", "warn"];
 
+/// Sayac karti (ADR-117). `key` hem kartin rengini (`.stat--<key>`) hem
+/// kivilcim gradyaninin id'sini verir; dort anahtar sabit ve benzersizdir.
+pub struct StatCard {
+    pub key: &'static str,
+    /// Baslik anahtari (`lang.t`)
+    pub label: &'static str,
+    pub icon: &'static str,
+    /// Kartin tamami bu adrese giden bir baglanti
+    pub href: String,
+    pub value: i64,
+    /// Alt satirin metin anahtari; bos ise sablon pencereyi yazar
+    pub foot: &'static str,
+    pub delta: Delta,
+    pub spark: Spark,
+}
+
+/// Onceki esit uzunluktaki doneme gore degisim rozeti.
+pub struct Delta {
+    /// Mutlak yuzde; `kind` yonu ayri tasir ki sablon isaret hesaplamasin
+    pub pct: i64,
+    /// `up` | `down` | `flat` | `new`
+    pub kind: &'static str,
+    /// Rozet tonu: artis her kartta iyi degil — ayrilis artarsa kotu
+    pub tone: &'static str,
+    /// Onceki donemin sayisi; rozetin `title`inda gorunur
+    pub before: i64,
+}
+
+/// Kartin tabanindaki kivilcim: `<polyline>` ve `<polygon>` nokta dizileri.
+/// viewBox 0 0 100 100 ve `preserveAspectRatio="none"` — kart ne kadar genis
+/// olursa olsun cizgi tabanı doldurur, kalinligi `vector-effect` sabitler.
+pub struct Spark {
+    pub line: String,
+    pub area: String,
+}
+
+/// Pencerenin gunluk serisi; her alan gun sayisi kadar uzun.
+struct Series {
+    joined: Vec<i64>,
+    departed: Vec<i64>,
+    changed: Vec<i64>,
+}
+
+/// Onceki esit uzunluktaki pencerenin sayilari (degisim rozetinin paydasi).
+struct Previous {
+    joined: i64,
+    departed: i64,
+    changed: i64,
+}
+
 pub struct Totals {
     pub identities: i64,
     pub joined: i64,
@@ -179,9 +232,16 @@ pub struct DistRow {
 pub async fn load(pool: &PgPool, time_zone: &str, days: i32) -> Result<Dashboard, sqlx::Error> {
     let (totals, today) = totals(pool, time_zone, days).await?;
     let (trend, trend_peak) = trend(pool, time_zone).await?;
+    let cards = cards(
+        &totals,
+        days,
+        &series(pool, time_zone, days).await?,
+        previous(pool, time_zone, days).await?,
+    );
     Ok(Dashboard {
         today,
         window_days: days,
+        cards,
         windows: WINDOWS
             .iter()
             .map(|&d| WindowChip {
@@ -341,6 +401,84 @@ async fn totals(
         },
         row.7,
     ))
+}
+
+/// Pencerenin gunluk serisi: her gun icin kayit / ayrilis / gorev degisikligi.
+/// Gunler `generate_series` ile uretilir, olaysiz gun de dizide 0 olarak durur —
+/// kivilcim cizgisinin x ekseni esit araliklidir.
+///
+/// Esikler `totals`takilerle ayni kurallari yazar ama **gune hizalanmistir**
+/// (`totals` yuvarlanan bir zaman damgasi penceresi kullanir). Sinir gununun
+/// yarisi iki tarafta ayni kalmayabilir: seri bir sekildir, sayinin kendisi
+/// karttaki rakamdan okunur.
+async fn series(pool: &PgPool, time_zone: &str, days: i32) -> Result<Series, sqlx::Error> {
+    let rows: Vec<(i64, i64, i64)> = sqlx::query_as(
+        "WITH gun AS ( \
+           SELECT generate_series((now() AT TIME ZONE $1)::date - ($3::int - 1), \
+                                  (now() AT TIME ZONE $1)::date, \
+                                  interval '1 day')::date AS d), \
+         giren AS ( \
+           SELECT start_date AS d, count(*) AS n FROM identities \
+            WHERE deleted_at IS NULL \
+              AND start_date > (now() AT TIME ZONE $1)::date - $3::int \
+            GROUP BY 1), \
+         ayrilan AS ( \
+           SELECT (end_at AT TIME ZONE $1)::date AS d, count(*) AS n FROM identities \
+            WHERE deleted_at IS NULL AND end_at IS NOT NULL AND end_at <= now() \
+              AND (end_at AT TIME ZONE $1)::date > (now() AT TIME ZONE $1)::date - $3::int \
+            GROUP BY 1), \
+         degisen AS ( \
+           SELECT (occurred_at AT TIME ZONE $1)::date AS d, \
+                  count(DISTINCT identity_id) AS n FROM audit_log \
+            WHERE event_type = $2 \
+              AND (occurred_at AT TIME ZONE $1)::date > (now() AT TIME ZONE $1)::date - $3::int \
+            GROUP BY 1) \
+         SELECT coalesce(giren.n, 0), coalesce(ayrilan.n, 0), coalesce(degisen.n, 0) \
+           FROM gun \
+           LEFT JOIN giren ON giren.d = gun.d \
+           LEFT JOIN ayrilan ON ayrilan.d = gun.d \
+           LEFT JOIN degisen ON degisen.d = gun.d \
+          ORDER BY gun.d",
+    )
+    .bind(time_zone)
+    .bind(audit::IDENTITY_CHANGED)
+    .bind(days)
+    .fetch_all(pool)
+    .await?;
+    Ok(Series {
+        joined: rows.iter().map(|r| r.0).collect(),
+        departed: rows.iter().map(|r| r.1).collect(),
+        changed: rows.iter().map(|r| r.2).collect(),
+    })
+}
+
+/// Onceki esit uzunluktaki pencerenin uc sayisi: degisim rozetinin paydasi.
+/// Kosullar `totals`takilerle birebir ayni, yalnizca pencere bir boy geriye kayar.
+async fn previous(pool: &PgPool, time_zone: &str, days: i32) -> Result<Previous, sqlx::Error> {
+    let row: (i64, i64, i64) = sqlx::query_as(
+        "SELECT \
+           (SELECT count(*) FROM identities WHERE deleted_at IS NULL \
+              AND start_date > (now() AT TIME ZONE $1)::date - 2 * $2::int \
+              AND start_date <= (now() AT TIME ZONE $1)::date - $2::int), \
+           (SELECT count(*) FROM identities WHERE deleted_at IS NULL \
+              AND end_at IS NOT NULL \
+              AND end_at <= now() - make_interval(days => $2::int) \
+              AND end_at > now() - make_interval(days => 2 * $2::int)), \
+           (SELECT count(DISTINCT identity_id) FROM audit_log \
+             WHERE event_type = $3 \
+               AND occurred_at <= now() - make_interval(days => $2::int) \
+               AND occurred_at > now() - make_interval(days => 2 * $2::int))",
+    )
+    .bind(time_zone)
+    .bind(days)
+    .bind(audit::IDENTITY_CHANGED)
+    .fetch_one(pool)
+    .await?;
+    Ok(Previous {
+        joined: row.0,
+        departed: row.1,
+        changed: row.2,
+    })
 }
 
 /// Son etkinlikler: yalnizca operatorun yaptiklari (`actor_username` dolu).
@@ -536,6 +674,144 @@ fn percent(value: i64, peak: i64) -> i64 {
     (fifths * 5).clamp(5, 100)
 }
 
+/// Kivilcim cizgisinin cizim alani: tepe ve taban, 0-100'luk viewBox icinde.
+/// Taban 100 degil 96 — 1,6px cizgi tam kenarda yarisi kirpilirdi.
+const SPARK_TOP: f64 = 8.0;
+const SPARK_BOTTOM: f64 = 96.0;
+
+/// Kart tanimlari ekrandaki sirayla: anahtar, metin anahtari, ikon, pencere
+/// filtresi. Bos filtre = "Toplam" karti, pencereyi okumaz.
+const CARD_DEFS: [(&str, &str, &str, &str); 4] = [
+    ("total", "dash.total_identities", "ico-users", ""),
+    ("joined", "dash.joined", "ico-user-plus", "joined"),
+    ("left", "dash.departed", "ico-logout", "departed"),
+    ("moved", "dash.changed", "ico-refresh", "changed"),
+];
+
+/// Dort sayac karti. Saf — DB olmadan sinanir.
+///
+/// "Toplam" kartinin kendi sorgusu yok: pencerenin basindaki kadro
+/// `identities - joined`tir (silinmemis kayitlarin ne kadari pencerede girdi),
+/// seri de gunluk kayitlarin kumulatifi. Ayrilanlar silinmedigi icin toplamdan
+/// dusmez: kart "kac kisi kayitli"yi sayar, "kac kisi calisiyor"u degil.
+fn cards(totals: &Totals, days: i32, series: &Series, previous: Previous) -> Vec<StatCard> {
+    let base = totals.identities - totals.joined;
+    let total_series = cumulative(base, &series.joined);
+    // Kart basina: sayi, onceki donem, gunluk seri, artis iyi mi
+    let data: [(i64, i64, &[i64], bool); 4] = [
+        (totals.identities, base, &total_series, true),
+        (totals.joined, previous.joined, &series.joined, true),
+        // Ayrilis artarsa kotu: rozetin tonu oburlerinin tersi
+        (totals.departed, previous.departed, &series.departed, false),
+        (totals.changed, previous.changed, &series.changed, true),
+    ];
+    CARD_DEFS
+        .iter()
+        .zip(data)
+        .map(
+            |((key, label, icon, filter), (value, before, daily, up_is_good))| StatCard {
+                key,
+                label,
+                icon,
+                href: match filter.is_empty() {
+                    true => "/identities".to_string(),
+                    false => format!("/identities?window={filter}&days={days}"),
+                },
+                value,
+                foot: if filter.is_empty() {
+                    "dash.all_time"
+                } else {
+                    ""
+                },
+                delta: delta(value, before, up_is_good),
+                spark: spark(daily),
+            },
+        )
+        .collect()
+}
+
+/// Kumulatif kadro: pencerenin basindaki sayidan baslar, her gun o gunun
+/// kayitlarini ekler. Saf — DB olmadan sinanir.
+fn cumulative(base: i64, daily: &[i64]) -> Vec<i64> {
+    let mut running = base;
+    daily
+        .iter()
+        .map(|n| {
+            running += n;
+            running
+        })
+        .collect()
+}
+
+/// Degisim rozeti. `up_is_good`: artis iyi mi (ayrilis kartinda degil).
+/// Onceki donem sifirken yuzde tanimsizdir — rozet "yeni" der, bolme yapilmaz.
+/// Saf — DB olmadan sinanir.
+fn delta(now: i64, before: i64, up_is_good: bool) -> Delta {
+    let tone = |up: bool| if up == up_is_good { "ok" } else { "err" };
+    if now == before {
+        return Delta {
+            pct: 0,
+            kind: "flat",
+            tone: "muted",
+            before,
+        };
+    }
+    if before == 0 {
+        return Delta {
+            pct: 0,
+            kind: "new",
+            tone: tone(true),
+            before,
+        };
+    }
+    let up = now > before;
+    Delta {
+        pct: ((now - before).abs() * 100 + before / 2) / before,
+        kind: if up { "up" } else { "down" },
+        tone: tone(up),
+        before,
+    }
+}
+
+/// Kivilcim cizgisi: `<polyline>` ve altindaki dolgunun `<polygon>` noktalari.
+/// Olcek dizinin kendi en kucuk-en buyuk araligi — kumulatif kadro gibi sifirdan
+/// uzak serilerde 0 tabanli olcek cizgiyi duz yapardi. Hepsi ayni degerse cizgi
+/// duz: sifirsa tabanda, degilse ortada. Saf — DB olmadan sinanir.
+fn spark(values: &[i64]) -> Spark {
+    use std::fmt::Write;
+    let (lo, hi) = match (values.iter().min(), values.iter().max()) {
+        (Some(lo), Some(hi)) => (*lo, *hi),
+        _ => {
+            return Spark {
+                line: String::new(),
+                area: String::new(),
+            }
+        }
+    };
+    let step = match values.len() {
+        0 | 1 => 0.0,
+        n => 100.0 / (n - 1) as f64,
+    };
+    let mut line = String::new();
+    for (i, value) in values.iter().enumerate() {
+        let y = match (hi > lo, hi > 0) {
+            (true, _) => {
+                SPARK_BOTTOM - (value - lo) as f64 / (hi - lo) as f64 * (SPARK_BOTTOM - SPARK_TOP)
+            }
+            (false, true) => (SPARK_TOP + SPARK_BOTTOM) / 2.0,
+            (false, false) => SPARK_BOTTOM,
+        };
+        if i > 0 {
+            line.push(' ');
+        }
+        let _ = write!(line, "{:.1},{y:.1}", i as f64 * step);
+    }
+    Spark {
+        area: format!("{line} 100.0,100.0 0.0,100.0"),
+        line,
+    }
+}
+
 /// Olay turunun ikonu; bilinmeyen tur notr ikon alir (ekran bozulmaz).
 /// Olay turunun ikonu ve ikon karesinin tonu (`.ico-tile-<ton>`): giris yesil,
 /// ayrilis kirmizi, bekleme sarisi, tanim degisikligi turkuaz, gerisi vurgu.
@@ -593,6 +869,114 @@ mod tests {
         assert_eq!(percent(1, 100), 5);
         // 7/9 = %77,7 -> en yakin bes
         assert_eq!(percent(7, 9), 80);
+    }
+
+    /// ADR-117: rozetin yonu ve tonu. Artis her kartta iyi degil.
+    #[test]
+    fn the_delta_badge_knows_when_a_rise_is_bad() {
+        let up = delta(12, 10, true);
+        assert_eq!((up.pct, up.kind, up.tone), (20, "up", "ok"));
+        // Ayni artis ayrilis kartinda kotu
+        let bad = delta(12, 10, false);
+        assert_eq!((bad.pct, bad.kind, bad.tone), (20, "up", "err"));
+        let down = delta(8, 10, true);
+        assert_eq!((down.pct, down.kind, down.tone), (20, "down", "err"));
+        // Azalan ayrilis iyi haber
+        assert_eq!(delta(8, 10, false).tone, "ok");
+    }
+
+    /// Onceki donem sifirken yuzde tanimsiz: bolme yapilmaz, rozet "yeni" der.
+    #[test]
+    fn the_delta_badge_never_divides_by_zero() {
+        let new = delta(5, 0, true);
+        assert_eq!((new.kind, new.pct, new.tone), ("new", 0, "ok"));
+        // Hic hareket yoksa rozet sessiz
+        for before in [0, 7] {
+            let flat = delta(before, before, true);
+            assert_eq!((flat.kind, flat.tone), ("flat", "muted"), "{before}");
+        }
+        // Sifira dusus: yuzde yine hesaplanir
+        assert_eq!(delta(0, 4, true).pct, 100);
+    }
+
+    #[test]
+    fn the_cumulative_headcount_starts_at_the_window_floor() {
+        assert_eq!(cumulative(10, &[1, 0, 2]), vec![11, 11, 13]);
+        assert_eq!(cumulative(0, &[]), Vec::<i64>::new());
+    }
+
+    /// Kivilcim: nokta sayisi gun sayisi kadar, x 0'dan 100'e esit araliklarla,
+    /// y hep cizim alaninin icinde. Dolgu cizgiyi tabanda kapatir.
+    #[test]
+    fn the_sparkline_fills_the_box_and_stays_inside_it() {
+        let s = spark(&[0, 5, 10]);
+        assert_eq!(s.line, "0.0,96.0 50.0,52.0 100.0,8.0");
+        assert!(s.area.ends_with(" 100.0,100.0 0.0,100.0"), "{}", s.area);
+        for point in s.line.split(' ') {
+            let (x, y) = point.split_once(',').expect("x,y");
+            let (x, y): (f64, f64) = (x.parse().unwrap(), y.parse().unwrap());
+            assert!((0.0..=100.0).contains(&x), "{point}");
+            assert!((SPARK_TOP..=SPARK_BOTTOM).contains(&y), "{point}");
+        }
+    }
+
+    /// Hepsi ayni degerse cizgi duz: sifirsa tabanda (hicbir sey olmadi),
+    /// degilse ortada (degismedi) — tabandaki duz cizgi "sifir" diye okunurdu.
+    #[test]
+    fn a_flat_series_draws_a_flat_line() {
+        assert_eq!(spark(&[0, 0, 0]).line, "0.0,96.0 50.0,96.0 100.0,96.0");
+        assert_eq!(spark(&[7, 7, 7]).line, "0.0,52.0 50.0,52.0 100.0,52.0");
+        assert_eq!(spark(&[]).line, "");
+        assert_eq!(spark(&[3]).line, "0.0,52.0");
+    }
+
+    /// Kart listesi: dort kart, dort ayri anahtar (gradyan id'si benzersiz olmali),
+    /// "Toplam" disindakiler pencereli listeye gider.
+    #[test]
+    fn the_four_cards_have_distinct_keys_and_real_links() {
+        let totals = Totals {
+            identities: 12,
+            joined: 2,
+            departed: 1,
+            changed: 3,
+            needs_intervention: 0,
+            intervention_identity: None,
+            pending_approvals: 0,
+            role_unassigned: 0,
+        };
+        let series = Series {
+            joined: vec![1, 1],
+            departed: vec![0, 1],
+            changed: vec![2, 1],
+        };
+        let previous = Previous {
+            joined: 1,
+            departed: 2,
+            changed: 3,
+        };
+        let cards = cards(&totals, 30, &series, previous);
+        assert_eq!(cards.len(), 4);
+        let keys: Vec<&str> = cards.iter().map(|c| c.key).collect();
+        assert_eq!(keys, vec!["total", "joined", "left", "moved"]);
+        assert_eq!(cards[0].href, "/identities");
+        assert_eq!(cards[0].value, 12);
+        // Toplamin tabani: pencerede girenler dusulur
+        assert_eq!(cards[0].delta.before, 10);
+        assert_eq!(cards[1].href, "/identities?window=joined&days=30");
+        assert_eq!(cards[2].href, "/identities?window=departed&days=30");
+        assert_eq!(cards[3].href, "/identities?window=changed&days=30");
+        // Degismeyen sayac sessiz, azalan ayrilis iyi
+        assert_eq!(cards[3].delta.kind, "flat");
+        assert_eq!(cards[2].delta.tone, "ok");
+        // Her kart filtresi listede izinli
+        for card in &cards[1..] {
+            let filter = card.href.split("window=").nth(1).unwrap();
+            let filter = filter.split('&').next().unwrap();
+            assert!(
+                crate::identity::WINDOW_FILTERS.contains(&filter),
+                "{filter} izinli listede yok"
+            );
+        }
     }
 
     #[test]

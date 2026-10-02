@@ -96,47 +96,48 @@
     </span>
   </nav>
 
+  {# ADR-117: dort kart tek listede (`dashboard::cards`). Her kart kendi
+     renginde (`.stat--<anahtar>`), tamami ilgili listeye giden bir baglanti.
+     Tabanda pencerenin gunluk serisi, sayinin yaninda onceki esit uzunluktaki
+     doneme gore degisim. Kivilcim SVG'si sunucuda uretilir (JS yok); gradyan
+     id'si kart anahtarindan gelir, dort anahtar benzersiz. #}
   <section class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-    <div class="stat">
+    {% for c in dash.cards %}
+    <a class="stat stat--{{ c.key }}" href="{{ c.href }}">
       <div class="stat-head">
-        <span class="stat-ico"><i class="ico ico-users" aria-hidden="true"></i></span>
+        <span class="stat-ico"><i class="ico {{ c.icon }}" aria-hidden="true"></i></span>
         <div class="min-w-0 flex-1">
-          <p class="stat-label">{{ lang.t("dash.total_identities") }}</p>
-          <p class="stat-value">{{ dash.totals.identities }}</p>
-          <p class="stat-foot">{{ lang.t("dash.all_time") }}</p>
+          <p class="stat-label">{{ lang.t(c.label) }}</p>
+          <p class="stat-row">
+            <span class="stat-value">{{ c.value }}</span>
+            <span class="delta delta-{{ c.delta.tone }}" title="{{ lang.t1("dash.delta_prev", c.delta.before) }}">
+              {%- if c.delta.kind == "up" -%}
+              <i class="ico ico-caret-up" aria-hidden="true"></i>%{{ c.delta.pct }}
+              {%- else if c.delta.kind == "down" -%}
+              <i class="ico ico-caret-down" aria-hidden="true"></i>%{{ c.delta.pct }}
+              {%- else if c.delta.kind == "new" -%}
+              {{ lang.t("dash.delta_new") }}
+              {%- else -%}
+              —
+              {%- endif -%}
+            </span>
+          </p>
+          <p class="stat-foot">{% if c.foot.is_empty() %}{{ lang.t1("dash.window_n", dash.window_days) }}{% else %}{{ lang.t(c.foot) }}{% endif %}</p>
         </div>
       </div>
-    </div>
-    <div class="stat stat-ok">
-      <div class="stat-head">
-        <span class="stat-ico"><i class="ico ico-user-plus" aria-hidden="true"></i></span>
-        <div class="min-w-0 flex-1">
-          <p class="stat-label">{{ lang.t("dash.joined") }}</p>
-          <p class="stat-value">{{ dash.totals.joined }}</p>
-          <p class="stat-foot">{{ lang.t1("dash.window_n", dash.window_days) }}</p>
-        </div>
-      </div>
-    </div>
-    <div class="stat stat-err">
-      <div class="stat-head">
-        <span class="stat-ico"><i class="ico ico-logout" aria-hidden="true"></i></span>
-        <div class="min-w-0 flex-1">
-          <p class="stat-label">{{ lang.t("dash.departed") }}</p>
-          <p class="stat-value">{{ dash.totals.departed }}</p>
-          <p class="stat-foot">{{ lang.t1("dash.window_n", dash.window_days) }}</p>
-        </div>
-      </div>
-    </div>
-    <div class="stat stat-warn">
-      <div class="stat-head">
-        <span class="stat-ico"><i class="ico ico-refresh" aria-hidden="true"></i></span>
-        <div class="min-w-0 flex-1">
-          <p class="stat-label">{{ lang.t("dash.changed") }}</p>
-          <p class="stat-value">{{ dash.totals.changed }}</p>
-          <p class="stat-foot">{{ lang.t1("dash.window_n", dash.window_days) }}</p>
-        </div>
-      </div>
-    </div>
+      <svg class="stat-spark" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+        <defs>
+          <linearGradient id="spark-{{ c.key }}" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="currentColor" stop-opacity="0.35"></stop>
+            <stop offset="1" stop-color="currentColor" stop-opacity="0"></stop>
+          </linearGradient>
+        </defs>
+        <polygon points="{{ c.spark.area }}" fill="url(#spark-{{ c.key }})"></polygon>
+        <polyline points="{{ c.spark.line }}" fill="none" stroke="currentColor" stroke-width="1.6"
+                  stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></polyline>
+      </svg>
+    </a>
+    {% endfor %}
   </section>
 
   {# Uc sutun: akis (5) | dagilimlar (4) | hizli islemler (3) #}

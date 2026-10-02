@@ -1638,8 +1638,11 @@ mod tests {
             body_string(send("GET", "/departments".into(), String::new(), auditor.clone()).await)
                 .await;
         // Girinti artik `— ` on eki degil derinlik sinifi (CSP: satir ici stil yok).
+        // Sinif ile baglanti arasinda ac/kapa okunun yuvasi duruyor (ADR-114 C).
         assert!(
-            page.contains("<span class=\"tree-d2\"><a class=\"link\" href=\"/departments/bt\">BT"),
+            page.contains(
+                "<span class=\"tree-d2\">\n              <span class=\"flex items-center gap-1.5\">\n                <span class=\"tree-spacer\" data-tree-slot></span>\n                <a class=\"link\" href=\"/departments/bt\">BT"
+            ),
             "{page}"
         );
 

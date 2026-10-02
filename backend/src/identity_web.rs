@@ -93,6 +93,10 @@ struct ListQuery {
     offset: Option<i64>,
     /// `unassigned=1`: yalnizca rolu yer tutucu olanlar (ADR-103 madde 4)
     unassigned: Option<String>,
+    /// ADR-117: panelin sayac kartindan gelen pencere (`joined`/`departed`/`changed`)
+    window: Option<String>,
+    /// Pencerenin gun sayisi; panelinkiyle ayni izinli liste (`dashboard::window`)
+    days: Option<i32>,
 }
 
 #[derive(Template)]
@@ -114,6 +118,18 @@ struct IdentitiesTemplate {
     /// ADR-103 madde 4: filtre acik mi ve (kapaliyken) rolu atanmamis kac kisi var
     unassigned_only: bool,
     role_unassigned: i64,
+    /// ADR-117: acik pencere filtresinin serit metni; bos = filtre yok
+    window_note: String,
+}
+
+/// Pencere seridinin metin anahtari. `tn` derleme zamani sabit anahtar istiyor,
+/// bu yuzden ad buradan esleniyor; `identity::WINDOW_FILTERS` ile ayni uc deger.
+fn window_text_key(window: &str) -> &'static str {
+    match window {
+        "joined" => "identities.window_joined",
+        "departed" => "identities.window_departed",
+        _ => "identities.window_changed",
+    }
 }
 
 /// Personel listesi: okuma her operatorde (auditor dahil), "Yeni kimlik"
@@ -126,9 +142,15 @@ async fn list_page(
     let query = q.q.unwrap_or_default();
     let offset = q.offset.unwrap_or(0).max(0);
     let unassigned_only = q.unassigned.as_deref() == Some("1");
+    // Izinli listeler: pencere adi `identity::window_filter`, gun sayisi panelin
+    // `dashboard::window`i. Sorguya keyfi metin ya da sayi girmez.
+    let window = identity::window_filter(q.window.as_deref());
+    let window_days = crate::dashboard::window(q.days);
     let listing = identity::Listing {
         query: &query,
         unassigned_only,
+        window,
+        window_days,
         offset,
         limit: PAGE_SIZE,
     };
@@ -161,6 +183,13 @@ async fn list_page(
         unadopted,
         unassigned_only,
         role_unassigned,
+        window_note: match window {
+            Some(w) => op.lang.tn(
+                window_text_key(w),
+                &[&window_days.to_string(), &total.to_string()],
+            ),
+            None => String::new(),
+        },
         rows,
     })
 }
