@@ -42,6 +42,10 @@
 - V1 sonrası kod taraması — rol parolası DDL kaçışı, süresi geçen oturum/OIDC satırları, operatör reddinde çoklu eşleşme, parola üretiminde mod sapması, nginx HSTS
 - Onay kutuları her yerde aynı boyda ve metin satırına hizalı
 
+### Geri alınanlar
+
+- Gövde fontu CaskaydiaMono kalır
+
 ### Testler
 
 - Faz 1a güvenlik ve test kapanışını tamamla

@@ -29,11 +29,11 @@
         <div class="grid gap-x-5 gap-y-4 lg:grid-cols-2">
           <div>
             <label class="label" for="ad_host">Host</label>
-            <input class="input mono" type="text" id="ad_host" name="ad_host" value="{{ ad_host }}">
+            <input class="input" type="text" id="ad_host" name="ad_host" value="{{ ad_host }}">
           </div>
           <div>
             <label class="label" for="ad_bind_dn">Bind DN</label>
-            <input class="input mono" type="text" id="ad_bind_dn" name="ad_bind_dn" value="{{ ad_bind_dn }}">
+            <input class="input" type="text" id="ad_bind_dn" name="ad_bind_dn" value="{{ ad_bind_dn }}">
           </div>
           <div>
             <label class="label" for="ad_service_password">{{ lang.t("config.service_password") }}
@@ -45,7 +45,7 @@
           {# ADR-106 madde 5: TC kimlik no AD şemasında yok; kurum koyduysa öznitelik adı buradan. Boş = okunmaz #}
           <div>
             <label class="label" for="ad_national_id_attribute">{{ lang.t("config.national_id_attribute") }}</label>
-            <input class="input mono" type="text" id="ad_national_id_attribute" name="ad_national_id_attribute" value="{{ ad_national_id_attribute }}" placeholder="extensionAttribute5">
+            <input class="input" type="text" id="ad_national_id_attribute" name="ad_national_id_attribute" value="{{ ad_national_id_attribute }}" placeholder="extensionAttribute5">
             <span class="hint">{{ lang.t("config.national_id_attribute_hint") }}</span>
           </div>
         </div>
@@ -59,7 +59,7 @@
         <div class="grid gap-x-5 gap-y-4 lg:grid-cols-2">
           <div>
             <label class="label" for="zimbra_url">Admin URL</label>
-            <input class="input mono" type="text" id="zimbra_url" name="zimbra_url" value="{{ zimbra_url }}">
+            <input class="input" type="text" id="zimbra_url" name="zimbra_url" value="{{ zimbra_url }}">
           </div>
           <div>
             <label class="label" for="zimbra_admin_password">{{ lang.t("config.admin_password") }}
@@ -79,11 +79,11 @@
         <div class="grid gap-x-5 gap-y-4 lg:grid-cols-2">
           <div>
             <label class="label" for="oidc_issuer">Issuer</label>
-            <input class="input mono" type="text" id="oidc_issuer" name="oidc_issuer" value="{{ oidc_issuer }}">
+            <input class="input" type="text" id="oidc_issuer" name="oidc_issuer" value="{{ oidc_issuer }}">
           </div>
           <div>
             <label class="label" for="oidc_client_id">Client ID</label>
-            <input class="input mono" type="text" id="oidc_client_id" name="oidc_client_id" value="{{ oidc_client_id }}">
+            <input class="input" type="text" id="oidc_client_id" name="oidc_client_id" value="{{ oidc_client_id }}">
           </div>
           <div>
             <label class="label" for="oidc_client_secret">Client secret

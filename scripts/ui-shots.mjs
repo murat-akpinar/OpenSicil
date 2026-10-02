@@ -7,7 +7,7 @@
 // Goruntunun yaninda alti olcum yapar, cunku goze bakmak hepsini kaciriyor:
 //   1. yatay tasma  : documentElement.scrollWidth > innerWidth
 //   2. tofu kutusu  : .ico'nun hesaplanmis font-family'si Nerd Font'u icermiyor
-//   3. govde fontu  : body'nin hesaplanmis font-family'si Inter'le baslamiyor
+//   3. govde fontu  : body'nin hesaplanmis font-family'si Nerd Font'u icermiyor
 //   4. CSP          : konsola dusen "Content Security Policy" satirlari
 //   5. ic kaydirma  : bir tablo kendi kutusunda dikey kayiyor (sayfa kaymali)
 //   6. renk sayisi  : panelde etkinlik ikonu >= 3, sayac karti = 4 ayri renk
@@ -132,7 +132,7 @@ for (const [themeName, themeValue] of [["koyu", "dark"], ["acik", "light"]].filt
       if (!/CaskaydiaMono/.test(probe.icoFont)) {
         findings.push(`TOFU    ${tag}: .ico font-family = ${probe.icoFont}`);
       }
-      if (!/^Inter/.test(probe.bodyFont)) {
+      if (!/CaskaydiaMono/.test(probe.bodyFont)) {
         findings.push(`FONT    ${tag}: body font-family = ${probe.bodyFont}`);
       }
       if (probe.innerScroll) {

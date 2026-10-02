@@ -23,7 +23,7 @@
         <td>{{ n.name }}</td>
         <td>{{ lang.key("usedkind", n.kind) }}</td>
         <td class="muted">{{ n.former_identity_id }}</td>
-        <td class="muted mono whitespace-nowrap">{{ n.burned_at }}</td>
+        <td class="muted whitespace-nowrap">{{ n.burned_at }}</td>
         <td>
           {% if !n.released.is_empty() %}{{ n.released }}{% else if can_release %}
           <form method="post" action="/used-names/{{ n.id }}/release" class="flex gap-2">

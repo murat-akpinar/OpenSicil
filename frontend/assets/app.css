@@ -10,10 +10,7 @@
    `sh scripts/check-glyphs.sh` ile varlığı doğrulanmış kod noktaları).
 
    Tipografi ölçeği 12 / 14 / 16 / 20 / 28; sayılarda `tabular-nums`. Gövde fontu
-   Inter (ADR-115), ikon fontu CaskaydiaMono Nerd Font: glyph taşıyan kutular
-   `!important` ile ikon fontunda tutulur, yoksa `\fXXX` kod noktaları tofu
-   kutusuna dönerdi. Monospace yalnızca veri alanlarında (`.mono`, `.code`):
-   sicil no, kullanıcı adı, departman kodu, tarih/saat, DN/URL. */
+   değişmez (ADR-116): değişseydi `.ico` glyph'leri tofu kutusuna dönerdi. */
 @import "tailwindcss";
 
 /* Tailwind'in kaynak taraması: bu dosya assets/ altında, şablonlar bir üstteki templates/;
@@ -194,37 +191,11 @@
   --color-chart-6: var(--chart-6);
   --color-chart-7: var(--chart-7);
   --color-chart-8: var(--chart-8);
-  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
-  /* `font-mono` utility'si ve `.mono`/`.code` veri alanlarini tasir; ikon
-     glyph'leri de bu fonttan gelir */
+  --font-sans: "CaskaydiaMono Nerd Font", ui-monospace, "Cascadia Mono", monospace;
   --font-mono: "CaskaydiaMono Nerd Font", ui-monospace, "Cascadia Mono", monospace;
 }
 
-/* Gövde fontu self-host (ADR-115): Inter'in değişken ağırlıklı woff2'si — tek
-   dosya 100–900 arasını taşır, ayrı Regular/Bold dosyası yok. İki alt küme:
-   Türkçe `ğ`/`ş`/`İ` Latin Extended-A'da durur, `unicode-range` hangi dosyanın
-   indirileceğini tarayıcıya bırakır. `swap`: font gelene kadar sistem fontu çizer. */
-@font-face {
-  font-family: "Inter";
-  src: url("/static/InterVariable-latin.woff2") format("woff2");
-  font-weight: 100 900;
-  font-style: normal;
-  font-display: swap;
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
-    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191,
-    U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
-@font-face {
-  font-family: "Inter";
-  src: url("/static/InterVariable-latin-ext.woff2") format("woff2");
-  font-weight: 100 900;
-  font-style: normal;
-  font-display: swap;
-  unicode-range: U+0100-02AF, U+0304, U+0308, U+0329, U+1E00-1E9F, U+1EF2-1EFF,
-    U+2020, U+20A0-20AB, U+20AD-20CF, U+2113, U+2C60-2C7F, U+A720-A7FF;
-}
-
-/* Ikon fontu self-host (ADR-067): yalnızca Regular ve Bold; italik kullanılmıyor */
+/* Arayüz fontu self-host (ADR-067): yalnızca Regular ve Bold; italik kullanılmıyor */
 @font-face {
   font-family: "CaskaydiaMono Nerd Font";
   src: url("/static/CaskaydiaMonoNerdFont-Regular.ttf") format("truetype");
@@ -260,7 +231,7 @@
     background-attachment: fixed;
     background-repeat: no-repeat;
     color: var(--ctp-fg);
-    font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-family: "CaskaydiaMono Nerd Font", ui-monospace, monospace;
     accent-color: var(--ctp-accent);
   }
   /* Geçişler 150–200 ms; hareketi azalt diyen operatörde hiç geçiş olmaz */
@@ -304,23 +275,8 @@
      Glyph'ler yalnızca burada durur (şablonlarda ham karakter yok): `sh scripts/check-glyphs.sh`
      bu dosyadaki her `\fXXX` kod noktasını gömülü TTF'te arar, eksikse hata verir — eksik glyph
      ekranda tofu kutusu demek. Kod noktaları Nerd Font'un Font Awesome bloğundan (f000–f385). */
-  /* Glyph taşıyan her kutu ikon fontunda kalır: gövde Inter'e geçince `\fXXX`
-     kod noktaları tofu kutusuna dönüyordu (ADR-115). `.ico` dışında üç taşıyıcı
-     var — çekmece düğmesi, tema düğmesi ve `.alert::before` — glyph onların
-     kendi içeriğinden geliyor, sarmalayıcı `<i>` yok. */
-  .ico,
-  .nav-toggle,
-  .theme-toggle,
-  .alert::before {
-    font-family: "CaskaydiaMono Nerd Font", ui-monospace, monospace !important;
-  }
   .ico {
     @apply inline-block shrink-0 leading-none not-italic;
-  }
-  /* Veri alanı: sicil no, kullanıcı adı, departman kodu, tarih/saat, DN/URL.
-     Düz metin monospace olmaz — gövde Inter (ADR-115). */
-  .mono {
-    @apply font-mono tabular-nums;
   }
   .ico::before {
     display: inline-block;
@@ -1505,7 +1461,7 @@
 
   /* Monospace hap: departman kodu, kullanıcı adı, sicil no gibi veriler */
   .code {
-    @apply inline-block rounded-md bg-bg-hard px-1.5 py-0.5 font-mono text-xs tabular-nums;
+    @apply inline-block rounded-md bg-bg-hard px-1.5 py-0.5 text-xs tabular-nums;
   }
 
   /* Ağaç satırındaki aç/kapa oku; alt dalı olmayanda hiç basılmaz. Durumu

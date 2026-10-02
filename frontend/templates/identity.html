@@ -20,8 +20,8 @@
     <div><dt>{{ lang.t("field.primary_role") }}</dt><dd>{{ page.person.role }}{% if page.person.role_placeholder %} <span class="badge badge-warn">{{ lang.t("person.role_unassigned") }}</span>{% endif %}</dd></div>
     <div><dt>{{ lang.t("field.manager") }}</dt><dd>{{ page.person.manager }}{% if page.lifecycle.manager_departed %} <span class="warn">{% if page.lifecycle.handover_name.is_empty() %}{{ lang.t("person.manager_no_effective") }}{% else %}{{ lang.t1("person.manager_handover", page.lifecycle.handover_name) }}{% endif %}</span>{% endif %}</dd></div>
     <div><dt>{{ lang.t("field.employment_type") }}</dt><dd>{{ lang.key("employment", page.person.employment_type) }}</dd></div>
-    <div><dt>{{ lang.t("person.start") }}</dt><dd class="mono">{{ page.person.start_date }}</dd></div>
-    <div><dt>{{ lang.t("person.end_at") }}</dt><dd class="mono">{{ page.person.end_at }}</dd></div>
+    <div><dt>{{ lang.t("person.start") }}</dt><dd>{{ page.person.start_date }}</dd></div>
+    <div><dt>{{ lang.t("person.end_at") }}</dt><dd>{{ page.person.end_at }}</dd></div>
     <div><dt>{{ lang.t("field.mobile_phone") }}</dt><dd>{{ page.person.mobile_phone }}</dd></div>
     <div><dt>{{ lang.t("field.username") }}</dt><dd>{{ page.person.username }}</dd></div>
     <div><dt>{{ lang.t("field.email") }}</dt><dd>{{ page.person.email }}</dd></div>
