@@ -91,8 +91,11 @@
       </div>
     </div>
 
-    <div class="card-tight mb-4 max-h-96 overflow-y-auto">
-      <table class="tbl">
+    {# Liste sayfayla birlikte kayar (`.tbl-page`), kendi kutusunda degil: 384px'lik
+       kutu sayfanin yanina ikinci bir kaydirma cubugu koyuyordu ve basligi sayfanin
+       ortasinda asili birakiyordu. Projedeki diger uzun tablolarla ayni kalip. #}
+    <div class="tbl-page card-tight mb-4">
+      <table class="tbl tbl-static">
         <thead><tr>
           <th class="w-8"><input type="checkbox" data-select-all="finding" aria-label="{{ lang.t("adopt.select_all") }}" title="{{ lang.t("adopt.select_all") }}"></th>
           <th>{{ lang.t("reconcile.account") }}</th>
@@ -159,7 +162,7 @@
       <th>{{ lang.t("reconcile.container") }}</th>
       <th>{{ lang.t("reconcile.state") }}</th>
       <th>{{ lang.t("reconcile.kind") }}</th>
-      <th></th>
+      <th class="w-px">{{ lang.t("common.action") }}</th>
     </tr></thead>
     <tbody>
     {% for r in v.rows %}

@@ -79,6 +79,12 @@ common.select = "Select"
 common.none = "None"
 common.yes = "Yes"
 common.no = "No"
+common.action = "Action"
+common.more = "more"
+common.less = "close"
+common.choose_file = "Choose file"
+common.no_file = "No file chosen"
+common.drop_file = "or drag the file here"
 
 # --- field labels ---
 field.full_name = "Full name"

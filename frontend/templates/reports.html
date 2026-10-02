@@ -12,7 +12,11 @@
 </div>
 
 <div class="grid gap-4 sm:grid-cols-3 mb-5">
-  <a class="stat stat--left" href="/interventions">
+  {# Sayi uc ayri listenin toplami (mudahale + silme onayi + sahiplenme), tek bir
+     sayfasi yok: kart baglanti degil. Eskiden `/interventions`e gidiyordu ve
+     "26" diyen kart bos liste aciyordu. Her bilesenin kendi satiri asagida,
+     kendi sayisiyla ve kendi adresiyle duruyor. #}
+  <div class="stat stat--left">
     <div class="stat-head">
       <span class="stat-ico"><i class="ico ico-inbox" aria-hidden="true"></i></span>
       <div class="min-w-0 flex-1">
@@ -21,7 +25,7 @@
         <p class="stat-foot">{{ summary.pending_foot }}</p>
       </div>
     </div>
-  </a>
+  </div>
   <a class="stat stat--moved" href="/upcoming">
     <div class="stat-head">
       <span class="stat-ico"><i class="ico ico-calendar" aria-hidden="true"></i></span>

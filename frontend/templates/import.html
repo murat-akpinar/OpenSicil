@@ -44,9 +44,17 @@
 <form class="card stack mb-4" method="post" action="/imports/preview">
   <p class="hint">{{ lang.t("import.hint") }}</p>
   {% if ownership %}<p class="alert alert-info">{{ lang.t("import.ownership_hint") }}</p>{% endif %}
+  {# Tarayicinin kendi dosya widget'i temanin disinda kaliyordu: input gizli ama
+     odaklanabilir, etiket dugme gibi cizilir. Kutu ayni zamanda surukle-birak
+     alani (app.js `bindCsvFile`); JS yoksa etiket + input yine calisir. #}
   <div class="field">
-    <label class="label" for="csv-file">{{ lang.t("import.file") }}</label>
-    <input class="input" id="csv-file" type="file" accept=".csv,text/csv,text/plain" data-csv-into="csv">
+    <span class="label">{{ lang.t("import.file") }}</span>
+    <div class="file-drop" data-csv-drop>
+      <input class="file-input" id="csv-file" type="file" accept=".csv,text/csv,text/plain" data-csv-into="csv">
+      <label class="btn" for="csv-file"><i class="ico ico-inbox" aria-hidden="true"></i>{{ lang.t("common.choose_file") }}</label>
+      <span class="file-name" data-csv-name>{{ lang.t("common.no_file") }}</span>
+      <span class="muted text-xs">{{ lang.t("common.drop_file") }}</span>
+    </div>
   </div>
   <div class="field">
     <label class="label" for="csv">{{ lang.t("import.paste") }}</label>

@@ -79,6 +79,12 @@ common.select = "Seçin"
 common.none = "Yok"
 common.yes = "Evet"
 common.no = "Hayır"
+common.action = "İşlem"
+common.more = "devamı"
+common.less = "kapat"
+common.choose_file = "Dosya seç"
+common.no_file = "Dosya seçilmedi"
+common.drop_file = "ya da dosyayı buraya sürükleyin"
 
 # --- alan adlari ---
 field.full_name = "Ad Soyad"

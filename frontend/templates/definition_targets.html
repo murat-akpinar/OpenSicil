@@ -63,17 +63,19 @@
   </div>
   {% if !t.effective.is_empty() %}
   <h3 class="sec-title mt-6">{{ lang.t("def.effective") }}</h3>
-  <table class="tbl">
-    <tbody>
-    {% for e in t.effective %}
-      <tr>
-        <td class="w-56">{{ lang.t(e.label) }}</td>
-        <td>{{ e.value }}</td>
-        <td class="muted">{{ e.from }}</td>
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table>
+  <div class="tbl-scroll">
+    <table class="tbl">
+      <tbody>
+      {% for e in t.effective %}
+        <tr>
+          <td class="w-56">{{ lang.t(e.label) }}</td>
+          <td>{{ e.value }}</td>
+          <td class="muted">{{ e.from }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
   {% endif %}
   {% endif %}
 </section>

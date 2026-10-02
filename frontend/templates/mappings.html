@@ -2,26 +2,34 @@
 {% block title %}{{ target_name }} — OpenSicil{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1 class="h1">{{ target_name }} — {{ lang.t("mappings.title") }}</h1>
+  <h1 class="h1">{{ target_name }}</h1>
   <a class="link text-sm" href="/targets">{{ lang.t("nav.targets") }}</a>
 </div>
 <p class="mb-4 text-sm muted">{{ lang.t("mappings.intro") }}</p>
 {% if !error.is_empty() %}<p class="alert alert-err">{{ error }}</p>{% endif %}
-<table class="tbl mb-6">
-  <thead><tr><th>{{ lang.t("mappings.attribute") }}</th><th>{{ lang.t("mappings.source") }}</th><th>{{ lang.t("mappings.text") }}</th><th>{{ lang.t("mappings.transform") }}</th><th>{{ lang.t("mappings.write_if_empty_short") }}</th><th></th></tr></thead>
-  <tbody>
-  {% for r in rows %}
-    <tr>
-      <td>{{ r.attribute }}</td>
-      <td>{{ lang.t(r.source) }}{% if r.sensitive %} <span class="warn">{{ lang.t("mappings.sensitive_tag") }}</span>{% endif %}</td>
-      <td>{{ r.source_text }}</td>
-      <td>{{ lang.t(r.transform) }}</td>
-      <td>{% if r.write_if_empty %}{{ lang.t("common.yes") }}{% endif %}</td>
-      <td>{% if can_edit %}<form method="post" action="/targets/{{ target_id }}/mappings/{{ r.id }}/delete"><button class="btn btn-sm" type="submit">{{ lang.t("common.delete") }}</button></form>{% endif %}</td>
-    </tr>
-  {% endfor %}
-  </tbody>
-</table>
+<section class="card mb-6">
+  <div class="card-head">
+    <span class="ico-tile"><i class="ico ico-sitemap" aria-hidden="true"></i></span>
+    <h2 class="h2">{{ lang.t("mappings.title") }}</h2>
+  </div>
+  <div class="tbl-scroll">
+    <table class="tbl">
+      <thead><tr><th>{{ lang.t("mappings.attribute") }}</th><th>{{ lang.t("mappings.source") }}</th><th>{{ lang.t("mappings.text") }}</th><th>{{ lang.t("mappings.transform") }}</th><th>{{ lang.t("mappings.write_if_empty_short") }}</th><th class="w-px">{{ lang.t("common.action") }}</th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          <td><span class="mono">{{ r.attribute }}</span></td>
+          <td>{{ lang.t(r.source) }}{% if r.sensitive %} <span class="warn">{{ lang.t("mappings.sensitive_tag") }}</span>{% endif %}</td>
+          <td><span class="mono">{{ r.source_text }}</span></td>
+          <td>{{ lang.t(r.transform) }}</td>
+          <td>{% if r.write_if_empty %}{{ lang.t("common.yes") }}{% endif %}</td>
+          <td class="w-px">{% if can_edit %}<form method="post" action="/targets/{{ target_id }}/mappings/{{ r.id }}/delete"><button class="btn btn-sm" type="submit">{{ lang.t("common.delete") }}</button></form>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
 {% if can_edit %}
 <h2 class="h2">{{ lang.t("mappings.new_row") }}</h2>
 <form method="post" action="/targets/{{ target_id }}/mappings" class="card grid items-end gap-3 sm:grid-cols-3">

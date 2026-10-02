@@ -310,11 +310,33 @@
   a {
     color: var(--ctp-accent);
   }
-  /* Onay kutusu her yerde ayni boy ve metin satirina oturur: tarayici varsayilani
-     13px ve `margin: 3px 3.5px` idi, `align-top` hucrede kutu komsu hucrenin ilk
-     satirindan kayiyordu (bkz. `.tbl td`). */
+  /* Onay kutusu her yerde ayni: tarayici varsayilani 13px, `margin: 3px 3.5px`
+     ve tema disi bir gri kareydi — koyu temada siyah, acikta mavi cikiyordu.
+     `appearance: none` + kendi cercevesi; isaret CaskaydiaMono Nerd Font
+     glyph'i (ADR-067, `sh scripts/check-glyphs.sh` dogrular). Pseudo-eleman
+     `.switch::after` ile ayni teknik: `appearance: none` verilmis kutuda calisir.
+     16px kutu metin satirina oturur (`align-top` hucrede bkz. `.check`). */
   input[type="checkbox"] {
-    @apply m-0 size-4 shrink-0 align-middle;
+    @apply relative m-0 inline-block size-4 shrink-0 cursor-pointer rounded border
+           border-surface bg-bg-hard align-middle
+           disabled:cursor-not-allowed disabled:opacity-50;
+    appearance: none;
+  }
+  input[type="checkbox"]::after {
+    @apply absolute inset-0 grid place-items-center text-[0.625rem] leading-none
+           text-on-accent;
+    content: "";
+    font-family: "CaskaydiaMono Nerd Font", monospace;
+  }
+  input[type="checkbox"]:checked,
+  input[type="checkbox"]:indeterminate {
+    @apply border-accent bg-accent;
+  }
+  input[type="checkbox"]:checked::after {
+    content: "\f00c";
+  }
+  input[type="checkbox"]:indeterminate::after {
+    content: "\f068";
   }
   :focus-visible {
     outline: 2px solid var(--ctp-accent);
@@ -662,6 +684,9 @@
     @apply grid size-8 shrink-0 place-items-center rounded-full bg-accent-soft text-xs
            font-bold text-on-accent-soft;
   }
+  .avatar-lg {
+    @apply size-14 text-lg;
+  }
   .avatar-c1 {
     color: var(--chart-1);
     box-shadow: inset 0 0 0 1px currentcolor;
@@ -903,11 +928,14 @@
 
   /* Sayaç kartı (ADR-117). Renk tek değişkenden gelir: `--stat-c`, kartın tür
      sınıfı (`.stat--total` …) yazar; zemin, kenarlık, ikon karesi, sayı ve
-     kıvılcım hepsi ondan türer. Alt dolgu 46px — kıvılcım kartın tabanında
-     42px yer kaplıyor. Kartın tamamı bağlantı; odak halkası `:focus-visible`ten. */
+     kıvılcım hepsi ondan türer. Tür sınıfı olmayan kartta (mutabakat, içe
+     aktarma özetleri) değişken tanımsız kalıyordu ve `color-mix` kenarlığı
+     parlak beyaza çeviriyordu — varsayılan vurgu rengi.
+     Kartın tamamı bağlantı; odak halkası `:focus-visible`ten. */
   .stat {
     @apply relative flex flex-col overflow-hidden border border-line text-fg no-underline;
-    padding: 18px 18px 46px;
+    --stat-c: var(--ctp-accent);
+    padding: 18px;
     border-radius: 18px;
     box-shadow: var(--ctp-shadow);
     background-image: linear-gradient(
@@ -929,6 +957,11 @@
     box-shadow:
       var(--ctp-shadow),
       0 14px 34px color-mix(in srgb, var(--stat-c) 18%, transparent);
+  }
+  /* Kıvılcım kartın tabanında 42px yer kaplar, yalnızca o kart alttan boşluk
+     açar; kıvılcımsız kartta aynı dolgu 46px boş alan bırakıyordu. */
+  .stat--spark {
+    padding-bottom: 46px;
   }
   .stat--total {
     --stat-c: var(--stat-total);
@@ -1289,7 +1322,8 @@
      değil — `w-full` buton formun sonunda devasa bir şerit oluyordu (ADR-114). */
   .btn {
     @apply inline-flex w-fit cursor-pointer items-center justify-center gap-2 rounded-lg
-           border border-line bg-card px-3.5 py-2 text-sm font-bold text-fg no-underline
+           border border-line bg-card px-3.5 py-2 text-sm font-bold whitespace-nowrap
+           text-fg no-underline
            hover:border-accent hover:text-accent
            disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-line
            disabled:hover:text-fg;
@@ -1338,6 +1372,27 @@
   .label {
     @apply mb-1.5 block text-sm font-bold text-fg-dim;
   }
+  /* Dosya seçici: tarayıcının "Dosya Seç / seçilmedi" widget'ı temanın dışında
+     kalıyordu. Input görünmez ama odaklanabilir (etiket düğme gibi çizilir ve
+     odak halkasını o taşır); kutunun kendisi sürükle-bırak alanı (app.js). */
+  .file-drop {
+    @apply flex flex-wrap items-center gap-3 rounded-xl border border-dashed
+           border-surface bg-bg-soft px-4 py-4 text-sm;
+  }
+  .file-drop[data-over] {
+    @apply border-accent bg-accent-soft;
+  }
+  .file-input {
+    @apply absolute size-px overflow-hidden whitespace-nowrap opacity-0;
+    clip-path: inset(50%);
+  }
+  .file-input:focus-visible + .btn {
+    outline: 2px solid var(--ctp-accent);
+    outline-offset: 2px;
+  }
+  .file-name {
+    @apply min-w-0 flex-1 truncate text-fg-dim;
+  }
   .input {
     @apply w-full border border-surface bg-bg-soft px-3 py-2 text-fg
            placeholder:text-fg-faint focus:border-accent;
@@ -1370,39 +1425,11 @@
   }
   /* Anahtar görünümlü onay kutusu (`/targets`, `/config`): kutu yerine ray + topuz.
      `appearance: none` ile çizilir, `accent-color` devre dışı kalır. */
-  .switch {
-    @apply relative inline-block h-5 w-9 shrink-0 cursor-pointer rounded-full
-           border border-surface bg-bg-hard align-middle;
-    appearance: none;
-    transition:
-      background-color 160ms ease,
-      border-color 160ms ease;
-  }
-  .switch::after {
-    @apply absolute top-0.5 left-0.5 size-3.5 rounded-full bg-fg-faint;
-    content: "";
-    transition:
-      transform 160ms ease,
-      background-color 160ms ease;
-  }
-  .switch:checked {
-    @apply border-accent bg-accent;
-  }
-  .switch:checked::after {
-    background-color: var(--ctp-on-accent);
-    transform: translateX(1rem);
-  }
-  .switch:disabled {
-    @apply cursor-not-allowed opacity-50;
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .switch,
-    .switch::after {
-      transition: none;
-    }
-  }
+  /* Yardim metni 12px mono fontta cok kucuk okunuyordu: 13px ve bir ton koyu */
   .hint {
-    @apply mt-1.5 block text-xs text-fg-faint;
+    @apply mt-1.5 block text-fg-dim;
+    font-size: 0.8125rem;
+    line-height: 1.45;
   }
   /* Kutu ilk satira hizalanir: `items-center` uzun etiket iki satira sarinca
      kutuyu iki satirin ortasina kaydiriyordu. mt-0.5, 16px kutuyu 20px satirda ortalar. */
@@ -1428,6 +1455,47 @@
   }
   .kv dd {
     @apply break-words;
+  }
+  /* Genis kart basligi: alanlar uc sutuna yayilir */
+  .kv-3 {
+    @apply lg:grid-cols-3;
+  }
+  /* Bos alan gorunmez kalmasin: "deger yok" ile "alan yok" ayni sey degil */
+  .kv dd:empty::after {
+    content: "—";
+    color: var(--ctp-fg-faint);
+  }
+
+  /* Ham veri (DN, oznitelik adi, teknik fark): bir ton kucuk, kirilabilir,
+     govde metninden ayrilsin diye soluk */
+  .mono {
+    @apply block text-xs text-fg-dim;
+    font-family: var(--font-mono);
+    /* `break-all` cumleyi de ortasindan kesiyordu; `anywhere` yalnizca satira
+       sigmayan parcayi boler — DN virgulsuz 80 karakter olabiliyor */
+    overflow-wrap: anywhere;
+  }
+  /* Uzun teknik metin iki satirdan sonra kirpilir, "devami" acar. `details`
+     yeter, JS yok; etiket metnin altinda durdugu icin ucgen isaretci gizlenir. */
+  .clamp > summary {
+    @apply flex cursor-pointer list-none flex-col items-start gap-1;
+  }
+  .clamp > summary::-webkit-details-marker {
+    display: none;
+  }
+  .clamp:not([open]) .clamp-text {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+  }
+  .clamp-tog {
+    @apply text-xs font-bold text-accent;
+  }
+  .clamp:not([open]) .clamp-less,
+  .clamp[open] .clamp-more {
+    display: none;
   }
 
   /* Vurgulu panel: müdahale / acil gibi dikkat isteyen bloklar */
@@ -1462,6 +1530,12 @@
      ofset üst bar değil kutunun kendi tepesi, yoksa başlık gövdenin içine iner. */
   .tbl-scroll .tbl th {
     top: 0;
+  }
+  /* Yapışkan olmayan başlık: kart içindeki tablo (mutabakat sahiplenme listesi)
+     sayfanın tamamını kaplamıyor, yapışan başlık kartın kenarından taşıp
+     satırların üstüne biniyordu. Başlık listeyle birlikte yukarı çıkar. */
+  .tbl.tbl-static th {
+    position: static;
   }
   @media (width < 48rem) {
     .tbl-page .tbl th {

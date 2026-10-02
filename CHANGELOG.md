@@ -43,6 +43,7 @@
 - V1 sonrası kod taraması — rol parolası DDL kaçışı, süresi geçen oturum/OIDC satırları, operatör reddinde çoklu eşleşme, parola üretiminde mod sapması, nginx HSTS
 - Onay kutuları her yerde aynı boyda ve metin satırına hizalı
 - Tablolarda iç dikey kaydırma kalktı, başlık üst barın altına yapışıyor
+- Sayfa taramasındaki görsel hatalar ve raporlar kapağındaki yanlış bağlantı
 
 ### Geri alınanlar
 

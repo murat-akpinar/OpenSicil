@@ -791,6 +791,14 @@ pub struct Person {
     pub name_conflict_override: bool,
 }
 
+impl Person {
+    /// Kisi sayfasi basligindaki bas harf avatari; liste satirlariyla (`Listed`)
+    /// ayni yardimci, boylece ayni kisi her yerde ayni harfleri tasir.
+    pub fn initials(&self) -> String {
+        crate::shell::initials(&self.name)
+    }
+}
+
 // ADR-022/042: istek ve karar yalnizca ad henuz olusmamisken yazilir (false = olusmus).
 pub async fn request_names(
     pool: &PgPool,

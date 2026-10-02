@@ -152,6 +152,47 @@ async fn counts(pool: &PgPool) -> Result<Counts, sqlx::Error> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    /// Ozet kutusundaki sayi uc ayri listenin toplami; tek bir sayfasi yok, bu
+    /// yuzden kutu baglanti olmamali. Eskiden `/interventions`e gidiyordu:
+    /// "26 bekleyen is" diyen kutu bir mudahale varken bos liste aciyordu.
+    /// Her bilesen kendi satirinda, kendi sayisi ve kendi adresiyle durur.
+    #[test]
+    fn the_pending_box_is_not_a_link_and_each_list_carries_its_own_count() {
+        let page = ReportsTemplate {
+            lang: crate::i18n::DEFAULT,
+            shell: Shell::from_parts("admin", &["admin".to_string()]),
+            targets: Vec::new(),
+            summary: Summary {
+                pending: 26,
+                pending_foot: String::new(),
+                interventions: 1,
+                deletions: 2,
+                unadopted: 23,
+                upcoming: 0,
+                upcoming_days: 30,
+                used_names: 0,
+                last_reconcile: String::new(),
+            },
+        }
+        .render()
+        .unwrap();
+        assert!(
+            !page.contains(r#"<a class="stat stat--left""#),
+            "toplam kutusu baglanti olmamali: {page}"
+        );
+        let row = page
+            .split_once(r#"href="/interventions""#)
+            .expect("mudahale satiri yok")
+            .1;
+        let row = row.split_once("</a>").expect("satir kapanmamis").0;
+        assert!(
+            row.contains(">1<") && !row.contains(">26<"),
+            "mudahale satiri kendi sayisini gostermeli: {row}"
+        );
+    }
+
     #[tokio::test]
     #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
     async fn the_hub_lists_every_target_system_for_reconciliation() {

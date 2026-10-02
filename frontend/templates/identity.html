@@ -1,38 +1,59 @@
 {% extends "base.html" %}
+{# Uzun ham metin: iki satirdan sonra kirpilir, "devami" acar. Kisasina sarmalayici
+   takmanin anlami yok — "devami" etiketi acacak bir sey olmadan cikardi. #}
+{% macro clamped(text) %}
+{%- if text.len() > 90 -%}
+<details class="clamp">
+  <summary>
+    <span class="clamp-text mono">{{ text }}</span>
+    <span class="clamp-tog clamp-more">{{ lang.t("common.more") }}</span>
+    <span class="clamp-tog clamp-less">{{ lang.t("common.less") }}</span>
+  </summary>
+</details>
+{%- else -%}
+<span class="mono">{{ text }}</span>
+{%- endif -%}
+{% endmacro %}
 {% block title %}{{ page.person.name }} — OpenSicil{% endblock %}
 {% block content %}
-<div class="page-head">
-  <div>
-    <h1 class="h1">{{ page.person.name }}</h1>
-    <p class="muted text-sm">{{ page.person.role }}{% if !page.person.department.is_empty() %} · {{ page.person.department }}{% endif %}</p>
-  </div>
-  <div class="flex items-center gap-2">
-    <span class="badge badge-{{ page.state_kind }}">{{ lang.key("state", page.state) }}</span>
-    {% if can_edit_names %}<a class="btn btn-sm" href="/identities/{{ page.person.id }}/edit">{{ lang.t("form.edit_title") }}</a>{% endif %}
-  </div>
-</div>
-
+{# Ust bilgi karti: solda kimlik (bas harf avatari, ad, rol · departman, durum
+   rozeti ve duzenleme), sagda alanlar uc sutun. Sayfa basligi kartin kendisi,
+   ayri bir `page-head` seridi yok. #}
 <div class="card mb-6">
-  <dl class="kv">
-    <div><dt>{{ lang.t("field.employee_number") }}</dt><dd>{{ page.person.employee_number }}</dd></div>
-    <div><dt>{{ lang.t("field.national_id") }}</dt><dd>{{ page.person.national_id_masked }}</dd></div>
-    <div><dt>{{ lang.t("field.department") }}</dt><dd>{{ page.person.department }}</dd></div>
-    <div><dt>{{ lang.t("field.primary_role") }}</dt><dd>{{ page.person.role }}{% if page.person.role_placeholder %} <span class="badge badge-warn">{{ lang.t("person.role_unassigned") }}</span>{% endif %}</dd></div>
-    <div><dt>{{ lang.t("field.manager") }}</dt><dd>{{ page.person.manager }}{% if page.lifecycle.manager_departed %} <span class="warn">{% if page.lifecycle.handover_name.is_empty() %}{{ lang.t("person.manager_no_effective") }}{% else %}{{ lang.t1("person.manager_handover", page.lifecycle.handover_name) }}{% endif %}</span>{% endif %}</dd></div>
-    <div><dt>{{ lang.t("field.employment_type") }}</dt><dd>{{ lang.key("employment", page.person.employment_type) }}</dd></div>
-    <div><dt>{{ lang.t("person.start") }}</dt><dd>{{ page.person.start_date }}</dd></div>
-    <div><dt>{{ lang.t("person.end_at") }}</dt><dd>{{ page.person.end_at }}</dd></div>
-    <div><dt>{{ lang.t("field.mobile_phone") }}</dt><dd>{{ page.person.mobile_phone }}</dd></div>
-    <div><dt>{{ lang.t("field.username") }}</dt><dd>{{ page.person.username }}</dd></div>
-    <div><dt>{{ lang.t("field.email") }}</dt><dd>{{ page.person.email }}</dd></div>
-    <div><dt>UPN</dt><dd>{{ page.person.upn }}</dd></div>
-    {% if page.lifecycle.subordinates > 0 %}
-    <div class="sm:col-span-2"><dt>{{ lang.t("person.subordinates") }}</dt><dd>{{ lang.t1("person.people_count", page.lifecycle.subordinates) }}{% if page.lifecycle.orphaned_subordinates %} <span class="err">{{ lang.t("person.orphaned_subordinates") }}</span>{% endif %}</dd></div>
-    {% endif %}
-    {% if !page.person.requested_username.is_empty() %}
-    <div class="sm:col-span-2"><dt>{{ lang.t("person.requested_username") }}</dt><dd>{{ page.person.requested_username }}{% if page.person.name_conflict_override %} <span class="muted">{{ lang.t("person.override_note") }}</span>{% endif %}</dd></div>
-    {% endif %}
-  </dl>
+  <div class="flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-8">
+    <div class="flex min-w-0 items-start gap-4 lg:w-64 lg:shrink-0">
+      <span class="avatar avatar-lg" data-seed="{{ page.person.name }}" aria-hidden="true">{{ page.person.initials() }}</span>
+      <div class="min-w-0">
+        <h1 class="h1">{{ page.person.name }}</h1>
+        <p class="mt-0.5 muted text-sm">{{ page.person.role }}{% if !page.person.department.is_empty() %} · {{ page.person.department }}{% endif %}</p>
+        <div class="mt-2.5 flex flex-wrap items-center gap-2">
+          <span class="badge badge-{{ page.state_kind }}">{{ lang.key("state", page.state) }}</span>
+          {% if can_edit_names %}<a class="btn btn-sm" href="/identities/{{ page.person.id }}/edit">{{ lang.t("form.edit_title") }}</a>{% endif %}
+        </div>
+      </div>
+    </div>
+    {# Bos deger `.kv dd:empty::after` ile soluk "—" basar; sablonda kosul yok #}
+    <dl class="kv kv-3 min-w-0 flex-1">
+      <div><dt>{{ lang.t("field.employee_number") }}</dt><dd>{{ page.person.employee_number }}</dd></div>
+      <div><dt>{{ lang.t("field.national_id") }}</dt><dd>{{ page.person.national_id_masked }}</dd></div>
+      <div><dt>{{ lang.t("field.department") }}</dt><dd>{{ page.person.department }}</dd></div>
+      <div><dt>{{ lang.t("field.primary_role") }}</dt><dd>{{ page.person.role }}{% if page.person.role_placeholder %} <span class="badge badge-warn">{{ lang.t("person.role_unassigned") }}</span>{% endif %}</dd></div>
+      <div><dt>{{ lang.t("field.manager") }}</dt><dd>{{ page.person.manager }}{% if page.lifecycle.manager_departed %} <span class="warn">{% if page.lifecycle.handover_name.is_empty() %}{{ lang.t("person.manager_no_effective") }}{% else %}{{ lang.t1("person.manager_handover", page.lifecycle.handover_name) }}{% endif %}</span>{% endif %}</dd></div>
+      <div><dt>{{ lang.t("field.employment_type") }}</dt><dd>{{ lang.key("employment", page.person.employment_type) }}</dd></div>
+      <div><dt>{{ lang.t("person.start") }}</dt><dd>{{ page.person.start_date }}</dd></div>
+      <div><dt>{{ lang.t("person.end_at") }}</dt><dd>{{ page.person.end_at }}</dd></div>
+      <div><dt>{{ lang.t("field.mobile_phone") }}</dt><dd>{{ page.person.mobile_phone }}</dd></div>
+      <div><dt>{{ lang.t("field.username") }}</dt><dd>{{ page.person.username }}</dd></div>
+      <div><dt>{{ lang.t("field.email") }}</dt><dd>{{ page.person.email }}</dd></div>
+      <div><dt>UPN</dt><dd>{{ page.person.upn }}</dd></div>
+      {% if page.lifecycle.subordinates > 0 %}
+      <div><dt>{{ lang.t("person.subordinates") }}</dt><dd>{{ lang.t1("person.people_count", page.lifecycle.subordinates) }}{% if page.lifecycle.orphaned_subordinates %} <span class="err">{{ lang.t("person.orphaned_subordinates") }}</span>{% endif %}</dd></div>
+      {% endif %}
+      {% if !page.person.requested_username.is_empty() %}
+      <div><dt>{{ lang.t("person.requested_username") }}</dt><dd>{{ page.person.requested_username }}{% if page.person.name_conflict_override %} <span class="muted">{{ lang.t("person.override_note") }}</span>{% endif %}</dd></div>
+      {% endif %}
+    </dl>
+  </div>
 </div>
 
 {% if page.name_intervention %}
@@ -40,7 +61,7 @@
   <h2 class="h2 mb-1">{{ lang.t("person.name_intervention") }}</h2>
   <p class="text-sm mb-2">{{ lang.t("person.name_intervention_help") }} <a class="link" href="/used-names">{{ lang.t("nav.used_names") }}</a></p>
   {% if can_edit_names %}
-  <form method="post" action="/identities/{{ page.person.id }}/names" class="flex gap-3 items-end">
+  <form method="post" action="/identities/{{ page.person.id }}/names" class="flex flex-wrap gap-3 items-end">
     <div class="grow">
       <label class="label" for="requested_username">{{ lang.t("field.username") }}</label>
       <input class="input" type="text" id="requested_username" name="requested_username" value="{{ page.person.requested_username }}" maxlength="20" autocomplete="off">
@@ -53,179 +74,218 @@
 {% endif %}
 
 {% if can_edit_names && !page.lifecycle.deleted %}
-<h2 class="h2">{{ lang.t("lifecycle.title") }}</h2>
-<div class="mb-6 grid gap-4 text-sm md:grid-cols-2">
-  {% if !page.lifecycle.departed %}
-  <form method="post" action="/identities/{{ page.person.id }}/departure" class="card-tight space-y-2">
-    <p class="h2">{{ lang.t("lifecycle.planned_departure") }}</p>
-    <label class="block">{{ lang.t("lifecycle.last_working_day") }} <input class="input" type="date" name="end_date" value="{{ page.lifecycle.end_date }}" required></label>
-    <label class="block">{{ lang.t("lifecycle.handover_manager") }} <input class="input" type="text" name="handover_manager_id" value="{{ page.lifecycle.handover_manager_id }}"></label>
-    <button class="btn btn-primary" type="submit">{{ lang.t("common.save") }}</button>
-  </form>
-  <form method="post" action="/identities/{{ page.person.id }}/emergency" class="panel panel-err space-y-2">
-    <p class="err font-bold">{{ lang.t("lifecycle.emergency") }}</p>
-    <label class="block">{{ lang.t("lifecycle.reason") }} <input class="input" type="text" name="reason" required></label>
-    <label class="block">{{ lang.t("lifecycle.handover_manager") }} <input class="input" type="text" name="handover_manager_id" value="{{ page.lifecycle.handover_manager_id }}"></label>
-    <p class="text-xs muted">{{ lang.t("lifecycle.emergency_note") }}</p>
-    <button class="btn btn-danger" type="submit">{{ lang.t("lifecycle.emergency") }}</button>
-  </form>
-  {% else %}
-  <form method="post" action="/identities/{{ page.person.id }}/revert" class="card-tight space-y-2">
-    <p class="h2">{{ lang.t("lifecycle.revert_title") }}</p>
-    <label class="block">{{ lang.t("lifecycle.return_day") }} <input class="input" type="date" name="return_day"></label>
-    <button class="btn btn-primary" type="submit">{{ lang.t("lifecycle.revert_button") }}</button>
-  </form>
-  {% endif %}
-  {% if page.lifecycle.suspension_start.is_empty() %}
-  <form method="post" action="/identities/{{ page.person.id }}/suspension" class="card-tight space-y-2">
-    <p class="h2">{{ lang.t("lifecycle.suspend_title") }}</p>
-    <label class="block">{{ lang.t("lifecycle.first_day") }} <input class="input" type="date" name="suspension_start" required></label>
-    <label class="block">{{ lang.t("lifecycle.leave_last_day") }} <input class="input" type="date" name="suspension_end"></label>
-    <button class="btn btn-primary" type="submit">{{ lang.t("lifecycle.suspend_button") }}</button>
-  </form>
-  {% else %}
-  <form method="post" action="/identities/{{ page.person.id }}/suspension/lift" class="card-tight space-y-2">
-    <p class="h2">{{ lang.t("lifecycle.suspension") }}: {{ page.lifecycle.suspension_start }} – {% if page.lifecycle.suspension_end.is_empty() %}{{ lang.t("lifecycle.open_ended") }}{% else %}{{ page.lifecycle.suspension_end }} ({{ lang.t1("lifecycle.accounts_open_at", page.lifecycle.return_day) }}){% endif %}</p>
-    <button class="btn btn-primary" type="submit">{{ lang.t("lifecycle.lift_button") }}</button>
-  </form>
-  {% endif %}
-  {% if page.lifecycle.can_cancel && !page.lifecycle.cancelled %}
-  <form method="post" action="/identities/{{ page.person.id }}/cancel" class="card-tight space-y-2">
-    <p class="h2">{{ lang.t("lifecycle.cancel_title") }}</p>
-    <p class="text-xs muted">{{ lang.t("lifecycle.cancel_note") }}</p>
-    <button class="btn btn-warn" type="submit">{{ lang.t("lifecycle.cancel_button") }}</button>
-  </form>
-  {% endif %}
-  {% if page.lifecycle.cancelled %}<p class="warn">{{ lang.t("lifecycle.cancel_requested") }}</p>{% endif %}
-  {% if page.lifecycle.emergency %}<p class="err">{{ lang.t("lifecycle.emergency") }}.</p>{% endif %}
-</div>
-{% endif %}
-
-<h2 class="h2">{{ lang.t("person.additional_roles") }}</h2>
-{% if page.additional_roles.is_empty() %}
-<p class="text-sm mb-2 muted">{{ lang.t("person.no_additional_roles") }}</p>
-{% else %}
-<table class="tbl mb-2">
-  <thead><tr><th>{{ lang.t("field.role") }}</th><th>{{ lang.t("person.role_end") }}</th><th></th></tr></thead>
-  <tbody>
-  {% for r in page.additional_roles %}
-    <tr>
-      <td>{{ r.name }}</td>
-      <td>{% if r.ends_on.is_empty() %}<span class="muted">{{ lang.t("person.no_end") }}</span>{% else %}{{ r.ends_on }}{% if r.ends_soon %} <span class="badge badge-warn">{{ lang.t("person.ends_soon") }}</span>{% endif %}{% endif %}</td>
-      <td>{% if can_edit_names %}<form method="post" action="/identities/{{ page.person.id }}/roles/{{ r.role_id }}/delete"><button class="btn btn-sm" type="submit">{{ lang.t("common.remove") }}</button></form>{% endif %}</td>
-    </tr>
-  {% endfor %}
-  </tbody>
-</table>
-{% endif %}
-{% if can_edit_names %}
-<form method="post" action="/identities/{{ page.person.id }}/roles" class="flex gap-2 items-end mb-6">
-  <div class="grow">
-    <label class="label" for="role_id">{{ lang.t("person.additional_role") }}</label>
-    <select class="input" id="role_id" name="role_id" required>
-      {% for c in page.role_options %}<option value="{{ c.id }}">{{ c.label }}</option>{% endfor %}
-    </select>
+{# Uc esit sutun: planli ayrilis, askiya alma, acil ayrilis. Izgara hucreleri
+   zaten esit yukseklikte; dugmeyi `mt-auto` tabana iter, boylece ayni hizada
+   dururlar. Dar ekranda alt alta. #}
+<section class="card mb-6">
+  <div class="card-head">
+    <span class="ico-tile"><i class="ico ico-calendar" aria-hidden="true"></i></span>
+    <h2 class="h2">{{ lang.t("lifecycle.title") }}</h2>
   </div>
-  <div>
-    <label class="label" for="ends_on">{{ lang.t("person.end_optional") }}</label>
-    <input class="input" type="date" id="ends_on" name="ends_on">
+  <div class="grid gap-4 text-sm md:grid-cols-3">
+    {% if !page.lifecycle.departed %}
+    <form method="post" action="/identities/{{ page.person.id }}/departure" class="card-tight flex flex-col gap-2">
+      <p class="h2">{{ lang.t("lifecycle.planned_departure") }}</p>
+      <label class="block">{{ lang.t("lifecycle.last_working_day") }} <input class="input" type="date" name="end_date" value="{{ page.lifecycle.end_date }}" required></label>
+      <label class="block">{{ lang.t("lifecycle.handover_manager") }} <input class="input" type="text" name="handover_manager_id" value="{{ page.lifecycle.handover_manager_id }}"></label>
+      <button class="btn btn-primary mt-auto" type="submit">{{ lang.t("common.save") }}</button>
+    </form>
+    {% else %}
+    <form method="post" action="/identities/{{ page.person.id }}/revert" class="card-tight flex flex-col gap-2">
+      <p class="h2">{{ lang.t("lifecycle.revert_title") }}</p>
+      <label class="block">{{ lang.t("lifecycle.return_day") }} <input class="input" type="date" name="return_day"></label>
+      <button class="btn btn-primary mt-auto" type="submit">{{ lang.t("lifecycle.revert_button") }}</button>
+    </form>
+    {% endif %}
+    {% if page.lifecycle.suspension_start.is_empty() %}
+    <form method="post" action="/identities/{{ page.person.id }}/suspension" class="card-tight flex flex-col gap-2">
+      <p class="h2">{{ lang.t("lifecycle.suspend_title") }}</p>
+      <label class="block">{{ lang.t("lifecycle.first_day") }} <input class="input" type="date" name="suspension_start" required></label>
+      <label class="block">{{ lang.t("lifecycle.leave_last_day") }} <input class="input" type="date" name="suspension_end"></label>
+      <button class="btn btn-primary mt-auto" type="submit">{{ lang.t("lifecycle.suspend_button") }}</button>
+    </form>
+    {% else %}
+    <form method="post" action="/identities/{{ page.person.id }}/suspension/lift" class="card-tight flex flex-col gap-2">
+      <p class="h2">{{ lang.t("lifecycle.suspension") }}: {{ page.lifecycle.suspension_start }} – {% if page.lifecycle.suspension_end.is_empty() %}{{ lang.t("lifecycle.open_ended") }}{% else %}{{ page.lifecycle.suspension_end }} ({{ lang.t1("lifecycle.accounts_open_at", page.lifecycle.return_day) }}){% endif %}</p>
+      <button class="btn btn-primary mt-auto" type="submit">{{ lang.t("lifecycle.lift_button") }}</button>
+    </form>
+    {% endif %}
+    {% if !page.lifecycle.departed %}
+    <form method="post" action="/identities/{{ page.person.id }}/emergency" class="panel panel-err flex flex-col gap-2">
+      <p class="err font-bold">{{ lang.t("lifecycle.emergency") }}</p>
+      <label class="block">{{ lang.t("lifecycle.reason") }} <input class="input" type="text" name="reason" required></label>
+      <label class="block">{{ lang.t("lifecycle.handover_manager") }} <input class="input" type="text" name="handover_manager_id" value="{{ page.lifecycle.handover_manager_id }}"></label>
+      <p class="text-xs muted">{{ lang.t("lifecycle.emergency_note") }}</p>
+      <button class="btn btn-danger mt-auto" type="submit">{{ lang.t("lifecycle.emergency") }}</button>
+    </form>
+    {% endif %}
+    {% if page.lifecycle.can_cancel && !page.lifecycle.cancelled %}
+    <form method="post" action="/identities/{{ page.person.id }}/cancel" class="card-tight flex flex-col gap-2">
+      <p class="h2">{{ lang.t("lifecycle.cancel_title") }}</p>
+      <p class="text-xs muted">{{ lang.t("lifecycle.cancel_note") }}</p>
+      <button class="btn btn-warn mt-auto" type="submit">{{ lang.t("lifecycle.cancel_button") }}</button>
+    </form>
+    {% endif %}
   </div>
-  <button class="btn btn-primary" type="submit">{{ lang.t("common.add") }}</button>
-</form>
+  {% if page.lifecycle.cancelled %}<p class="mt-3 warn">{{ lang.t("lifecycle.cancel_requested") }}</p>{% endif %}
+  {% if page.lifecycle.emergency %}<p class="mt-3 err">{{ lang.t("lifecycle.emergency") }}.</p>{% endif %}
+</section>
 {% endif %}
 
-<div class="mb-3 flex flex-wrap items-center justify-between gap-3">
-  <h2 class="h2 mb-0">{{ lang.t("person.accounts") }}</h2>
-  {% if can_first_password && !page.lifecycle.deleted %}
-  <form method="post" action="/identities/{{ page.person.id }}/first-password">
-    <button class="btn btn-ok btn-sm" type="submit" title="{{ lang.t("person.first_password_title") }}">{{ lang.t("person.first_password") }}</button>
-  </form>
+<section class="card mb-6">
+  <div class="card-head">
+    <span class="ico-tile"><i class="ico ico-tag" aria-hidden="true"></i></span>
+    <h2 class="h2">{{ lang.t("person.additional_roles") }}</h2>
+  </div>
+  {% if page.additional_roles.is_empty() %}
+  <p class="text-sm muted">{{ lang.t("person.no_additional_roles") }}</p>
+  {% else %}
+  <div class="tbl-scroll">
+    <table class="tbl">
+      <thead><tr><th>{{ lang.t("field.role") }}</th><th>{{ lang.t("person.role_end") }}</th><th class="w-px">{{ lang.t("common.action") }}</th></tr></thead>
+      <tbody>
+      {% for r in page.additional_roles %}
+        <tr>
+          <td>{{ r.name }}</td>
+          <td>{% if r.ends_on.is_empty() %}<span class="muted">{{ lang.t("person.no_end") }}</span>{% else %}{{ r.ends_on }}{% if r.ends_soon %} <span class="badge badge-warn">{{ lang.t("person.ends_soon") }}</span>{% endif %}{% endif %}</td>
+          <td class="w-px">{% if can_edit_names %}<form method="post" action="/identities/{{ page.person.id }}/roles/{{ r.role_id }}/delete"><button class="btn btn-sm" type="submit">{{ lang.t("common.remove") }}</button></form>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
   {% endif %}
-</div>
-<table class="tbl mb-6">
-  <thead><tr><th>{{ lang.t("field.target") }}</th><th>{{ lang.t("field.account") }}</th><th>{{ lang.t("person.origin_mode") }}</th><th>{{ lang.t("person.applied") }}</th><th>{{ lang.t("person.diff") }}</th><th></th></tr></thead>
-  <tbody>
-  {% for a in page.accounts %}
-    <tr>
-      <td>{{ a.target }}</td>
-      <td>{{ a.external_id }}</td>
-      <td>
-        {% if !a.mode.is_empty() %}<span class="badge badge-{% if a.observed %}info{% else %}ok{% endif %}">{{ lang.key("link", a.mode) }}</span>{% endif %}
-        {% if !a.origin.is_empty() %}<span class="meta">{{ lang.key("link", a.origin) }}</span>{% endif %}
-      </td>
-      <td>{% if !a.applied_state.is_empty() %}{{ lang.key("state", a.applied_state) }}{% endif %}</td>
-      <td>{{ a.diff }}</td>
-      <td>
-        {# ADR-018/087: gozlem modunda fark yukaridadir; onay yonetime alir #}
-        {% if a.observed %}
-          {% if a.manage_requested %}<span class="warn">{{ lang.t("person.manage_requested") }}</span>
-          {# ADR-103 madde 5: rolu yer tutucu olan kisi yonetime alinmaz; dugme yerine neden #}
-          {% else if page.person.role_placeholder %}<span class="warn">{{ lang.t("person.role_undefined") }}</span>
-          {% else if can_edit_names %}
-          <form method="post" action="/identities/{{ page.person.id }}/accounts/{{ a.target_id }}/manage">
-            <button class="btn btn-sm" type="submit" title="{{ lang.t("person.take_over_title") }}">{{ lang.t("person.take_over") }}</button>
-          </form>
-          {% endif %}
-        {% endif %}
-      </td>
-    </tr>
-  {% endfor %}
-  </tbody>
-</table>
-
-<h2 class="h2">{{ lang.t("person.jobs") }}</h2>
-{% if page.jobs.is_empty() %}
-<p class="mb-6 muted">{{ lang.t("person.no_jobs") }}</p>
-{% else %}
-<table class="tbl mb-6">
-  <thead><tr><th>{{ lang.t("field.target") }}</th><th>{{ lang.t("field.state") }}</th><th>{{ lang.t("person.last_activity") }}</th><th>{{ lang.t("person.description") }}</th><th></th></tr></thead>
-  <tbody>
-  {% for j in page.jobs %}
-    <tr>
-      <td>{{ j.target }}</td>
-      <td>
-        <span class="badge badge-{{ j.status_kind }}">{{ lang.key("job", j.status) }}</span>
-        {# Deneme sayisi ve sonraki deneme yalnizca bitmemis iste anlamli #}
-        {% if j.pending && j.attempts > 0 %}<span class="meta">{{ lang.t1("person.attempt_n", j.attempts) }}</span>{% endif %}
-      </td>
-      <td>
-        {{ j.at }}
-        {% if j.pending %}<span class="meta">{{ lang.t1("person.next_attempt_at", j.next_attempt_at) }}</span>{% endif %}
-      </td>
-      <td>
-        {% if !j.waiting.is_empty() %}<span class="warn">{{ j.waiting }}</span>{% endif %}
-        {% if !j.summary.is_empty() %}<span class="err">{{ j.summary }}</span>{% endif %}
-        {% if !j.detail.is_empty() %}<details><summary class="text-xs muted">{{ lang.t("person.technical_detail") }}</summary><code class="text-xs">{{ j.detail }}</code></details>{% endif %}
-        {% if !j.result.is_empty() %}<span class="ok">{{ j.result }}</span>{% endif %}
-      </td>
-      <td>
-        {% if can_retry && j.retryable %}
-        <form method="post" action="/identities/{{ page.person.id }}/jobs/{{ j.id }}/retry"><button class="btn btn-sm" type="submit">{{ lang.t("person.retry") }}</button></form>
-        {% endif %}
-      </td>
-    </tr>
-  {% endfor %}
-  </tbody>
-</table>
-{% endif %}
-
-<h2 class="h2">{{ lang.t("person.events") }}</h2>
-{% if page.events.is_empty() %}
-<p class="muted">{{ lang.t("person.no_events") }}</p>
-{% else %}
-{# Panelin etkinlik akisiyla ayni bilesen: ham olay anahtari yerine ikon + cumle #}
-<div class="feed">
-  {% for e in page.events %}
-  <div class="feed-row feed-row--{{ e.category }}">
-    <span class="ico-solid feed-ico feed-ico--{{ e.category }}"><i class="ico {{ e.icon }}" aria-hidden="true"></i></span>
-    <div class="feed-main">
-      <p class="feed-title">{{ lang.key("event", e.event_type) }}{% if !e.subject.is_empty() %} <span class="muted">{{ e.subject }}</span>{% endif %}</p>
-      <p class="feed-sub">{% if e.actor.is_empty() %}{{ lang.t("person.by_system") }}{% else %}{{ e.actor }}{% endif %}</p>
+  {% if can_edit_names %}
+  <form method="post" action="/identities/{{ page.person.id }}/roles" class="mt-4 flex flex-wrap gap-2 items-end">
+    <div class="grow">
+      <label class="label" for="role_id">{{ lang.t("person.additional_role") }}</label>
+      <select class="input" id="role_id" name="role_id" required>
+        {% for c in page.role_options %}<option value="{{ c.id }}">{{ c.label }}</option>{% endfor %}
+      </select>
     </div>
-    {% if !e.outcome.is_empty() %}<span class="badge badge-{{ e.outcome_kind }}">{{ lang.key("outcome", e.outcome) }}</span>{% endif %}
-    <span class="feed-time">{{ e.at }}</span>
+    <div>
+      <label class="label" for="ends_on">{{ lang.t("person.end_optional") }}</label>
+      <input class="input" type="date" id="ends_on" name="ends_on">
+    </div>
+    <button class="btn btn-primary" type="submit">{{ lang.t("common.add") }}</button>
+  </form>
+  {% endif %}
+</section>
+
+<section class="card mb-6">
+  <div class="card-head">
+    <span class="ico-tile"><i class="ico ico-link" aria-hidden="true"></i></span>
+    <h2 class="h2">{{ lang.t("person.accounts") }}</h2>
+    {% if can_first_password && !page.lifecycle.deleted %}
+    <form class="ml-auto" method="post" action="/identities/{{ page.person.id }}/first-password">
+      <button class="btn btn-ok btn-sm" type="submit" title="{{ lang.t("person.first_password_title") }}">{{ lang.t("person.first_password") }}</button>
+    </form>
+    {% endif %}
   </div>
-  {% endfor %}
-</div>
-{% endif %}
+  <div class="tbl-scroll">
+    <table class="tbl">
+      <thead><tr><th>{{ lang.t("field.target") }}</th><th>{{ lang.t("field.account") }}</th><th>{{ lang.t("person.origin_mode") }}</th><th>{{ lang.t("person.applied") }}</th><th>{{ lang.t("person.diff") }}</th><th class="w-px">{{ lang.t("common.action") }}</th></tr></thead>
+      <tbody>
+      {% for a in page.accounts %}
+        <tr>
+          <td>{{ a.target }}</td>
+          <td><span class="mono">{{ a.external_id }}</span></td>
+          <td>
+            {% if !a.mode.is_empty() %}<span class="badge badge-{% if a.observed %}info{% else %}ok{% endif %}">{{ lang.key("link", a.mode) }}</span>{% endif %}
+            {% if !a.origin.is_empty() %}<span class="meta">{{ lang.key("link", a.origin) }}</span>{% endif %}
+          </td>
+          <td>{% if !a.applied_state.is_empty() %}{{ lang.key("state", a.applied_state) }}{% endif %}</td>
+          {# Fark DN ve oznitelik listesi: ham veri `.mono`, uzunu iki satirda kirpilir #}
+          <td><div class="max-w-80">{% call clamped(a.diff) %}</div></td>
+          <td class="w-px">
+            {# ADR-018/087: gozlem modunda fark yukaridadir; onay yonetime alir #}
+            {% if a.observed %}
+              {% if a.manage_requested %}<span class="warn">{{ lang.t("person.manage_requested") }}</span>
+              {# ADR-103 madde 5: rolu yer tutucu olan kisi yonetime alinmaz; dugme yerine neden #}
+              {% else if page.person.role_placeholder %}<span class="warn">{{ lang.t("person.role_undefined") }}</span>
+              {% else if can_edit_names %}
+              <form method="post" action="/identities/{{ page.person.id }}/accounts/{{ a.target_id }}/manage">
+                <button class="btn btn-sm" type="submit" title="{{ lang.t("person.take_over_title") }}">{{ lang.t("person.take_over") }}</button>
+              </form>
+              {% endif %}
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card mb-6">
+  <div class="card-head">
+    <span class="ico-tile"><i class="ico ico-bolt" aria-hidden="true"></i></span>
+    <h2 class="h2">{{ lang.t("person.jobs") }}</h2>
+  </div>
+  {% if page.jobs.is_empty() %}
+  <p class="text-sm muted">{{ lang.t("person.no_jobs") }}</p>
+  {% else %}
+  <div class="tbl-scroll">
+    <table class="tbl">
+      <thead><tr><th>{{ lang.t("field.target") }}</th><th>{{ lang.t("field.state") }}</th><th>{{ lang.t("person.last_activity") }}</th><th>{{ lang.t("person.description") }}</th><th class="w-px">{{ lang.t("common.action") }}</th></tr></thead>
+      <tbody>
+      {% for j in page.jobs %}
+        <tr>
+          <td>{{ j.target }}</td>
+          <td>
+            <span class="badge badge-{{ j.status_kind }}">{{ lang.key("job", j.status) }}</span>
+            {# Deneme sayisi ve sonraki deneme yalnizca bitmemis iste anlamli #}
+            {% if j.pending && j.attempts > 0 %}<span class="meta">{{ lang.t1("person.attempt_n", j.attempts) }}</span>{% endif %}
+          </td>
+          <td>
+            {{ j.at }}
+            {% if j.pending %}<span class="meta">{{ lang.t1("person.next_attempt_at", j.next_attempt_at) }}</span>{% endif %}
+          </td>
+          {# Renk yalnizca durum rozetinde: aciklama bastan sona yesil/kirmizi
+             oldugunda satirin neyi anlattigi degil rengi okunuyordu #}
+          <td class="text-fg-dim">
+            <div class="max-w-96 space-y-1">
+              {% if !j.waiting.is_empty() %}{% call clamped(j.waiting) %}{% endif %}
+              {% if !j.summary.is_empty() %}{% call clamped(j.summary) %}{% endif %}
+              {% if !j.detail.is_empty() %}<details><summary class="text-xs muted">{{ lang.t("person.technical_detail") }}</summary><code class="mono">{{ j.detail }}</code></details>{% endif %}
+              {% if !j.result.is_empty() %}{% call clamped(j.result) %}{% endif %}
+            </div>
+          </td>
+          <td class="w-px">
+            {% if can_retry && j.retryable %}
+            <form method="post" action="/identities/{{ page.person.id }}/jobs/{{ j.id }}/retry"><button class="btn btn-sm" type="submit">{{ lang.t("person.retry") }}</button></form>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</section>
+
+<section class="card">
+  <div class="card-head">
+    <span class="ico-tile"><i class="ico ico-clock" aria-hidden="true"></i></span>
+    <h2 class="h2">{{ lang.t("person.events") }}</h2>
+  </div>
+  {% if page.events.is_empty() %}
+  <p class="text-sm muted">{{ lang.t("person.no_events") }}</p>
+  {% else %}
+  {# Panelin etkinlik akisiyla ayni bilesen: ham olay anahtari yerine ikon + cumle #}
+  <div class="feed">
+    {% for e in page.events %}
+    <div class="feed-row feed-row--{{ e.category }}">
+      <span class="ico-solid feed-ico feed-ico--{{ e.category }}"><i class="ico {{ e.icon }}" aria-hidden="true"></i></span>
+      <div class="feed-main">
+        <p class="feed-title">{{ lang.key("event", e.event_type) }}{% if !e.subject.is_empty() %} <span class="muted">{{ e.subject }}</span>{% endif %}</p>
+        <p class="feed-sub">{% if e.actor.is_empty() %}{{ lang.t("person.by_system") }}{% else %}{{ e.actor }}{% endif %}</p>
+      </div>
+      {% if !e.outcome.is_empty() %}<span class="badge badge-{{ e.outcome_kind }}">{{ lang.key("outcome", e.outcome) }}</span>{% endif %}
+      <span class="feed-time">{{ e.at }}</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</section>
 {% endblock %}

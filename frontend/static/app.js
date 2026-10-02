@@ -475,16 +475,50 @@
     if (!target || typeof FileReader === "undefined") {
       return;
     }
-    input.addEventListener("change", function () {
-      var file = input.files && input.files[0];
+    // Seçilen dosyanın adı: gizli input'un yerine kutudaki alan gösterir.
+    // Boşsa şablonun yazdığı "dosya seçilmedi" metni durur, JS metin üretmez.
+    var box = input.closest("[data-csv-drop]");
+    var nameSlot = box && box.querySelector("[data-csv-name]");
+    var emptyName = nameSlot ? nameSlot.textContent : "";
+
+    function load(file) {
       if (!file) {
         return;
+      }
+      if (nameSlot) {
+        nameSlot.textContent = file.name;
       }
       var reader = new FileReader();
       reader.onload = function () {
         target.value = String(reader.result);
       };
       reader.readAsText(file, "UTF-8");
+    }
+
+    input.addEventListener("change", function () {
+      var file = input.files && input.files[0];
+      if (!file && nameSlot) {
+        nameSlot.textContent = emptyName;
+      }
+      load(file);
+    });
+
+    if (!box) {
+      return;
+    }
+    // Sürükle-bırak: tarayıcı varsayılanı dosyayı sekmede açmak, o yüzden
+    // dragover da iptal edilir. `DataTransfer` yoksa düğme yolu çalışmaya devam eder.
+    box.addEventListener("dragover", function (event) {
+      event.preventDefault();
+      box.setAttribute("data-over", "");
+    });
+    box.addEventListener("dragleave", function () {
+      box.removeAttribute("data-over");
+    });
+    box.addEventListener("drop", function (event) {
+      event.preventDefault();
+      box.removeAttribute("data-over");
+      load(event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0]);
     });
   }
 
