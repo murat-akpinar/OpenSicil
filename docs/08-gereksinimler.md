@@ -181,7 +181,7 @@ Karar listesi tek yerde tutulur: [PROJECT.md → Kararlar](PROJECT.md#kararlar).
 
 **Faz 5**
 
-- [ ] N-03 yük testi: 20.000 kullanıcılı lab Samba AD'de gece mutabakatı, 2.000 kimliklik değişiklik seti ve o sırada tek kimlik işleminin bekleme süresi (N-11). Zimbra mutabakatında liste üyeliğinin okunma yolu da burada ölçülür: [docs/06](06-zimbra.md) yalnızca hesap başına `GetAccountMembershipRequest`'i yazar, 20.000 hesapta 20.000 çağrıdır; yetmezse liste başına üye okuyup tersine çevirmek denenir. Tek sıra yetmezse eşzamanlılık açılır ve boyutlandırma tablosu güncellenir ([ADR-016](decisions/016-hedef-olcek-ve-olcekte-calisma.md), [ADR-047](decisions/047-worker-tek-sirada.md)).
+- [x] N-03 yük testi: 20.000 kullanıcılı lab Samba AD'de gece mutabakatı, 2.000 kimliklik değişiklik seti ve o sırada tek kimlik işleminin bekleme süresi (N-11). Ölçüldü (2026-10-02, `scripts/load-lab.sh`, AD; Zimbra yarısı Zimbra bölümünde): mutabakat 8 sn, 2.000 kimliklik set 5 dk (6,6 iş/sn), set sürerken tek kimlik işi 1 sn, arama 86 ms; tek sıra yetti, eşzamanlılık açılmadı ([ADR-108](decisions/108-n03-olcumu-tek-sira-yetti.md)). Zimbra mutabakatında liste üyeliğinin okunma yolu da burada ölçülür: [docs/06](06-zimbra.md) yalnızca hesap başına `GetAccountMembershipRequest`'i yazar, 20.000 hesapta 20.000 çağrıdır; yetmezse liste başına üye okuyup tersine çevirmek denenir. Tek sıra yetmezse eşzamanlılık açılır ve boyutlandırma tablosu güncellenir ([ADR-016](decisions/016-hedef-olcek-ve-olcekte-calisma.md), [ADR-047](decisions/047-worker-tek-sirada.md)).
 
 ### 🟡 Kurulumda kararlaştırılacak
 

@@ -51,6 +51,7 @@
 - Arayüz mockup bölümü kapanışı — güvenlik ve test
 - Giriş bölümü kapanışı — güvenlik ve test, belgeler ADR-095'e göre
 - Fazlar arası işlerin kapanışı — güvenlik ve test, Faz 4 öncesi
+- N-03 yük ölçümü — 20.000 hesaplık lab betiği, tek sıra yetti, eşzamanlılık açılmadı (ADR-108)
 
 ### Yeniden düzenleme
 
