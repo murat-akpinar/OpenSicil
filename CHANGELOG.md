@@ -53,6 +53,7 @@
 - Fazlar arası işlerin kapanışı — güvenlik ve test, Faz 4 öncesi
 - N-03 yük ölçümü — 20.000 hesaplık lab betiği, tek sıra yetti, eşzamanlılık açılmadı (ADR-108)
 - N-14 — docs/09 eşlemesi kind kümesinde doğrulandı; k8s-lab manifestleri ve betiği, nginx conf küme DNS'i + FQDN
+- Faz 4 kapanışı — güvenlik ve test (198/98 test, kapsam %94,65/%93,51, imaj temiz, e2e-lab, yığında duman testi)
 
 ### Yeniden düzenleme
 
