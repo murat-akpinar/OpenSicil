@@ -5,8 +5,11 @@
 // Okuma seridinde calisir (ADR-051): hedefe hicbir sey yazmaz, denetim kaydina
 // dokunmaz, fren sayaclarini (ADR-050) harcamaz. Tek yazdigi tablo
 // `reconcile_findings` ve oraya yalnizca worker yazabilir (ADR-015).
+use std::collections::HashSet;
+
 use crate::ad::DirectoryAccount;
-use sqlx::{PgPool, Postgres, Transaction};
+use crate::adoption::{self, PersonValues};
+use sqlx::{PgPool, Postgres, Row, Transaction};
 
 pub const MANAGED: &str = "managed";
 pub const OBSERVED: &str = "observed";
@@ -203,6 +206,112 @@ pub async fn store(
     tx.commit().await?;
     Ok(Counts::of(findings))
 }
+// Denetim: dolum bir kimlik olayidir (hangi alan doldu), hedefe yazma niyeti
+// degil — okuma seridinin "denetime dokunma" kurali (ADR-099) worker'in hedefe
+// yazma niyet satirlarini kapsar, model degisikligi kayitsiz kalmaz.
+pub const FILLED_EVENT: &str = "identity.fields_filled";
+
+// Dolum adaylari: bagli bulgu + alani eksik, silinmemis kimlik. Sicilin baska
+// kimlikte durup durmadigi ayni sorguda sorulur.
+const FILL_SQL: &str = "SELECT f.identity_id, f.account_name, f.mail AS ad_mail, \
+    f.mobile AS ad_mobile, f.telephone_number AS ad_telephone, \
+    f.employee_number AS ad_employee_number, \
+    NOT EXISTS (SELECT 1 FROM identities o WHERE o.employee_number = f.employee_number) \
+      AS employee_number_free, \
+    i.username, i.email, i.mobile_phone, i.employee_number \
+    FROM reconcile_findings f JOIN identities i ON i.id = f.identity_id \
+    WHERE f.target_system_id = $1 AND i.deleted_at IS NULL \
+      AND (i.username IS NULL OR i.email IS NULL OR i.mobile_phone IS NULL \
+           OR i.employee_number IS NULL) \
+    ORDER BY f.identity_id";
+
+/// ADR-112 madde 1: alan kimlikte doluysa dokunulmaz, bossa AD'deki deger yazilir.
+fn fillable<'a>(have: Option<&str>, found: Option<&'a str>) -> Option<&'a str> {
+    if have.is_some() {
+        None
+    } else {
+        found
+    }
+}
+
+/// Denetim satirina girecek alan adlari; bos liste = yazilacak sey yok.
+fn filled_field_names(v: &PersonValues<'_>) -> Vec<&'static str> {
+    [
+        ("username", v.username.is_some()),
+        ("email", v.email.is_some()),
+        ("mobile_phone", v.phone.is_some()),
+        ("employee_number", v.employee_number.is_some()),
+    ]
+    .into_iter()
+    .filter_map(|(name, set)| set.then_some(name))
+    .collect()
+}
+
+/// Taramadan sonra bagli (yonetilen + gozlemdeki) kimliklerin **bos** alanlari
+/// AD'de okunan degerden dolar (ADR-112 madde 1). Dolu alan degismez, hedefe
+/// yazilmaz, fren sayaci harcanmaz (ADR-051); degisen tek tablo `identities`,
+/// yanina kimlik olayi dusulur. Silinmis kimlik atlanir — kisisel veri
+/// temizligi (ADR-024) geri doldurulmaz. UPN bulguda tasinmiyor, dolmuyor.
+/// Doner: alani dolan kimlik sayisi.
+pub async fn fill_linked_identities(pool: &PgPool, target: i64) -> Result<usize, String> {
+    let rows = sqlx::query(FILL_SQL)
+        .bind(target)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| format!("dolum adayları okunamadı: {e}"))?;
+    let mut tx: Transaction<'_, Postgres> = pool.begin().await.map_err(|e| e.to_string())?;
+    // Ayni sicil iki bulguda duruyorsa ikincisini SQL'in tekillik kontrolu
+    // zaten atlar; denetim satiri "doldu" demesin diye burada da atlanir.
+    let mut taken: HashSet<String> = HashSet::new();
+    let mut filled = 0;
+    for row in &rows {
+        let identity: i64 = row.get("identity_id");
+        let account_name: String = row.get("account_name");
+        let ad_mail: Option<String> = row.get("ad_mail");
+        let ad_mobile: Option<String> = row.get("ad_mobile");
+        let ad_telephone: Option<String> = row.get("ad_telephone");
+        let ad_employee: Option<String> = row.get("ad_employee_number");
+        let employee_free: bool = row.get("employee_number_free");
+        let have_username: Option<String> = row.get("username");
+        let have_email: Option<String> = row.get("email");
+        let have_phone: Option<String> = row.get("mobile_phone");
+        let have_employee: Option<String> = row.get("employee_number");
+
+        let phone = adoption::writable_phone(ad_mobile.as_deref().or(ad_telephone.as_deref()));
+        let free_employee = ad_employee
+            .as_deref()
+            .filter(|v| employee_free && !taken.contains(*v));
+        let values = PersonValues {
+            username: fillable(have_username.as_deref(), Some(account_name.as_str())),
+            email: fillable(have_email.as_deref(), ad_mail.as_deref()),
+            upn: None,
+            phone: fillable(have_phone.as_deref(), phone),
+            employee_number: fillable(have_employee.as_deref(), free_employee),
+        };
+        let names = filled_field_names(&values);
+        if names.is_empty() {
+            continue;
+        }
+        if let Some(value) = values.employee_number {
+            taken.insert(value.to_string());
+        }
+        adoption::fill_person_fields(&mut tx, identity, &values).await?;
+        sqlx::query(
+            "INSERT INTO audit_log (event_type, identity_id, target_system_id, detail) \
+             VALUES ($1, $2, $3, $4::jsonb)",
+        )
+        .bind(FILLED_EVENT)
+        .bind(identity)
+        .bind(target)
+        .bind(format!("{{\"fields\":[\"{}\"]}}", names.join("\",\"")))
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("dolum denetim satırı yazılamadı: {e}"))?;
+        filled += 1;
+    }
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(filled)
+}
 // --- END FEATURE: reconcile ---
 
 #[cfg(test)]
@@ -340,5 +449,154 @@ mod tests {
         assert_eq!(findings.len(), 29);
         assert!(findings.iter().all(|f| f.kind == UNMANAGED));
         assert_eq!(Counts::of(&findings).unmanaged, 29);
+    }
+
+    // ADR-112 madde 1 saf kural: dolu alana dokunulmaz, degeri olmayan alan dolmaz.
+    #[test]
+    fn only_an_empty_field_with_a_value_is_filled() {
+        assert_eq!(fillable(None, Some("deger")), Some("deger"));
+        assert_eq!(fillable(Some("elde var"), Some("deger")), None);
+        assert_eq!(fillable(None, None), None);
+        let values = PersonValues {
+            username: Some("ali.kaya"),
+            employee_number: Some("7788"),
+            ..PersonValues::default()
+        };
+        assert_eq!(
+            filled_field_names(&values),
+            vec!["username", "employee_number"]
+        );
+        assert!(filled_field_names(&PersonValues::default()).is_empty());
+    }
+
+    // ADR-112 madde 1 uctan uca: tarama bulgusundan bos alanlar dolar; dolu alan,
+    // E.164 olmayan numara, mukerrer sicil ve silinmis kimlik atlanir, denetim yazilir.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn the_scan_fills_empty_identity_fields_from_the_directory() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        let seed = crate::test_support::seed_example_model(&pool).await;
+        let read_job: i64 = sqlx::query_scalar(
+            "INSERT INTO read_jobs (kind, target_system_id, requested_by) \
+             VALUES ('reconcile', $1, 'test') RETURNING id",
+        )
+        .bind(seed.ad)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        // ikinci kimligin e-postasi elle girilmis: dolum onu ezmemeli
+        sqlx::query("UPDATE identities SET email = 'elle@girildi' WHERE id = $1")
+            .bind(seed.other_identity)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let mut ayse = account("g-1", "ayse.yilmaz", true);
+        ayse.mobile = Some("+905321234567".to_string());
+        ayse.employee_number = Some("7788".to_string());
+        // Ali'nin cebi yok (sabit hat E.164 degil) ve sicili Ayse'nin sicili
+        let mut ali = account("g-2", "ali.kaya", true);
+        ali.employee_number = Some("7788".to_string());
+        let links = [
+            link("g-1", MANAGED, seed.identity, "?"),
+            link("g-2", OBSERVED, seed.other_identity, "?"),
+        ];
+        let findings = compare(&[ayse, ali], &links);
+        store(
+            &pool,
+            seed.ad,
+            read_job,
+            &findings,
+            &[7u8; crate::crypto::KEY_LEN],
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(fill_linked_identities(&pool, seed.ad).await.unwrap(), 2);
+        let fields = |id: i64| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_as::<
+                    _,
+                    (
+                        Option<String>,
+                        Option<String>,
+                        Option<String>,
+                        Option<String>,
+                    ),
+                >(
+                    "SELECT username, email, mobile_phone, employee_number \
+                     FROM identities WHERE id = $1",
+                )
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+            }
+        };
+        assert_eq!(
+            fields(seed.identity).await,
+            (
+                Some("ayse.yilmaz".into()),
+                Some("ayse.yilmaz@hogwarts.local".into()),
+                Some("+905321234567".into()),
+                Some("7788".into())
+            )
+        );
+        assert_eq!(
+            fields(seed.other_identity).await,
+            (
+                Some("ali.kaya".into()),
+                Some("elle@girildi".into()),
+                None,
+                None
+            ),
+            "dolu e-posta ezilmez, sabit hat ceple yazılmaz, mükerrer sicil atlanır"
+        );
+        let detail: String = sqlx::query_scalar(
+            "SELECT detail::text FROM audit_log WHERE event_type = $1 AND identity_id = $2",
+        )
+        .bind(FILLED_EVENT)
+        .bind(seed.other_identity)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(detail.contains("username"), "{detail}");
+        assert!(!detail.contains("email"), "{detail}");
+
+        assert_eq!(
+            fill_linked_identities(&pool, seed.ad).await.unwrap(),
+            0,
+            "ikinci tarama dolacak alan bulmaz"
+        );
+
+        // ADR-024 kisisel veri temizligi geri doldurulmaz. (Sicil serbest kaldigi
+        // icin ayni taramada Ali'nin sicili dolar; bakilan sey silinmis kimlik.)
+        sqlx::query(
+            "UPDATE identities SET deleted_at = now(), username = NULL, email = NULL, \
+             mobile_phone = NULL, employee_number = NULL WHERE id = $1",
+        )
+        .bind(seed.identity)
+        .execute(&pool)
+        .await
+        .unwrap();
+        fill_linked_identities(&pool, seed.ad).await.unwrap();
+        assert_eq!(
+            fields(seed.identity).await,
+            (None, None, None, None),
+            "silinmiş kimliğin alanları yeniden dolmaz"
+        );
+        let again: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM audit_log WHERE event_type = $1 AND identity_id = $2",
+        )
+        .bind(FILLED_EVENT)
+        .bind(seed.identity)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(again, 1, "silinmiş kimliğe ikinci dolum satırı yazılmaz");
+
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
     }
 }

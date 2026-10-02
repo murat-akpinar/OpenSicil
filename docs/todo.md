@@ -594,13 +594,17 @@ Kurallar:
 >
 > **Sıra bağlayıcıdır:** motor, DB'de boş olan alanı eşleme satırı varsa AD'de siler ([ADR-034](decisions/034-sam-upn-esleme-disi-ve-bossa-yaz.md)). Dolum kutucuğu bitmeden Eşlemeler ekranında `employeeID` satırı `employeeNumber`'a çevrilmez, Hogwarts hesapları da yönetime alınmaz.
 
-- [ ] Mutabakat sonrası boşluk dolumu: AD → kimlik, yalnızca boş alanlar ([ADR-112](decisions/112-alan-bazli-yetki-ve-geri-dolum.md) madde 1)
-  - Kabul: gece taraması bittikten sonra hedefin bağlı (yönetilen + gözlemdeki) bütün kimliklerinde `employee_number`, `mobile_phone`, `email`, `upn`, `username` yalnızca boşken `reconcile_findings`'teki değerden dolar; dolu alan değişmez
+- [x] Mutabakat sonrası boşluk dolumu: AD → kimlik, yalnızca boş alanlar ([ADR-112](decisions/112-alan-bazli-yetki-ve-geri-dolum.md) madde 1)
+  - Kabul: gece taraması bittikten sonra hedefin bağlı (yönetilen + gözlemdeki) bütün kimliklerinde `employee_number`, `mobile_phone`, `email`, `username` yalnızca boşken `reconcile_findings`'teki değerden dolar; dolu alan değişmez
   - Kabul: sicil başka bir kimlikte duruyorsa yazılmaz (mevcut tekillik kuralı), dolum geri kalan alanları yine yazar
   - Kabul: okuma şeridinde kalır — hedefe yazma yok, denetim niyet satırı yok, fren sayacı harcanmaz ([ADR-051](decisions/051-okuma-seridi.md))
   - Kabul: her dolum kimlik olayı olarak denetime girer (hangi alan, nereden)
   - Kabul: çalışan yığında Cedric Diggory'nin sicili ve cebi tarama sonrası kişi sayfasında görünür (elle giriş yok)
-  - Not: `adoption::fill_person_fields` (`worker/src/adoption.rs:190`) aynı kuralı zaten yazıyor; sahiplenme ve dolum tek fonksiyonu paylaşır, ikinci bir kopya açılmaz
+  - Not: `adoption::fill_person_fields` (`worker/src/adoption.rs`) aynı kuralı zaten yazıyor; sahiplenme ve dolum tek fonksiyonu paylaşır, ikinci bir kopya açılmaz
+  - Not (2026-10-02): `fill_person_fields` `&Candidate` yerine `PersonValues` alıyor (sahiplenme ve dolum aynı SQL'den geçer, "yalnızca boşsa yaz" `COALESCE` kuralı tek yerde), `writable_phone` serbest fonksiyon oldu; `reconcile::fill_linked_identities` adayları tek sorguda bulur (bağlı bulgu + alanı eksik + **silinmemiş** kimlik; sicilin başka kimlikte durup durmadığı aynı sorguda) ve dolan alanları `identity.fields_filled` denetim satırına yazar. **UPN dolmuyor:** bulgu UPN taşımıyor (`reconcile_findings`'te kolon yok, `DirectoryAccount` `userPrincipalName` okumuyor) ve UPN eşleme dışı (ADR-034) — gerekirse kolon + öznitelik eklenir, bugün işlevsel kaybı yok
+  - Not: silinmiş kimlik atlanır — ADR-024 kişisel veri temizliği geri doldurulmazsa anlamsız olurdu; testin son bloğu bunu sınıyor
+  - Doğrulama (2026-10-02): worker **102** test (lab Samba + gerçek Postgres `--include-ignored`), backend **209** test, fmt + clippy `-D warnings` iki crate'te temiz, `cargo audit` yalnızca [ADR-073](decisions/073-cargo-audit-rsa-bulgusu-kabul-edilen-risk.md) `rsa` (worker 0). Yeni testler: saf kural (dolu alana dokunulmaz, değeri olmayan dolmaz) ve uçtan uca DB testi (boş alanlar dolar, elle girilen e-posta ezilmez, sabit hat biçimi cep alanına yazılmaz, mükerrer sicil atlanır, ikinci tarama 0 döner, silinmiş kimlik dolmaz, denetim satırı yalnızca dolan alanları listeler)
+  - Doğrulama (2026-10-02, **çalışan yığın + gerçek Hogwarts AD**): worker yeniden kuruldu, mutabakat işi açıldı → `29 hesap tarandı: 1 yönetiliyor, 2 gözlemde, 26 yönetilmeyen, 0 kayıp; 1 kimlikte boş alan AD'den doldu`. Cedric Diggory'nin boş olan sicili ve cebi doldu (`00000000013`, `+447700900013`), denetimde tek satır `identity.fields_filled {"fields": ["mobile_phone", "employee_number"]}`; Cho ve Draco'nun dolu alanları değişmedi. Kişi sayfası (`/identities/1`) HTTP 200 ve iki değeri de basıyor — geçici doğrulama oturumu sonunda silindi
 - [ ] Eşleme düzeltmesi: `employeeID` → `employeeNumber` (kod değil, ekran işi)
   - Kabul: dolum kutucuğu bittikten **sonra** Eşlemeler ekranında satır silinip `employeeNumber` ile eklenir; iki öznitelik de izinli listede (`worker/src/mapping_rules.rs:19-20`)
   - Kabul: değişiklikten sonra Hogwarts hesaplarında sicil değeri silinmiyor (yönetime almadan önce `manage_diff` ile doğrulanır)
@@ -615,11 +619,28 @@ Kurallar:
   - Kabul: dolum backend toplu eylemidir — AEAD + blind index backend'de üretilir ([ADR-010](decisions/010-kisisel-veri-kimlik-no-telefon.md)); worker düz değeri kimliğe yazmaz
   - Kabul: denetim satırına değer değil "dolduruldu" bilgisi girer
 - [ ] Ayrılışta silme yok: pasif OU + açıklamada tarih ve neden ([ADR-111](decisions/111-ayriliste-silme-yok-pasif-ou.md))
-  - **Önce cevaplanacak (ADR-111 madde 4):** hesap silinmiyorsa kimlik ne zaman `silindi` olur ve kişisel veri ne zaman temizlenir? Öneri (a): saklama dolunca temizlenir, hesap pasif OU'da kalır — bağlantıya motorun bir daha dokunmayacağı bir işaret gerekir. Kullanıcı cevabı olmadan kod yazılmaz
   - Kabul: AD hedefinde saklama sonu varsayılanı "onay bekler"; süre dolunca hesap "silinmeyi bekleyenler" listesine düşer, onaysız silinmez
+  - Kabul: kimlik `silindi` kuralı değişmez (ADR-111 madde 4) — onay gelmedikçe kimlik `ayrıldı`da bekler, kişi sayfası ve "silinmeyi bekleyenler" listesi bunu söyler; durum makinesine ve `account_links`'e yeni kolon eklenmez
   - Kabul: ayrılış formunda serbest metin `departure_note`; `description` eşleme satırı `template` ile `{end_date}` ve `{departure_note}` token'larını çözer
   - Kabul: varsayılan `description` eşleme satırı gelmez; `docs/09`'a örnek girer
   - Kabul: ayrılış işinden sonra lab/gerçek AD'de hesap pasif OU'da, devre dışı ve `description` dolu
+- [ ] Kapanış: güvenlik ve test
+  - (1a'daki kapanış şablonunun aynısı)
+
+---
+
+## Loglar JSON, SIEM'e hazır ([ADR-113](decisions/113-log-json-satirlari-siem.md))
+
+> Fazlar arası iş, "Faz" olarak numaralanmaz. Kullanıcı isteği (2026-10-02): "loglar OpenTelemetry standardına uygun olsun, kuran kişiler merkezi SIEM'lerine göndersin." Karar: alan adları OTel semantic conventions, taşıma işi collector'ın — uygulamaya OTel SDK/OTLP eklenmez, ayarlar sekmesine log hedefi girmez ([ADR-113](decisions/113-log-json-satirlari-siem.md)).
+
+- [ ] Log satırları JSON olur (iki crate)
+  - Kabul: backend istek log'u tek JSON satırı: `timestamp`, `severity`, `service.name`, `body`, `http.request.method`, `url.path`, `http.response.status_code`, `client.address`, `event.duration`
+  - Kabul: worker'ın `println!`/`eprintln!` satırları da aynı biçimden geçer; Türkçe metin `body` alanında kalır
+  - Kabul: yeni bağımlılık yok — backend `serde_json`, worker elle kaçış (`writes::json_quote`)
+  - Kabul: `jq -c . < log` satır satır ayrıştırıyor; `/api/health` yine loglanmıyor
+- [ ] Denetim kaydı stdout'a da basılır + `docs/09` toplayıcı bölümü
+  - Kabul: `audit_log`'a yazılan satır aynı anda `event.category: "iam"` JSON log satırı olarak çıkar; kişisel veri girmez (docs/07 kuralı)
+  - Kabul: `docs/09`'da "Merkezi log / SIEM" bölümü: alan listesi + compose log driver örneği + OTel Collector `filelog` örneği; "OTLP istiyorsanız collector çevirir" notu
 - [ ] Kapanış: güvenlik ve test
   - (1a'daki kapanış şablonunun aynısı)
 

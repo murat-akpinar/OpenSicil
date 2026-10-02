@@ -141,4 +141,5 @@
 - Toplu yönetime alma — okuma şeridinde gözlem farkı hesabı, seçim ekranı, eşik ve onay (ADR-018/043/051)
 - Altın oran paleti ve yuvarlak tema düğmesi
 - Kişi sayfasında olaylar, işler ve ek roller operatör diline çevrildi
+- Mutabakat sonrası AD'den boş alan dolumu
 

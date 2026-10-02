@@ -225,8 +225,11 @@ async fn run_reconcile(
     let counts = reconcile::store(pool, target, read_job_id, &findings, &env.aead_key)
         .await
         .map_err(|e| format!("mutabakat bulguları yazılamadı: {e}"))?;
+    // ADR-112 madde 1: bulgular yazildiktan sonra bagli kimliklerin bos alanlari dolar
+    let filled = reconcile::fill_linked_identities(pool, target).await?;
     Ok(format!(
-        "{} hesap tarandı: {} yönetiliyor, {} gözlemde, {} yönetilmeyen, {} kayıp",
+        "{} hesap tarandı: {} yönetiliyor, {} gözlemde, {} yönetilmeyen, {} kayıp; \
+         {filled} kimlikte boş alan AD'den doldu",
         accounts.len(),
         counts.managed,
         counts.observed,

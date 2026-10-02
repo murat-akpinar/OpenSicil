@@ -52,12 +52,18 @@ impl Candidate {
     /// (docs/03); sabit hat biciminde bir deger ("01632 960001") oraya yazilmaz
     /// ve uydurulmaz — bos kalir, is sonucuna uyari girer (ADR-106 madde 3).
     pub fn writable_phone(&self) -> Option<&str> {
-        self.phone.as_deref().filter(|p| valid_e164(p))
+        writable_phone(self.phone.as_deref())
     }
 
     pub fn phone_rejected(&self) -> bool {
         self.phone.is_some() && self.writable_phone().is_none()
     }
+}
+
+/// Ayni kural mutabakat dolumunda da gecerli (ADR-112 madde 1): aday numara
+/// (cep, bossa sabit hat) E.164 degilse kimligin cep alanina yazilmaz.
+pub fn writable_phone(phone: Option<&str>) -> Option<&str> {
+    phone.filter(|p| valid_e164(p))
 }
 
 pub async fn find_by_sam(
@@ -165,7 +171,7 @@ pub async fn link_observed(
     .execute(&mut *tx)
     .await
     .map_err(|e| format!("bağlantı yazılamadı: {e}"))?;
-    fill_person_fields(&mut tx, identity_id, cand).await?;
+    fill_person_fields(&mut tx, identity_id, &PersonValues::of(cand)).await?;
     sqlx::query(
         "INSERT INTO audit_log (event_type, identity_id, target_system_id, detail) \
          VALUES ($1, $2, $3, $4::jsonb)",
@@ -183,14 +189,38 @@ pub async fn link_observed(
     tx.commit().await.map_err(|e| e.to_string())
 }
 
+/// Kimlige yazilabilecek kisi alanlari. `None` = bu alan icin degerimiz yok.
+/// `phone` E.164 kontrolunden gecmis olmali (`writable_phone`).
+#[derive(Debug, Default)]
+pub struct PersonValues<'a> {
+    pub username: Option<&'a str>,
+    pub email: Option<&'a str>,
+    pub upn: Option<&'a str>,
+    pub phone: Option<&'a str>,
+    pub employee_number: Option<&'a str>,
+}
+
+impl<'a> PersonValues<'a> {
+    fn of(cand: &'a Candidate) -> PersonValues<'a> {
+        PersonValues {
+            username: Some(&cand.sam),
+            email: cand.mail.as_deref(),
+            upn: cand.upn.as_deref(),
+            phone: cand.writable_phone(),
+            employee_number: cand.employee_number.as_deref(),
+        }
+    }
+}
+
 // Ad, e-posta, UPN, sicil ve cep: hepsi yalnizca kimlikte bosken yazilir, dolu
 // alana dokunulmaz (ADR-034/086/106). Sicil tekil kolondur: ayni deger baska bir
 // kimlikte duruyorsa yazilmaz — yoksa tek mukerrer numara butun sahiplenmeyi
-// (baglanti + denetim satiri) geri alirdi.
-async fn fill_person_fields(
+// (baglanti + denetim satiri) geri alirdi. Sahiplenme ani ve gece mutabakati
+// (ADR-112 madde 1) ayni fonksiyondan geçer.
+pub async fn fill_person_fields(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     identity_id: i64,
-    cand: &Candidate,
+    v: &PersonValues<'_>,
 ) -> Result<(), String> {
     sqlx::query(
         "UPDATE identities SET username = COALESCE(username, $2), email = COALESCE(email, $3), \
@@ -201,11 +231,11 @@ async fn fill_person_fields(
          WHERE id = $1",
     )
     .bind(identity_id)
-    .bind(&cand.sam)
-    .bind(&cand.mail)
-    .bind(&cand.upn)
-    .bind(cand.writable_phone())
-    .bind(&cand.employee_number)
+    .bind(v.username)
+    .bind(v.email)
+    .bind(v.upn)
+    .bind(v.phone)
+    .bind(v.employee_number)
     .execute(&mut **tx)
     .await
     .map(|_| ())
