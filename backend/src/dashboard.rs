@@ -899,11 +899,22 @@ pub(crate) fn glyph_for(event_type: &str) -> (&'static str, &'static str) {
         audit::IDENTITY_SUSPENDED | audit::IDENTITY_SUSPENSION_LIFTED => ("ico-clock", "account"),
         audit::FIRST_PASSWORD_REQUESTED | audit::FIRST_PASSWORD_SHOWN => ("ico-lock", "account"),
         audit::USED_NAME_RELEASED | audit::IDENTITY_NAME_REQUESTED => ("ico-tag", "account"),
+        audit::JOB_RETRY_REQUESTED | audit::RECONCILE_REAPPLY => ("ico-refresh", "account"),
+        audit::ACCOUNT_MANAGE_REQUESTED => ("ico-shield", "account"),
+        // ADR-112: AD'den gelen alan degeri (dolum worker'da, alim operatorde)
+        audit::IDENTITY_FIELD_TAKEN | "identity.fields_filled" => ("ico-link", "account"),
+        audit::IDENTITY_IMPORTED | audit::IMPORT_APPLIED => ("ico-inbox", "account"),
+        "identity.role_expired" => ("ico-key", "account"),
+        // --- onay akisi: sahneleme, onay, red ---
+        audit::IMPORT_STAGED | audit::MANAGE_STAGED => ("ico-inbox", "config"),
+        audit::IMPORT_APPROVED | audit::MANAGE_APPROVED => ("ico-check", "config"),
+        audit::IMPORT_REJECTED | audit::MANAGE_REJECTED => ("ico-logout", "config"),
         // --- danger ---
         audit::IDENTITY_DEPARTURE_SET
         | audit::IDENTITY_EMERGENCY_DEPARTURE
         | audit::IDENTITY_DEPARTURE_REVERTED
         | audit::IDENTITY_CANCELLED => ("ico-logout", "danger"),
+        audit::ACCOUNT_DELETION_APPROVED => ("ico-trash", "danger"),
         // --- worker'in hedef islemleri: yalnizca kisi sayfasinda gorunur ---
         "ad.account.create" => ("ico-user-plus", "account"),
         "ad.account.adopted" => ("ico-link", "account"),
@@ -1470,6 +1481,27 @@ mod tests {
             ("ico-logout", "danger")
         );
         assert_eq!(glyph_for("bilinmeyen.olay"), ("ico-inbox", "other"));
+    }
+
+    /// Tabloda karsiligi olmayan olay sessizce gri "other" kutusuna duser ve
+    /// akista ayirt edilemez. Liste elle tutulmaz: `audit.rs`in kendi kaynagi
+    /// taranir, worker'in kendi olaylari `WORKER_EVENTS`te.
+    #[test]
+    fn no_known_event_falls_into_the_generic_bucket() {
+        let source = include_str!("audit.rs");
+        let declared = source
+            .lines()
+            .filter(|line| line.starts_with("pub const "))
+            .filter_map(|line| line.split('"').nth(1));
+        for event in declared.chain(audit::WORKER_EVENTS) {
+            let (icon, category) = glyph_for(event);
+            assert_ne!(category, "other", "{event} için kategori yok");
+            assert!(
+                FEED_CATEGORIES.contains(&category),
+                "{event}: bilinmeyen kategori {category}"
+            );
+            assert!(icon.starts_with("ico-"), "{event}: ikon adı {icon}");
+        }
     }
 
     /// Akisin tek renk olmamasi tabloya bagli: kategoriler gercekten dagilmali.

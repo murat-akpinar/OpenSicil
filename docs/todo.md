@@ -747,6 +747,22 @@ Kurallar:
 
 ---
 
+## Tarayıcıda görülen hatalar (kullanıcı bildirimi, 2026-10-03)
+
+> Kullanıcı çalışan yığında gezerken dört şey bildirdi: `/login`de F5 "formu yeniden gönder" diyor ve denetim kaydına kendiliğinden tekrar tekrar "Operatör girişi" düşüyor; personel listesinde filtre uygulayınca `Failed to deserialize query string: role: cannot parse integer from empty string`; `/favicon.ico` 404; konsolda CSP "inline script" satırları.
+
+- [x] Dördü de kapandı
+  - **Giriş (kök neden):** başarılı giriş ana sayfayı POST yanıtında çiziyordu, URL `/login`de kalıyordu. F5 formu yeniden gönderiyor → her tazeleme yeni oturum + yeni `operator.login` satırı. Artık POST/Redirect/GET: `establish_operator_session` çerezi kurup `/`ye yönlendiriyor (üç kapı da — yerel, AD, OIDC). OIDC'de ek fayda: `code`/`state` adres çubuğunda kalmıyor. `operator_home_with_cookie` silindi
+  - **Filtre 400 (kök neden):** araç çubuğundaki "Tümü" seçeneği `department=&role=` diye boş dize gönderiyor, serde `Option<i64>` boş dizeyi reddediyor. `identity_web::empty_as_none` deserializer'ı eklendi ve sayısal bütün sorgu parametrelerine takıldı (`department`, `role`, `offset`, `days` + `upcoming`'in `days`i); elle yazılan `?role=abc` de artık sayfayı kırmıyor
+  - **Favicon:** `frontend/static/favicon.svg` (kenar çubuğundaki kalkan işaretiyle aynı dil) gömülü varlıklara ve `<link rel="icon">` iki kabuk şablonuna girdi — tarayıcı artık `/favicon.ico` istemiyor
+  - **CSP:** bizim sayfalarımızda satır içi script yok (`base.html`/`base_auth.html` yalnızca `/static/app.js` çağırıyor). Konsoldaki iki satırın kaynağı `<uuid>:19:51` ve `sandbox eval code` — tarayıcı eklentisinin enjekte ettiği script'ler; CSP onları engelliyor, yani kural **çalışıyor**. Temiz tarayıcıda `ui-shots.sh` CSP satırı görmüyor. Değişiklik yapılmadı
+  - **Taramada çıkan iki yan bulgu (kök neden):** (1) panelde uzun bir olay başlığı 390px'te sayfayı 444px yapıyordu — ızgara hücresinin varsayılan `min-width: auto`su `truncate` metnin tam genişliğini alt sınır yapıyor, `.grid > * { min-w-0 }` ile hücre sıfıra inebiliyor; (2) `glyph_for` tablosunda **13 olay türü** yoktu ve hepsi gri "other" kutusuna düşüyordu (`reconcile.reapply`, `account.manage_requested`, `job.retry_requested`, `account.deletion_approved`, `import.*`, `manage.*`, `identity.imported`, `identity.field_taken`) — tablo dolduruldu; `ui-shots.mjs`'in renk ölçümü de düzeltildi: renk sayısı olay türüyle değil **kategori** sayısıyla karşılaştırılır (beş kategori var, olay türü onlarca)
+  - Not (tekrarlamasın diye): iki tamlık testi eklendi — `audit.rs` kendi kaynağını tarayıp her olay sabitinin i18n etiketi var mı, `dashboard.rs` aynı listeyi tarayıp her olayın `glyph_for` kategorisi "other" dışında mı diye bakıyor. Worker'ın yazdığı `ad.*` dışı olaylar `audit::WORKER_EVENTS`'te, iki test de onu okuyor
+  - Doğrulama (2026-10-03): backend **231 test** (gerçek Postgres `--include-ignored` + lab Keycloak + lab Samba; +2 yeni: boş/bozuk filtre değerleri 200 dönüyor, favicon sunuluyor; +1 tamlık testi; üç giriş testi 303'e göre güncellendi), fmt + clippy `-D warnings` temiz, yeni migration yok. `sh scripts/build-css.sh` (81869 bayt) ve `sh scripts/check-glyphs.sh` temiz (yeni glyph yok); `sh scripts/ui-shots.sh tmp/ekran-goruntuleri/17-duzeltmeler` **"bulgu yok"** ve panel ekran görüntüsü 390px'e döndü (önce 444)
+  - Doğrulama (**çalışan yığın, tarayıcıda ölçüldü**): giriş sonrası URL `https://…/`, F5 "yeniden gönder" sormuyor ve yeni oturum açılmıyor; `link[rel=icon]` = `/static/favicon.svg` ve `/favicon.ico` isteği hiç gitmiyor (`/static/favicon.svg` → 200 `image/svg+xml`); araç çubuğundan "Tümü/Tümü" ile filtre → 200, `?department=&role=` / `?upcoming?days=` / `?role=abc` → 200; konsolda JS hatası yok
+
+---
+
 ## Ek Hedef Sistem: Zimbra
 
 > **Beklemede (kullanıcı kararı, 2026-10-02):** "Zimbra dursun, onu proje bitince bakacağım bir şey." Lab Zimbra'sı bir altyapı kararı ister (ADR-069: üçüncü taraf 10.1 derlemesi ya da ayrı VM) ve bu bölümün ilk kutucuğu ona bağlı; kullanıcı açıkça erteledi, kendi başına seçilmez.

@@ -11,8 +11,10 @@
 //   4. CSP          : konsola dusen "Content Security Policy" satirlari
 //   5. ic kaydirma  : bir tablo kendi kutusunda dikey kayiyor (sayfa kaymali)
 //   6. renk sayisi  : panelde sayac karti 4 renk; etkinlik ikonunun renk
-//                     sayisi akistaki ayri olay turu sayisindan az olmamali
-//                     (veri tek turdense tek renk dogrudur, bulgu degil)
+//                     sayisi akistaki ayri **kategori** sayisindan az olmamali
+//                     (olay turu degil: bes kategori var, olay turu onlarca —
+//                     ayni kategorideki iki olayin ayni renkte olmasi dogru.
+//                     Olayin kategorisiz kalmasini `dashboard.rs` testi yakalar)
 //   7. yapiskan ofset: ic kaydirmali kutudaki yapiskan baslik `top: 0` olmali,
 //                     yoksa baslik govdenin icine iner
 //   8. bos baslik   : metni ve kontrolu olmayan <th> (kolon adsiz kaliyor)
@@ -174,7 +176,9 @@ function probePage() {
     // Akistaki ayri olay turu: renk sayisi bunun altinda kalirsa
     // kategorilendirme bozulmus demektir
     feedKinds: new Set(
-      [...document.querySelectorAll(".feed .feed-title")].map((e) => e.textContent.trim())
+      [...document.querySelectorAll(".feed .feed-row")].map(
+        (e) => (e.className.match(/feed-row--\w+/) || ["?"])[0]
+      )
     ).size,
     statColors: colors(".stat .stat-value"),
     innerScroll: inner.join(","),
@@ -220,9 +224,9 @@ for (const [themeName, themeValue] of [
     await page.fill("#password", pass);
     await page.click('form[action="/login"] button[type=submit]');
     await page.waitForLoadState("domcontentloaded");
-    // Basarili giris ana sayfayi POST yanitinda cizer, yonlendirme yok: URL
-    // `/login`de kalir. Oturumun kurulup kurulmadigi ancak korumali bir sayfa
-    // istenerek anlasilir — oturum yoksa `/login`e geri atilir.
+    // Basarili giris ana sayfaya yonlendirir (POST/Redirect/GET). Oturumun
+    // kurulup kurulmadigi korumali bir sayfa istenerek anlasilir — oturum
+    // yoksa `/login`e geri atilir.
     await page.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
     if (new URL(page.url()).pathname === "/login") {
       console.error("giris basarisiz: kimlik yanlis ya da hesap kilitli");
@@ -261,9 +265,9 @@ for (const [themeName, themeValue] of [
       if (probe.wrappedBtn.length) {
         findings.push(`KIRIK-DUGME ${tag}: ${probe.wrappedBtn.join(" | ")}`);
       }
-      if (name === "panel" && probe.feedColors < Math.min(probe.feedKinds, 5)) {
+      if (name === "panel" && probe.feedColors < probe.feedKinds) {
         findings.push(
-          `TEK-RENK ${tag}: etkinlik ikonu ${probe.feedColors} renk, ${probe.feedKinds} ayri olay turu`
+          `TEK-RENK ${tag}: etkinlik ikonu ${probe.feedColors} renk, ${probe.feedKinds} ayri kategori`
         );
       }
       if (name === "panel" && probe.statColors !== 4) {

@@ -87,18 +87,34 @@ pub fn routes() -> Router<AppState> {
 /// tam liste burada ve sayfali (N-03: 20.000 kimlik tek sayfaya basilamaz).
 const PAGE_SIZE: i64 = 50;
 
+/// Sorgu dizesindeki sayisal parametre. Formdaki "Tumu" secenegi `role=` diye
+/// bos gelir ve serde `Option<i64>`u 400 ile reddeder; ayristirilamayan deger
+/// "filtre yok" sayilir. Elle yazilan `?days=abc` de sayfayi kirmaz.
+pub(crate) fn empty_as_none<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: std::str::FromStr,
+{
+    let raw: Option<String> = Option::deserialize(deserializer)?;
+    Ok(raw.and_then(|value| value.trim().parse().ok()))
+}
+
 #[derive(Deserialize)]
 struct ListQuery {
     q: Option<String>,
+    #[serde(default, deserialize_with = "empty_as_none")]
     offset: Option<i64>,
     /// `unassigned=1`: yalnizca rolu yer tutucu olanlar (ADR-103 madde 4)
     unassigned: Option<String>,
     /// ADR-117: panelin sayac kartindan gelen pencere (`joined`/`departed`/`changed`)
     window: Option<String>,
     /// Pencerenin gun sayisi; panelinkiyle ayni izinli liste (`dashboard::window`)
+    #[serde(default, deserialize_with = "empty_as_none")]
     days: Option<i32>,
     /// ADR-117 E: arac cubugunun filtreleri ve siralama
+    #[serde(default, deserialize_with = "empty_as_none")]
     department: Option<i64>,
+    #[serde(default, deserialize_with = "empty_as_none")]
     role: Option<i64>,
     sort: Option<String>,
     /// `dir=desc` azalan; baska her deger artan
@@ -1108,6 +1124,40 @@ mod tests {
             .await
             .unwrap();
         format!("{OPERATOR_SESSION_COOKIE_NAME}={token}")
+    }
+
+    /// Araç çubuğundaki "Tümü" seçeneği `department=&role=` diye boş gelir.
+    /// `Option<i64>` bunu "Failed to deserialize query string" ile 400'e
+    /// çeviriyordu; artık filtre yok sayılır ve liste açılır.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn empty_filter_values_do_not_break_the_list() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        crate::test_support::seed_two_identities(&pool).await;
+        let app = crate::web::routes()
+            .with_state(crate::web::test_state(pool.clone(), "https://localhost"));
+        let cookie = operator_cookie(&pool, &["hr"]).await;
+        for uri in [
+            "/identities?q=&department=&role=",
+            "/identities?department=&role=&offset=&days=",
+            // elle yazilan bozuk deger de sayfayi kirmaz
+            "/identities?role=abc",
+            "/upcoming?days=",
+        ] {
+            let response = app
+                .clone()
+                .oneshot(request("GET", uri, "", &cookie))
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                axum::http::StatusCode::OK,
+                "{uri} 200 dönmeli"
+            );
+        }
+        drop(app);
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
     }
 
     fn request(method: &str, uri: &str, body: &str, cookie: &str) -> Request<Body> {

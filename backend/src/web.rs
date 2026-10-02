@@ -395,7 +395,6 @@ async fn establish_oidc_session(
 // Uc kapinin ortak son adimi (ADR-095 madde 5): ayrilmis operator reddi,
 // oturum satiri, denetim kaydi, cerez ve giris sonrasi sayfa.
 async fn establish_operator_session(state: &AppState, operator: Operator) -> Response {
-    let lang = operator.lang;
     // ADR-059 madde 1: ayrilmis/askidaki operator oturum acamaz
     match crate::operator_guard::check_operator(&state.pool, &state.time_zone, &operator.username)
         .await
@@ -426,7 +425,10 @@ async fn establish_operator_session(state: &AppState, operator: Operator) -> Res
     {
         return with_operator_cookie(&token, Redirect::to("/change-password"));
     }
-    operator_home_with_cookie(state, &token, lang, operator.username, operator.authorities).await
+    // POST/Redirect/GET: yanitta ana sayfayi cizmek URL'i `/login`de birakiyordu,
+    // F5 formu yeniden gonderiyor ve her tazeleme yeni oturum + yeni
+    // `operator.login` denetim satiri aciyordu.
+    with_operator_cookie(&token, Redirect::to("/"))
 }
 
 async fn audit_operator_login(state: &AppState, operator: &Operator) {
@@ -451,28 +453,6 @@ async fn audit_operator_login(state: &AppState, operator: &Operator) {
     }
 }
 
-async fn operator_home_with_cookie(
-    state: &AppState,
-    token: &str,
-    lang: Lang,
-    username: String,
-    authorities: Vec<String>,
-) -> Response {
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        header::SET_COOKIE,
-        cookie_header_value(&set_cookie_header(
-            OPERATOR_SESSION_COOKIE_NAME,
-            token,
-            crate::operator_session::SESSION_LIFETIME_HOURS * 3600,
-        )),
-    );
-    (
-        headers,
-        render_operator_home(state, lang, username, authorities, HomeQuery::default()).await,
-    )
-        .into_response()
-}
 // --- END FEATURE: oidc-login ---
 
 async fn change_password_form(OperatorSession(operator): OperatorSession) -> Response {
@@ -1306,10 +1286,19 @@ mod tests {
             .oneshot(get_request(&callback_uri, None))
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert_eq!(location_of(&response), "/");
         let operator_cookie = set_cookie_value(&response);
         assert!(operator_cookie.starts_with("opensicil_operator_session="));
-        let body = body_string(response).await;
+        // Ana sayfa yonlendirmeden sonra acilir: `code`/`state` adres cubugunda
+        // kalmaz, tazeleme kodu ikinci kez kullanmaya calismaz.
+        let home = app
+            .clone()
+            .oneshot(get_request("/", Some(&operator_cookie)))
+            .await
+            .unwrap();
+        assert_eq!(home.status(), StatusCode::OK);
+        let body = body_string(home).await;
         assert!(body.contains("test-admin"));
         assert!(body.contains("admin"));
 
@@ -1458,7 +1447,9 @@ mod tests {
             "username=lab.operator&password=Lab-only-Pass1".to_string(),
         )
         .await;
-        assert_eq!(response.status(), StatusCode::OK);
+        // POST/Redirect/GET: F5 formu yeniden gondermesin (yeni oturum acmasin)
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert_eq!(location_of(&response), "/");
         let cookie = set_cookie_value(&response);
         let session: (Vec<String>, String, String) = sqlx::query_as(
             "SELECT authorities, auth_source, subject FROM operator_sessions \
@@ -1499,7 +1490,7 @@ mod tests {
             "username=mevcut.personel&password=Lab-only-Pass1".to_string(),
         )
         .await;
-        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
         let plain_cookie = set_cookie_value(&response);
         let authorities: Vec<String> = sqlx::query_scalar(
             "SELECT authorities FROM operator_sessions WHERE username = 'mevcut.personel'",

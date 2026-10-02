@@ -15,6 +15,7 @@ const JS: &[u8] = include_bytes!("../../frontend/static/app.js");
 const FONT_REGULAR: &[u8] =
     include_bytes!("../../frontend/static/CaskaydiaMonoNerdFont-Regular.ttf");
 const FONT_BOLD: &[u8] = include_bytes!("../../frontend/static/CaskaydiaMonoNerdFont-Bold.ttf");
+const FAVICON: &[u8] = include_bytes!("../../frontend/static/favicon.svg");
 
 // Fontun adı sürümünü taşır ve içeriği değişmez: bir yıl, sorulmadan.
 const CACHE_IMMUTABLE: &str = "public, max-age=31536000, immutable";
@@ -24,7 +25,7 @@ const CACHE_IMMUTABLE: &str = "public, max-age=31536000, immutable";
 const CACHE_REVALIDATE: &str = "public, no-cache";
 
 // Varlık adı derlemede sabit; istenen ad listede yoksa 404 (dizin gezinmesi imkânsız).
-const ASSETS: [(&str, &str, &[u8], &str); 4] = [
+const ASSETS: [(&str, &str, &[u8], &str); 5] = [
     ("app.css", "text/css; charset=utf-8", CSS, CACHE_REVALIDATE),
     (
         "app.js",
@@ -44,6 +45,7 @@ const ASSETS: [(&str, &str, &[u8], &str); 4] = [
         FONT_BOLD,
         CACHE_IMMUTABLE,
     ),
+    ("favicon.svg", "image/svg+xml", FAVICON, CACHE_REVALIDATE),
 ];
 
 // İçeriğin özeti: yalnızca dosya gerçekten değişince değişir (ADR-098 madde 2).
@@ -135,6 +137,10 @@ mod tests {
             "text/css; charset=utf-8"
         );
         assert_eq!(get_asset("app.js").await.status(), StatusCode::OK);
+        // Favicon olmayinca tarayici /favicon.ico isteyip 404 aliyordu
+        let icon = get_asset("favicon.svg").await;
+        assert_eq!(icon.status(), StatusCode::OK);
+        assert_eq!(icon.headers()[header::CONTENT_TYPE], "image/svg+xml");
         assert_eq!(
             get_asset("CaskaydiaMonoNerdFont-Regular.ttf")
                 .await

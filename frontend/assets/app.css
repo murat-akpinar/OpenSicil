@@ -1319,6 +1319,15 @@
     color: var(--ctp-fg-dim);
   }
 
+  /* Izgara hücresinin varsayılan `min-width: auto`su, içindeki `truncate`
+     metnin tam genişliğini hücrenin alt sınırı yapar: metin kırpılacağına sütun
+     şişer ve dar ekranda sayfa yana kayar (panelde uzun bir olay başlığı
+     390px'te sayfayı 444px yapıyordu). Hücre sıfıra kadar inebilmeli; kırpmayı
+     `truncate`, kaydırmayı `.tbl-scroll` zaten yapıyor. */
+  .grid > * {
+    @apply min-w-0;
+  }
+
   /* Kart içeriğinin kalan yüksekliği doldurması gereken yerler (grafik kartı
      yanındaki liste kartı kadar uzuyor; grafik ortada asılı kalmasın) */
   .card-fill {

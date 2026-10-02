@@ -44,6 +44,7 @@
 - Onay kutuları her yerde aynı boyda ve metin satırına hizalı
 - Tablolarda iç dikey kaydırma kalktı, başlık üst barın altına yapışıyor
 - Sayfa taramasındaki görsel hatalar ve raporlar kapağındaki yanlış bağlantı
+- Giriş sonrası yönlendirme, boş filtre değeri, favicon ve panelde taşma
 
 ### Geri alınanlar
 

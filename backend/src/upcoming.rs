@@ -78,6 +78,7 @@ pub fn routes() -> Router<AppState> {
 
 #[derive(Deserialize)]
 struct DaysQuery {
+    #[serde(default, deserialize_with = "crate::identity_web::empty_as_none")]
     days: Option<i32>,
 }
 

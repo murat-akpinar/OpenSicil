@@ -99,6 +99,11 @@ pub fn settings_change_detail(
 }
 // --- END FEATURE: audit-log ---
 
+/// Worker'in yazdigi ama sabiti burada olmayan olaylar (`ad.*` disinda).
+/// Ekran etiketi ve ikonu yine backend'den basiliyor; testler bu listeyi de tarar.
+#[cfg(test)]
+pub(crate) const WORKER_EVENTS: [&str; 2] = ["identity.fields_filled", "identity.role_expired"];
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -108,13 +113,12 @@ mod tests {
     /// ama buradan basilan olaylar `WORKER_EVENTS`'te durur.
     #[test]
     fn every_event_type_has_a_screen_label() {
-        const WORKER_EVENTS: [&str; 2] = ["identity.fields_filled", "identity.role_expired"];
         let source = include_str!("audit.rs");
         let declared = source
             .lines()
             .filter(|line| line.starts_with("pub const "))
             .filter_map(|line| line.split('"').nth(1));
-        for event in declared.chain(WORKER_EVENTS) {
+        for event in declared.chain(super::WORKER_EVENTS) {
             for lang in [crate::i18n::Lang::Tr, crate::i18n::Lang::En] {
                 assert_ne!(lang.key("event", event), "?", "event.{event} eksik");
             }
