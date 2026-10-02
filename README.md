@@ -2,7 +2,7 @@
 
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPLv3-1a1a1a?style=flat-square&labelColor=1a1a1a&color=8a6f3a)](LICENSE)
 [![Built with Claude Code](https://img.shields.io/badge/built%20with-Claude%20Code-1a1a1a?style=flat-square&labelColor=1a1a1a&color=d8b66b)](https://claude.ai/claude-code)
-[![Status](https://img.shields.io/badge/status-design-1a1a1a?style=flat-square&labelColor=1a1a1a&color=d97706)](#durum)
+[![Status](https://img.shields.io/badge/status-v1%20hazır-1a1a1a?style=flat-square&labelColor=1a1a1a&color=16a34a)](#durum)
 [![Rust](https://img.shields.io/badge/Rust-axum%20%2B%20sqlx-1a1a1a?style=flat-square&labelColor=1a1a1a&color=CE422B&logo=rust&logoColor=fff)](https://www.rust-lang.org)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-database-1a1a1a?style=flat-square&labelColor=1a1a1a&color=4169E1&logo=postgresql&logoColor=fff)](https://www.postgresql.org)
 [![Docker](https://img.shields.io/badge/Docker-compose-1a1a1a?style=flat-square&labelColor=1a1a1a&color=2496ED&logo=docker&logoColor=fff)](https://www.docker.com)
@@ -17,7 +17,7 @@ OpenSicil, kendi Active Directory'sini işleten kurumlar için açık kaynak bir
 
 ## Durum
 
-**Tasarım aşaması. Henüz uygulama kodu yok.** Tasarım 12 tasarım belgesi ve 62 karar kaydı (ADR) olarak yazıldı; İK operatörü, IGA mimarı ve nöbetteki işletmeci gözüyle birkaç kez gözden geçirildi; 56 teknik iddia birincil kaynaklara (Zimbra ve Samba kaynak kodu, Microsoft protokol belgeleri, `ldap3`, Keycloak) karşı sınandı, dördü yanlış çıktı ve düzeltildi ([ADR-057](docs/decisions/057-birincil-kaynak-dogrulamasi.md), [docs/11](docs/11-dogrulama-notlari.md)). Sıradaki adım iskelettir (Faz 1a).
+**v1 hazır (2026-10-02): ilk beş faz tamamlandı.** Sıfırdan kurulan ya da mevcut personeli olan bir kurum ürünü Active Directory üstünde tek başına kullanabilir: kayıt, görev değişikliği, askı, planlı ve acil ayrılış, ilk parola teslimi, roller ve departman ağacı, değişiklik seti eşiği ve onayı, mutabakat raporu ve gece koşusu, CSV ile toplu içe aktarma, mevcut hesapların sahiplenilmesi ve toplu yönetime alınması, metrik ucu, Kubernetes'te çalışma. Zimbra v1'e dahil değildir ([ADR-090](docs/decisions/090-zimbra-v1-sonrasina-alindi.md)); sırada o bölüm var. Tasarım 12 belge ve 100'den fazla karar kaydı (ADR) olarak yazıldı; her faz güvenlik ve test kapanışıyla bitti (gerçek Postgres + lab Keycloak + lab Samba AD'ye karşı testler, kapsam ≥ %90, imaj taraması, N-03 yük ölçümü 20.000 kimlikte). Kurulum: [docs/09](docs/09-kurulum.md).
 
 ## Hangi sorunu çözer
 

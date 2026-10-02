@@ -2,7 +2,7 @@
 
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPLv3-1a1a1a?style=flat-square&labelColor=1a1a1a&color=8a6f3a)](LICENSE)
 [![Built with Claude Code](https://img.shields.io/badge/built%20with-Claude%20Code-1a1a1a?style=flat-square&labelColor=1a1a1a&color=d8b66b)](https://claude.ai/claude-code)
-[![Status](https://img.shields.io/badge/status-design-1a1a1a?style=flat-square&labelColor=1a1a1a&color=d97706)](#status)
+[![Status](https://img.shields.io/badge/status-v1%20ready-1a1a1a?style=flat-square&labelColor=1a1a1a&color=16a34a)](#status)
 [![Rust](https://img.shields.io/badge/Rust-axum%20%2B%20sqlx-1a1a1a?style=flat-square&labelColor=1a1a1a&color=CE422B&logo=rust&logoColor=fff)](https://www.rust-lang.org)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-database-1a1a1a?style=flat-square&labelColor=1a1a1a&color=4169E1&logo=postgresql&logoColor=fff)](https://www.postgresql.org)
 [![Docker](https://img.shields.io/badge/Docker-compose-1a1a1a?style=flat-square&labelColor=1a1a1a&color=2496ED&logo=docker&logoColor=fff)](https://www.docker.com)
@@ -17,7 +17,7 @@ OpenSicil is an open-source **IGA** (Identity Governance & Administration) produ
 
 ## Status
 
-**Design phase. There is no application code yet.** The design is written down as 12 design documents and 62 decision records (ADRs), reviewed several times from the viewpoint of an HR operator, an IGA architect and an operator on call, and 56 technical claims were checked against primary sources (Zimbra and Samba source code, Microsoft protocol documents, `ldap3`, Keycloak); four turned out wrong and were corrected ([ADR-057](docs/decisions/057-birincil-kaynak-dogrulamasi.md), [docs/11](docs/11-dogrulama-notlari.md)). The next step is the skeleton (Phase 1a).
+**v1 ready (2026-10-02): the first five phases are complete.** An organisation starting from scratch or with existing staff can use the product on Active Directory alone: registration, job changes, suspension, planned and emergency departure, first-password delivery, roles and the department tree, change-set threshold and approval, reconciliation report with a nightly run, bulk import from CSV, adoption of existing accounts and bulk management takeover, a metrics endpoint, and running on Kubernetes. Zimbra is not part of v1 ([ADR-090](docs/decisions/090-zimbra-v1-sonrasina-alindi.md)); that section is next. The design is written as 12 documents and more than 100 decision records (ADRs); every phase ended with a security and test closure (tests against a real Postgres, a lab Keycloak and a lab Samba AD, coverage ≥ 90%, image scans, the N-03 load measurement at 20,000 identities). Setup: [docs/09](docs/09-kurulum.md).
 
 The documentation under `docs/` is in Turkish. This README is the English entry point.
 
