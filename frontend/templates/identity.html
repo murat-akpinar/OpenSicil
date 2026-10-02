@@ -216,8 +216,8 @@
 {# Panelin etkinlik akisiyla ayni bilesen: ham olay anahtari yerine ikon + cumle #}
 <div class="feed">
   {% for e in page.events %}
-  <div class="feed-row">
-    <span class="ico-solid ico-solid-{{ e.tone }}"><i class="ico {{ e.icon }}" aria-hidden="true"></i></span>
+  <div class="feed-row feed-row--{{ e.category }}">
+    <span class="ico-solid feed-ico feed-ico--{{ e.category }}"><i class="ico {{ e.icon }}" aria-hidden="true"></i></span>
     <div class="feed-main">
       <p class="feed-title">{{ lang.key("event", e.event_type) }}{% if !e.subject.is_empty() %} <span class="muted">{{ e.subject }}</span>{% endif %}</p>
       <p class="feed-sub">{% if e.actor.is_empty() %}{{ lang.t("person.by_system") }}{% else %}{{ e.actor }}{% endif %}</p>

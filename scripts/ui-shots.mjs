@@ -10,7 +10,9 @@
 //   3. govde fontu  : body'nin hesaplanmis font-family'si Nerd Font'u icermiyor
 //   4. CSP          : konsola dusen "Content Security Policy" satirlari
 //   5. ic kaydirma  : bir tablo kendi kutusunda dikey kayiyor (sayfa kaymali)
-//   6. renk sayisi  : panelde etkinlik ikonu >= 3, sayac karti = 4 ayri renk
+//   6. renk sayisi  : panelde sayac karti 4 renk; etkinlik ikonunun renk
+//                    sayisi akistaki ayri olay turu sayisindan az olmamali
+//                    (veri tek turdense tek renk dogrudur, bulgu degil)
 // `createRequire`: playwright tmp/araclar/pw altinda durdugu icin ESM'in bare
 // specifier cozumu onu bulamiyor (NODE_PATH yalnizca require'da gecerli).
 import { createRequire } from "node:module";
@@ -120,7 +122,12 @@ for (const [themeName, themeValue] of [["koyu", "dark"], ["acik", "light"]].filt
           innerWidth: window.innerWidth,
           icoFont: ico ? getComputedStyle(ico).fontFamily : "(.ico yok)",
           bodyFont: getComputedStyle(document.body).fontFamily,
-          feedColors: colors(".feed .ico-solid, .feed .feed-ico"),
+          feedColors: colors(".feed .feed-ico"),
+          // Akistaki ayri olay turu: renk sayisi bunun altinda kalirsa
+          // kategorilendirme bozulmus demektir
+          feedKinds: new Set(
+            [...document.querySelectorAll(".feed .feed-title")].map((e) => e.textContent.trim())
+          ).size,
           statColors: colors(".stat .stat-value"),
           innerScroll: inner.join(","),
         };
@@ -138,8 +145,10 @@ for (const [themeName, themeValue] of [["koyu", "dark"], ["acik", "light"]].filt
       if (probe.innerScroll) {
         findings.push(`IC-KAYDIRMA ${tag}: ${probe.innerScroll}`);
       }
-      if (name === "panel" && probe.feedColors > 0 && probe.feedColors < 3) {
-        findings.push(`TEK-RENK ${tag}: etkinlik ikonu ${probe.feedColors} renk (>= 3 olmali)`);
+      if (name === "panel" && probe.feedColors < Math.min(probe.feedKinds, 5)) {
+        findings.push(
+          `TEK-RENK ${tag}: etkinlik ikonu ${probe.feedColors} renk, ${probe.feedKinds} ayri olay turu`
+        );
       }
       if (name === "panel" && probe.statColors !== 4) {
         findings.push(`TEK-RENK ${tag}: sayac karti ${probe.statColors} renk (4 olmali)`);
@@ -149,7 +158,9 @@ for (const [themeName, themeValue] of [["koyu", "dark"], ["acik", "light"]].filt
         findings.push(`CSP     ${tag}: ${csp[0]}`);
       }
       console_errors.length = 0;
-      console.log(`${tag}  ${probe.scrollWidth}/${probe.innerWidth}px  akis:${probe.feedColors} sayac:${probe.statColors}`);
+      console.log(
+        `${tag}  ${probe.scrollWidth}/${probe.innerWidth}px  akis:${probe.feedColors}/${probe.feedKinds} sayac:${probe.statColors}`
+      );
     }
     await context.close();
   }

@@ -785,7 +785,8 @@ pub struct Event {
     pub outcome: String,
     pub outcome_kind: &'static str,
     pub icon: &'static str,
-    pub tone: &'static str,
+    /// Olay kategorisi (`.feed-ico--<kategori>`); panelin akisiyla ayni tablo
+    pub category: &'static str,
 }
 
 pub struct PersonPage {
@@ -1601,7 +1602,7 @@ async fn load_events(pool: &PgPool, time_zone: &str, id: i64) -> Result<Vec<Even
                 (None, None, Some(reason)) => reason,
                 _ => String::new(),
             };
-            let (icon, tone) = crate::dashboard::glyph_for(&event_type);
+            let (icon, category) = crate::dashboard::glyph_for(&event_type);
             Event {
                 at,
                 subject,
@@ -1610,7 +1611,7 @@ async fn load_events(pool: &PgPool, time_zone: &str, id: i64) -> Result<Vec<Even
                 outcome,
                 event_type,
                 icon,
-                tone,
+                category,
             }
         })
         .collect())

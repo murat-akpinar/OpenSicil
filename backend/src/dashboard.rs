@@ -206,11 +206,19 @@ pub struct Event {
     pub event_type: String,
     pub actor: String,
     pub person: String,
+    /// "HH:MM" — bugun ve dunun satirlari saati yazar
     pub time: String,
+    /// "DD.MM" — daha eskiler gunu yazar
+    pub date: String,
+    /// `today` | `yesterday` | `older`; "dun" cevrilecek bir dize oldugu icin
+    /// metni sablon secer, Rust saati ve gunu verir (ADR-089)
+    pub when: &'static str,
     pub icon: &'static str,
-    /// Ikon karesinin tonu (`.ico-tile-<ton>`): akis tek renk kare dizisiyken
-    /// olay turleri birbirinden ayirt edilemiyordu
-    pub tone: &'static str,
+    /// Olay kategorisi (`.feed-ico--<kategori>`): akis tek renk kare dizisiyken
+    /// olay turleri birbirinden ayirt edilemiyordu (ADR-117 B)
+    pub category: &'static str,
+    /// Satirin gittigi kayit; bos = satir tiklanamaz
+    pub href: String,
 }
 
 pub struct TrendDay {
@@ -484,12 +492,25 @@ async fn previous(pool: &PgPool, time_zone: &str, days: i32) -> Result<Previous,
 /// Son etkinlikler: yalnizca operatorun yaptiklari (`actor_username` dolu).
 /// Worker'in niyet/sonuc satirlari akisa girmez; onlarin yeri kisi sayfasi.
 async fn activity(pool: &PgPool, time_zone: &str) -> Result<Vec<Event>, sqlx::Error> {
-    let rows: Vec<(String, Option<String>, Option<String>, String)> = sqlx::query_as(
+    #[allow(clippy::type_complexity)]
+    let rows: Vec<(
+        String,
+        Option<String>,
+        Option<String>,
+        String,
+        String,
+        i32,
+        Option<i64>,
+    )> = sqlx::query_as(
         "SELECT a.event_type, a.actor_username, i.given_name || ' ' || i.surname, \
-                to_char(a.occurred_at AT TIME ZONE $1, 'DD.MM HH24:MI') \
-         FROM audit_log a LEFT JOIN identities i ON i.id = a.identity_id \
-         WHERE a.actor_username IS NOT NULL \
-         ORDER BY a.id DESC LIMIT $2",
+                    to_char(a.occurred_at AT TIME ZONE $1, 'HH24:MI'), \
+                    to_char(a.occurred_at AT TIME ZONE $1, 'DD.MM'), \
+                    ((now() AT TIME ZONE $1)::date \
+                     - (a.occurred_at AT TIME ZONE $1)::date)::int, \
+                    a.identity_id \
+             FROM audit_log a LEFT JOIN identities i ON i.id = a.identity_id \
+             WHERE a.actor_username IS NOT NULL \
+             ORDER BY a.id DESC LIMIT $2",
     )
     .bind(time_zone)
     .bind(ACTIVITY_LIMIT)
@@ -497,18 +518,37 @@ async fn activity(pool: &PgPool, time_zone: &str) -> Result<Vec<Event>, sqlx::Er
     .await?;
     Ok(rows
         .into_iter()
-        .map(|(event_type, actor, person, time)| {
-            let (icon, tone) = glyph_for(&event_type);
+        .map(|(event_type, actor, person, time, date, age, identity)| {
+            let (icon, category) = glyph_for(&event_type);
             Event {
                 icon,
-                tone,
+                category,
+                href: event_href(&event_type, identity),
+                when: match age {
+                    0 => "today",
+                    1 => "yesterday",
+                    _ => "older",
+                },
                 event_type,
                 actor: actor.unwrap_or_default(),
                 person: person.unwrap_or_default(),
                 time,
+                date,
             }
         })
         .collect())
+}
+
+/// Akis satirinin gittigi kayit. Kimlige bagli olay kisi sayfasina gider; hedef
+/// sistem ayari ve oznitelik eslemesi hedef listesine (eslemenin hangi hedefe ait
+/// oldugu yalnizca `detail` JSONB'sinde, kolon degil). Gerisi tiklanmaz: olmayan
+/// bir kapiyi isaret etmektense satir sabit kalsin.
+fn event_href(event_type: &str, identity: Option<i64>) -> String {
+    match (identity, event_type) {
+        (Some(id), _) => format!("/identities/{id}"),
+        (None, audit::TARGET_CHANGED | audit::MAPPING_CHANGED) => "/targets".to_string(),
+        _ => String::new(),
+    }
 }
 
 /// Eğilim: son yedi gun, gun basina kayit ve ayrilis sayisi. Gunler
@@ -812,44 +852,55 @@ fn spark(values: &[i64]) -> Spark {
     }
 }
 
-/// Olay turunun ikonu; bilinmeyen tur notr ikon alir (ekran bozulmaz).
-/// Olay turunun ikonu ve ikon karesinin tonu (`.ico-tile-<ton>`): giris yesil,
-/// ayrilis kirmizi, bekleme sarisi, tanim degisikligi turkuaz, gerisi vurgu.
-/// Kisi sayfasinin olay akisi da ayni ikonlari kullanir (`identity::load_events`).
+/// Olay turunun ikonu ve kategorisi (ADR-117 B). Bes kategori var ve kategori
+/// hem rengi (`.feed-ico--<kategori>`) hem anlami tasir:
+///
+///   `auth`    operator girisi
+///   `config`  hedef sistem ayari, oznitelik eslemesi, tanim ve ayar degisikligi
+///   `account` hesap ve kimlik isleri, rol atama, parola
+///   `danger`  silme, ayrilis, basarisiz giris, reddedilen is
+///   `other`   gerisi — bilinmeyen tur de buraya duser, ekran bozulmaz
+///
+/// Ikon olay turune ozel kalir: kategori besli, ikon daha ince ayrim yapar.
+/// Kisi sayfasinin olay akisi da ayni tablodan okur (`identity::load_events`),
+/// boylece iki ekran birbirinden sapamaz.
 pub(crate) fn glyph_for(event_type: &str) -> (&'static str, &'static str) {
     match event_type {
-        audit::IDENTITY_CREATED => ("ico-user-plus", "ok"),
-        // Worker'in hedef islemleri: yalnizca kisi sayfasinda gorunur
-        "ad.account.create" => ("ico-user-plus", "ok"),
-        "ad.account.adopted" => ("ico-link", "info"),
-        "ad.account.managed" => ("ico-shield", "ok"),
-        "ad.account.enable" => ("ico-check", "ok"),
-        "ad.account.disable" => ("ico-logout", "warn"),
-        "ad.account.delete" => ("ico-trash", "err"),
-        "ad.account.move" => ("ico-sitemap", "info"),
-        "ad.account.attributes" => ("ico-refresh", "accent"),
-        "ad.group.add_member" => ("ico-key", "ok"),
-        "ad.group.remove_member" => ("ico-key", "warn"),
-        "ad.account.first_password" | "ad.account.password_reset" => ("ico-lock", "warn"),
-        "ad.cancellation.verified" => ("ico-check", "warn"),
-        "ad.cancellation.rejected" => ("ico-bolt", "err"),
-        audit::IDENTITY_CHANGED | audit::TARGET_CHANGED | audit::MAPPING_CHANGED => {
-            ("ico-refresh", "accent")
-        }
-        audit::IDENTITY_ROLE_ASSIGNED | audit::IDENTITY_ROLE_REMOVED | audit::ROLE_CHANGED => {
-            ("ico-key", "info")
-        }
-        audit::DEPARTMENT_CHANGED => ("ico-sitemap", "info"),
+        // --- auth ---
+        audit::OPERATOR_LOGIN => ("ico-sign-in", "auth"),
+        audit::OPERATOR_REJECTED => ("ico-sign-in", "danger"),
+        // --- config ---
+        audit::TARGET_CHANGED => ("ico-cog", "config"),
+        audit::MAPPING_CHANGED => ("ico-link", "config"),
+        audit::SETTINGS_CHANGED | audit::BOOTSTRAP_PASSWORD_CHANGED => ("ico-cog", "config"),
+        audit::ROLE_CHANGED => ("ico-key", "config"),
+        audit::DEPARTMENT_CHANGED => ("ico-sitemap", "config"),
+        // --- account ---
+        audit::IDENTITY_CREATED => ("ico-user-plus", "account"),
+        audit::IDENTITY_CHANGED => ("ico-refresh", "account"),
+        audit::IDENTITY_ROLE_ASSIGNED | audit::IDENTITY_ROLE_REMOVED => ("ico-key", "account"),
+        audit::IDENTITY_SUSPENDED | audit::IDENTITY_SUSPENSION_LIFTED => ("ico-clock", "account"),
+        audit::FIRST_PASSWORD_REQUESTED | audit::FIRST_PASSWORD_SHOWN => ("ico-lock", "account"),
+        audit::USED_NAME_RELEASED | audit::IDENTITY_NAME_REQUESTED => ("ico-tag", "account"),
+        // --- danger ---
         audit::IDENTITY_DEPARTURE_SET
         | audit::IDENTITY_EMERGENCY_DEPARTURE
         | audit::IDENTITY_DEPARTURE_REVERTED
-        | audit::IDENTITY_CANCELLED => ("ico-logout", "err"),
-        audit::IDENTITY_SUSPENDED | audit::IDENTITY_SUSPENSION_LIFTED => ("ico-clock", "warn"),
-        audit::FIRST_PASSWORD_REQUESTED | audit::FIRST_PASSWORD_SHOWN => ("ico-lock", "warn"),
-        audit::OPERATOR_LOGIN | audit::OPERATOR_REJECTED => ("ico-sign-in", "accent"),
-        audit::SETTINGS_CHANGED | audit::BOOTSTRAP_PASSWORD_CHANGED => ("ico-cog", "accent"),
-        audit::USED_NAME_RELEASED | audit::IDENTITY_NAME_REQUESTED => ("ico-tag", "info"),
-        _ => ("ico-inbox", "accent"),
+        | audit::IDENTITY_CANCELLED => ("ico-logout", "danger"),
+        // --- worker'in hedef islemleri: yalnizca kisi sayfasinda gorunur ---
+        "ad.account.create" => ("ico-user-plus", "account"),
+        "ad.account.adopted" => ("ico-link", "account"),
+        "ad.account.managed" => ("ico-shield", "account"),
+        "ad.account.enable" => ("ico-check", "account"),
+        "ad.account.move" => ("ico-sitemap", "account"),
+        "ad.account.attributes" => ("ico-refresh", "account"),
+        "ad.group.add_member" | "ad.group.remove_member" => ("ico-key", "account"),
+        "ad.account.first_password" | "ad.account.password_reset" => ("ico-lock", "account"),
+        "ad.cancellation.verified" => ("ico-check", "account"),
+        "ad.account.disable" => ("ico-logout", "danger"),
+        "ad.account.delete" => ("ico-trash", "danger"),
+        "ad.cancellation.rejected" => ("ico-bolt", "danger"),
+        _ => ("ico-inbox", "other"),
     }
 }
 // --- END FEATURE: dashboard ---
@@ -857,6 +908,10 @@ pub(crate) fn glyph_for(event_type: &str) -> (&'static str, &'static str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Etkinlik akisinin kategorileri (ADR-117 B). `glyph_for` bunlardan birini
+    /// dondurur; her birinin app.css'te kendi rengi olmali.
+    const FEED_CATEGORIES: [&str; 5] = ["auth", "config", "account", "danger", "other"];
 
     #[test]
     fn percent_rounds_to_five_and_keeps_small_values_visible() {
@@ -1380,14 +1435,57 @@ mod tests {
         crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
     }
 
+    /// ADR-117 B: her olay bir kategoriye duser, kategori rengi secer.
     #[test]
     fn known_events_get_their_own_icon_and_unknown_ones_fall_back() {
-        assert_eq!(glyph_for(audit::IDENTITY_CREATED), ("ico-user-plus", "ok"));
+        assert_eq!(
+            glyph_for(audit::IDENTITY_CREATED),
+            ("ico-user-plus", "account")
+        );
+        assert_eq!(glyph_for(audit::OPERATOR_LOGIN), ("ico-sign-in", "auth"));
+        // Basarisiz giris "auth" degil "danger": operatorun dikkatini ister
+        assert_eq!(
+            glyph_for(audit::OPERATOR_REJECTED),
+            ("ico-sign-in", "danger")
+        );
+        assert_eq!(glyph_for(audit::TARGET_CHANGED), ("ico-cog", "config"));
+        // Esleme ayri ikon alir: ayni kategoride ama farkli is
+        assert_eq!(glyph_for(audit::MAPPING_CHANGED), ("ico-link", "config"));
         assert_eq!(
             glyph_for(audit::IDENTITY_EMERGENCY_DEPARTURE),
-            ("ico-logout", "err")
+            ("ico-logout", "danger")
         );
-        assert_eq!(glyph_for("bilinmeyen.olay"), ("ico-inbox", "accent"));
+        assert_eq!(glyph_for("bilinmeyen.olay"), ("ico-inbox", "other"));
+    }
+
+    /// Akisin tek renk olmamasi tabloya bagli: kategoriler gercekten dagilmali.
+    #[test]
+    fn the_feed_table_spreads_events_across_every_category() {
+        let seen: std::collections::BTreeSet<&str> = [
+            audit::OPERATOR_LOGIN,
+            audit::TARGET_CHANGED,
+            audit::IDENTITY_CREATED,
+            audit::IDENTITY_CANCELLED,
+            "bilinmeyen.olay",
+        ]
+        .iter()
+        .map(|e| glyph_for(e).1)
+        .collect();
+        assert_eq!(seen.len(), FEED_CATEGORIES.len(), "{seen:?}");
+    }
+
+    /// Satir ancak gidilecek bir yer varsa tiklanir.
+    #[test]
+    fn a_feed_row_links_only_where_there_is_something_to_open() {
+        assert_eq!(
+            event_href(audit::IDENTITY_CREATED, Some(7)),
+            "/identities/7"
+        );
+        // Kimlige bagli olmayan ayar olaylari hedef listesine gider
+        assert_eq!(event_href(audit::TARGET_CHANGED, None), "/targets");
+        assert_eq!(event_href(audit::MAPPING_CHANGED, None), "/targets");
+        // Gidilecek yeri olmayan satir sabit kalir
+        assert_eq!(event_href(audit::OPERATOR_LOGIN, None), "");
     }
 
     #[test]
@@ -1449,11 +1547,16 @@ mod tests {
                 css.contains(&format!(".ico-tile-{tone} {{")),
                 "app.css'te .ico-tile-{tone} yok"
             );
-            // Etkinlik akisi dolu tonu kullanir (mockup: duz renk + beyaz glyph)
-            assert!(
-                css.contains(&format!(".ico-solid-{tone} {{")),
-                "app.css'te .ico-solid-{tone} yok"
-            );
+        }
+        // ADR-117 B: akis satirinin rengi kategoriden gelir; kategori basina
+        // hem ikon dairesi hem satir sinifi tanimli olmali, yoksa satir renksiz.
+        for category in FEED_CATEGORIES {
+            for class in [
+                format!(".feed-ico--{category} {{"),
+                format!(".feed-row--{category} {{"),
+            ] {
+                assert!(css.contains(&class), "app.css'te {class} yok");
+            }
         }
     }
 }

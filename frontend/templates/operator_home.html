@@ -151,16 +151,25 @@
       {% if dash.activity.is_empty() %}
       <p class="muted text-sm">{{ lang.t("dash.activity_empty") }}</p>
       {% else %}
+      {# ADR-117 B: satirin rengi olayin kategorisinden (`dashboard::glyph_for`).
+         Satir `<a>`; gidilecek kayit yoksa `href` hic basilmaz ve satir
+         tiklanamaz kalir — olmayan bir kapiyi isaret etmez. Saat: bugun yalnizca
+         saat, dun "dun 14:20", oncesi gun. "dun" cevrilecek bir dize oldugu icin
+         metni sablon secer (ADR-089). #}
       <div class="feed">
         {% for e in dash.activity %}
-        <div class="feed-row">
-          <span class="ico-solid ico-solid-{{ e.tone }}"><i class="ico {{ e.icon }}" aria-hidden="true"></i></span>
+        <a class="feed-row feed-row--{{ e.category }}"{% if !e.href.is_empty() %} href="{{ e.href }}"{% endif %}>
+          <span class="ico-solid feed-ico feed-ico--{{ e.category }}"><i class="ico {{ e.icon }}" aria-hidden="true"></i></span>
           <div class="feed-main">
             <p class="feed-title">{{ lang.key("event", e.event_type) }}</p>
             <p class="feed-sub">{% if e.person != "" %}{{ e.person }} · {% endif %}{{ e.actor }}</p>
           </div>
-          <span class="feed-time">{{ e.time }}</span>
-        </div>
+          <span class="feed-time">
+            {%- if e.when == "today" -%}{{ e.time }}
+            {%- else if e.when == "yesterday" -%}{{ lang.t1("dash.yesterday_at", e.time) }}
+            {%- else -%}{{ e.date }}{%- endif -%}
+          </span>
+        </a>
         {% endfor %}
       </div>
       {% endif %}

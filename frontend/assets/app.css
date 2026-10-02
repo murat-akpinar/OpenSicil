@@ -74,6 +74,14 @@
   --stat-joined: #40a02b;
   --stat-left: #d20f39;
   --stat-moved: #c2410c;
+  /* Etkinlik akisi kategorileri (ADR-117 B): Catppuccin Latte karsiliklari.
+     Yellow (#df8e1d 2,6:1) acik kartta 3:1'in altinda kaldigi icin kehribar
+     tonu, teal icin Latte'nin kendisi (3,6:1). */
+  --feed-auth: #1e66f5;
+  --feed-config: #b45309;
+  --feed-account: #179299;
+  --feed-danger: #d20f39;
+  --feed-other: #6c6f85;
 }
 
 /* Sistem koyu tercihi; operatör elle "light" seçmediyse */
@@ -120,6 +128,12 @@
     --stat-joined: #a6e3a1;
     --stat-left: #f38ba8;
     --stat-moved: #fab387;
+    /* Etkinlik akisi kategorileri (ADR-117 B): Catppuccin Mocha */
+    --feed-auth: #89b4fa;
+    --feed-config: #f9e2af;
+    --feed-account: #94e2d5;
+    --feed-danger: #f38ba8;
+    --feed-other: #9399b2;
     --ctp-glow:
       radial-gradient(900px 600px at 10% -10%, rgba(20, 184, 166, 0.25), transparent 60%),
       radial-gradient(800px 600px at 100% 0%, rgba(59, 130, 246, 0.16), transparent 60%),
@@ -170,6 +184,12 @@
   --stat-joined: #a6e3a1;
   --stat-left: #f38ba8;
   --stat-moved: #fab387;
+  /* Etkinlik akisi kategorileri (ADR-117 B): Catppuccin Mocha */
+  --feed-auth: #89b4fa;
+  --feed-config: #f9e2af;
+  --feed-account: #94e2d5;
+  --feed-danger: #f38ba8;
+  --feed-other: #9399b2;
   --ctp-glow:
     radial-gradient(900px 600px at 10% -10%, rgba(20, 184, 166, 0.25), transparent 60%),
     radial-gradient(800px 600px at 100% 0%, rgba(59, 130, 246, 0.16), transparent 60%),
@@ -454,31 +474,6 @@
     box-shadow:
       inset 0 0 0 1px var(--ctp-ok-soft),
       0 0 12px -4px var(--ctp-ok-soft);
-  }
-  .ico-solid-warn {
-    color: var(--ctp-warn);
-    background-color: var(--ctp-warn-soft);
-    box-shadow:
-      inset 0 0 0 1px var(--ctp-warn-soft),
-      0 0 12px -4px var(--ctp-warn-soft);
-  }
-  .ico-solid-err {
-    color: var(--ctp-err);
-    background-color: var(--ctp-err-soft);
-    box-shadow:
-      inset 0 0 0 1px var(--ctp-err-soft),
-      0 0 12px -4px var(--ctp-err-soft);
-  }
-  .ico-solid-info {
-    color: var(--ctp-info);
-    background-color: var(--ctp-info-soft);
-    box-shadow:
-      inset 0 0 0 1px var(--ctp-info-soft),
-      0 0 12px -4px var(--ctp-info-soft);
-  }
-  .ico-solid-accent {
-    color: var(--ctp-accent);
-    background-color: var(--ctp-accent-soft);
   }
 
   /* --- kabuk (ADR-096 madde 2) ---
@@ -993,33 +988,87 @@
     @apply bg-bg-hard text-fg-faint;
   }
 
-  /* Etkinlik akışı zaman çizgisi: alt kenarlık yok, ikonları dikey bir çizgi
-     bağlar (son satır hariç) ve çizgi aşağı doğru solar. */
+  /* Etkinlik akışı (ADR-117 B). Satırın rengi olayın kategorisinden gelir:
+     `--feed-c` tek değişken, ikon dairesi ve hover zemini ondan türer. İkonları
+     dikey bir çizgi bağlar (son satır hariç) ve çizgi aşağı doğru solar. */
   .feed {
-    @apply flex min-h-0 flex-1 flex-col overflow-y-auto;
+    @apply flex min-h-0 flex-1 flex-col;
   }
   .feed-row {
-    @apply relative flex items-center gap-3 rounded-xl px-2 py-2.5 hover:bg-bg-soft;
+    @apply relative flex items-center gap-3 rounded-xl border-0 px-2 py-2.5
+           text-fg no-underline;
+    --feed-c: var(--feed-other);
   }
-  /* Çizgi ikonun ortasından başlar: px-2 (8px) + 36px ikonun yarısı = 25px */
+  /* `href`siz satır bağlantı değil: imleç de değişmemeli */
+  a.feed-row[href]:hover {
+    background-color: color-mix(in srgb, var(--feed-c) 8%, transparent);
+  }
+  .feed-row--auth {
+    --feed-c: var(--feed-auth);
+  }
+  .feed-row--config {
+    --feed-c: var(--feed-config);
+  }
+  .feed-row--account {
+    --feed-c: var(--feed-account);
+  }
+  .feed-row--danger {
+    --feed-c: var(--feed-danger);
+  }
+  .feed-row--other {
+    --feed-c: var(--feed-other);
+  }
+  /* Çizgi ikonun ortasından başlar: px-2 (8px) + 36px ikonun yarısı = 25px.
+     İkon `z-index` ile çizginin üstünde durur, yoksa çizgi daireyi keserdi. */
   .feed-row:not(:last-child)::before {
     @apply absolute top-11 -bottom-1 left-[25px] w-0.5 rounded-full;
     content: "";
-    background-image: linear-gradient(to bottom, var(--ctp-surface), transparent);
+    background-image: linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--ctp-fg) 28%, transparent),
+      color-mix(in srgb, var(--ctp-fg) 5%, transparent)
+    );
+  }
+  /* 36px daire: kategorinin rengi + yarı saydam zemin + iç halka + hafif ışıma.
+     Glyph rengi `inherit`: `.ico`nun kendi rengi daireninkini ezmesin. */
+  .feed-ico {
+    @apply relative z-1;
+    color: var(--feed-c);
+    background-color: color-mix(in srgb, var(--feed-c) 16%, transparent);
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--feed-c) 42%, transparent),
+      0 0 14px color-mix(in srgb, var(--feed-c) 20%, transparent);
+  }
+  .feed-ico .ico {
+    color: inherit;
+  }
+  .feed-ico--auth {
+    --feed-c: var(--feed-auth);
+  }
+  .feed-ico--config {
+    --feed-c: var(--feed-config);
+  }
+  .feed-ico--account {
+    --feed-c: var(--feed-account);
+  }
+  .feed-ico--danger {
+    --feed-c: var(--feed-danger);
+  }
+  .feed-ico--other {
+    --feed-c: var(--feed-other);
   }
   .feed-main {
     @apply min-w-0 flex-1;
   }
   .feed-title {
-    @apply truncate text-sm font-bold;
+    @apply truncate text-sm font-semibold;
   }
   .feed-sub {
     @apply truncate text-xs text-fg-faint;
   }
-  /* Saat hap rozet: 11px, eşit genişlikli rakam */
   .feed-time {
-    @apply shrink-0 rounded-full bg-bg-soft px-2 py-0.5 text-[0.6875rem] text-fg-faint
-           tabular-nums;
+    @apply shrink-0 text-[0.6875rem] tabular-nums;
+    color: var(--ctp-fg-dim);
   }
 
   /* Kart içeriğinin kalan yüksekliği doldurması gereken yerler (grafik kartı

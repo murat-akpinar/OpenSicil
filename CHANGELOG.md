@@ -151,4 +151,5 @@
 - Cam yüzeyli turkuaz tema ve daraltılabilir kenar menüsü
 - Gövde fontu Inter, monospace yalnızca veri alanlarında
 - Sayaç kartları kendi renginde, kıvılcım ve değişim rozetiyle
+- Etkinlik akışı olay kategorisine göre renklenir
 
