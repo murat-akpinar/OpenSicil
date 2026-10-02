@@ -614,6 +614,8 @@ Kurallar:
   - Kabul: satırlar seçilip tek eylemle alınır; seçilmeyen satır değişmez, otomatik yazma hiç yok
   - Kabul: `auditor` listeyi görür, eylemi göremez (403)
   - Kabul: her alınan değer denetime önce/sonra olarak girer
+  - Kabul: sicilde baştaki sıfırlar fark sayılmaz — `adoption::employee_number_matches` zaten bu kuralı yazıyor, liste onu çağırır
+  - Not (2026-10-02 ölçümü, Hogwarts): dolumdan sonra tek gerçek fark Draco Malfoy'da — AD sicil `00000000009` ↔ OpenSicil `9` (baştaki sıfır, fark **değil**) ve AD cep `+447700900009` ↔ OpenSicil `+905000000000` (gerçek fark, listeye girecek tek satır). Cedric ve Cho'da fark yok
 - [ ] TC kimlik no: öznitelik ayarı + toplu dolum ([ADR-112](decisions/112-alan-bazli-yetki-ve-geri-dolum.md) madde 5, [ADR-106](decisions/106-sahiplenmede-ad-kisi-alanlari.md))
   - Kabul: `ad_national_id_attribute` Yapılandırma'da girilince tarama değeri okur; boşken hiç okunmaz (bugünkü davranış korunur)
   - Kabul: dolum backend toplu eylemidir — AEAD + blind index backend'de üretilir ([ADR-010](decisions/010-kisisel-veri-kimlik-no-telefon.md)); worker düz değeri kimliğe yazmaz

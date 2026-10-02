@@ -29,6 +29,7 @@
 - Hogwarts AD'de bekleyen ölçümler alındı (whenCreated 29/29, sicil employeeNumber'dan, manage_diff 3 fark)
 - TC özniteliği kurulum ayarı olarak cevaplandı, Zimbra bölümü kullanıcı kararıyla beklemede
 - AD'den geri dolum ve ayrılışta silmeme kutucukları
+- AD'de farklı listesine sicil ve ölçüm notu
 
 ### Düzeltmeler
 
