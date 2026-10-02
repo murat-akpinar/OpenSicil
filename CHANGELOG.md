@@ -10,6 +10,7 @@
 - Faz 3b kapanışı — güvenlik ve test
 - Faz 3c kapanışı — güvenlik ve test
 - Faz 3d kapanışı — güvenlik ve test
+- Lab dosyaları git'ten çıkarıldı, geliştirici makinesinde kalır
 
 ### Dokümantasyon
 
