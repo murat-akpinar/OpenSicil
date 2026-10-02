@@ -27,6 +27,9 @@
   {% if !duplicates.is_empty() %}
   <label class="check"><input type="checkbox" name="confirm_duplicates" value="1"> {{ lang.t("import.confirm_duplicates") }}</label>
   {% endif %}
+  {% if !renumbers.is_empty() %}
+  <label class="check"><input type="checkbox" name="confirm_renumber" value="1"> {{ lang.t("import.confirm_renumber") }}</label>
+  {% endif %}
   {% if summary.affected > 0 %}
   <div class="flex flex-wrap gap-2">
     <button class="btn btn-primary" type="submit"><i class="ico ico-check" aria-hidden="true"></i>{% if will_stage %}{{ lang.t("import.stage") }}{% else %}{{ lang.t("import.apply") }}{% endif %}</button>

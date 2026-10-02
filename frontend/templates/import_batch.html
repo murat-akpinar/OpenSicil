@@ -22,7 +22,10 @@
 
 <div class="card stack">
   {% if !duplicates.is_empty() %}
-  <p class="hint">{% if duplicates_confirmed %}{{ lang.t("import.duplicates_confirmed") }}{% else %}{{ lang.t("import.confirm_needed") }}{% endif %}</p>
+  <p class="hint">{% if confirmed.duplicates %}{{ lang.t("import.duplicates_confirmed") }}{% else %}{{ lang.t("import.confirm_needed") }}{% endif %}</p>
+  {% endif %}
+  {% if !renumbers.is_empty() %}
+  <p class="hint">{% if confirmed.renumber %}{{ lang.t("import.renumber_confirmed") }}{% else %}{{ lang.t("import.confirm_renumber_needed") }}{% endif %}</p>
   {% endif %}
   {% if approver_is_initiator %}
   <p class="hint">{{ lang.t("err.approver_is_initiator") }}</p>

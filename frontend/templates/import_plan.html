@@ -46,6 +46,29 @@
 </div>
 {% endif %}
 
+{% if !renumbers.is_empty() %}
+<div class="card mb-4">
+  <div class="card-head">
+    <span class="ico-tile ico-tile-info"><i class="ico ico-tag" aria-hidden="true"></i></span>
+    <h2 class="h2">{{ lang.t1("import.renumbers_title", renumbers.len()) }}</h2>
+  </div>
+  <p class="hint mb-3">{{ lang.t("import.renumbers_hint") }}</p>
+  <table class="tbl">
+    <thead><tr><th>{{ lang.t("import.line_col") }}</th><th>{{ lang.t("field.person") }}</th><th>{{ lang.t("import.old_number") }}</th><th>{{ lang.t("import.new_number") }}</th></tr></thead>
+    <tbody>
+    {% for r in renumbers %}
+      <tr>
+        <td class="num">{{ r.line }}</td>
+        <td><a class="link" href="/identities/{{ r.identity_id }}">{{ r.person }}</a></td>
+        <td><code>{{ r.old_number }}</code></td>
+        <td><code>{{ r.new_number }}</code></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
 {% if !rows.is_empty() %}
 <div class="card overflow-x-auto p-0 mb-4">
   <table class="tbl">

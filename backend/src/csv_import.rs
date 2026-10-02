@@ -398,14 +398,32 @@ type ExistingRow = (
     Option<Vec<i64>>,
 );
 
-const EXISTING_SQL: &str = "SELECT i.id, i.employee_number, i.given_name, i.surname, \
-     i.mobile_phone, i.department_id, i.primary_role_id, i.manager_id, i.employment_type, \
-     to_char(i.start_date, 'YYYY-MM-DD'), to_char(i.end_at - interval '1 second', 'YYYY-MM-DD'), \
-     i.end_at IS NOT NULL AND i.end_at <= now(), i.existing_ad_account_hint, i.national_id_bidx, \
-     i.national_id_country, \
-     (SELECT array_agg(a.role_id) FROM identity_additional_roles a \
-        WHERE a.identity_id = i.id AND a.ends_on IS NULL) \
-     FROM identities i WHERE i.deleted_at IS NULL AND i.employee_number = ANY($1)";
+macro_rules! existing_sql {
+    ($filter:literal) => {
+        concat!(
+            "SELECT i.id, i.employee_number, i.given_name, i.surname, \
+             i.mobile_phone, i.department_id, i.primary_role_id, i.manager_id, i.employment_type, \
+             to_char(i.start_date, 'YYYY-MM-DD'), to_char(i.end_at - interval '1 second', 'YYYY-MM-DD'), \
+             i.end_at IS NOT NULL AND i.end_at <= now(), i.existing_ad_account_hint, i.national_id_bidx, \
+             i.national_id_country, \
+             (SELECT array_agg(a.role_id) FROM identity_additional_roles a \
+                WHERE a.identity_id = i.id AND a.ends_on IS NULL) \
+             FROM identities i WHERE i.deleted_at IS NULL AND ",
+            $filter
+        )
+    };
+}
+
+const EXISTING_SQL: &str = existing_sql!("i.employee_number = ANY($1)");
+
+/// ADR-055 madde 3: sicil nosu dosyada olmayan ama kimlik numarasi tutan kimlik.
+async fn existing_by_id(pool: &PgPool, id: i64) -> Result<Option<Existing>, sqlx::Error> {
+    let row: Option<ExistingRow> = sqlx::query_as(existing_sql!("i.id = $1"))
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
+    Ok(row.map(existing_from))
+}
 
 impl Refs {
     async fn load(pool: &PgPool, numbers: &[String]) -> Result<Refs, sqlx::Error> {
@@ -506,6 +524,9 @@ pub struct RowPlan {
     /// Yonetici bu dosyada acilacak bir kimlik: id'si uygulamada baglanir
     manager_ref: Option<String>,
     touch_manager: bool,
+    /// ADR-055 madde 3: satir, kimlik numarasi tutan mevcut kimligin sicil nosunu
+    /// degistiriyor; eski numara (gosterim ve denetim)
+    pub renumber: Option<String>,
 }
 
 impl RowPlan {
@@ -541,11 +562,29 @@ pub struct Duplicate {
     pub existing_number: String,
 }
 
+/// Sicil no degisimi onerisi (ADR-042 madde 3 / ADR-055 madde 3): ayni kimlik no,
+/// farkli sicil no; onaylanirsa mevcut kimligin sicil nosu guncellenir, yeni kimlik acilmaz.
+pub struct Renumber {
+    pub line: usize,
+    pub person: String,
+    pub identity_id: i64,
+    pub old_number: String,
+    pub new_number: String,
+}
+
+/// Dosya duzeyindeki iki onay kutusu; sahnelenen partiyle birlikte saklanir.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Confirmed {
+    pub duplicates: bool,
+    pub renumber: bool,
+}
+
 #[derive(Default)]
 pub struct Plan {
     pub rows: Vec<RowPlan>,
     pub errors: Vec<RowError>,
     pub duplicates: Vec<Duplicate>,
+    pub renumbers: Vec<Renumber>,
     pub new: usize,
     pub updated: usize,
     pub unchanged: usize,
@@ -612,25 +651,56 @@ pub async fn plan(
         }
     }
     plan.duplicates = possible_duplicates(pool, &plan.rows).await?;
+    plan.renumbers = renumbers_of(&plan.rows);
     Ok(plan)
+}
+
+fn renumbers_of(rows: &[RowPlan]) -> Vec<Renumber> {
+    rows.iter()
+        .filter_map(|r| {
+            Some(Renumber {
+                line: r.line,
+                person: r.person.clone(),
+                identity_id: r.identity_id?,
+                old_number: r.renumber.clone()?,
+                new_number: r.employee_number.clone(),
+            })
+        })
+        .collect()
 }
 
 type RowOutcome = Result<Result<RowPlan, RowError>, sqlx::Error>;
 
-async fn plan_row(ctx: &mut Ctx<'_>, refs: &Refs, table: &Table, row: &Row) -> RowOutcome {
+/// Sicil no: zorunlu ve dosyada tekil.
+fn row_number(ctx: &mut Ctx<'_>, table: &Table, row: &Row) -> Result<String, RowError> {
     let number = table
         .cell(row, Column::EmployeeNumber)
         .unwrap_or_default()
         .to_string();
     if number.is_empty() {
         let key = "err.import_employee_number_blank";
-        return Ok(Err(row_error(row.line, Some(Column::EmployeeNumber), key)));
+        return Err(row_error(row.line, Some(Column::EmployeeNumber), key));
     }
     if !ctx.numbers_seen.insert(number.clone()) {
         let key = "err.import_duplicate_employee_number";
-        return Ok(Err(row_error(row.line, Some(Column::EmployeeNumber), key)));
+        return Err(row_error(row.line, Some(Column::EmployeeNumber), key));
     }
-    let existing = refs.existing.get(&number);
+    Ok(number)
+}
+
+async fn plan_row(ctx: &mut Ctx<'_>, refs: &Refs, table: &Table, row: &Row) -> RowOutcome {
+    let number = match row_number(ctx, table, row) {
+        Ok(number) => number,
+        Err(e) => return Ok(Err(e)),
+    };
+    let by_national_id = match renumber_candidate(ctx, refs, table, row, &number).await? {
+        Ok(found) => found,
+        Err(e) => return Ok(Err(e)),
+    };
+    let renumber = by_national_id
+        .as_ref()
+        .map(|e| e.form.employee_number.clone());
+    let existing = refs.existing.get(&number).or(by_national_id.as_ref());
     let (form, manager_ref) = match merged_form(ctx, refs, table, row, existing) {
         Ok(merged) => merged,
         Err(e) => return Ok(Err(e)),
@@ -662,8 +732,41 @@ async fn plan_row(ctx: &mut Ctx<'_>, refs: &Refs, table: &Table, row: &Row) -> R
         roles,
         national_id,
         manager_ref,
+        renumber,
     };
     Ok(Ok(finish_row(table, row, number, existing, parts)))
+}
+
+/// Sicil nosu kayitli olmayan satirin kimlik numarasi baska bir kimlikte kayitliysa
+/// satir o kimligin guncellemesi sayilir (sicil no degisimi onerisi, ADR-055 madde 3).
+/// Numara bicimi bozuksa burada susulur, `identity::validate` raporlar.
+async fn renumber_candidate(
+    ctx: &Ctx<'_>,
+    refs: &Refs,
+    table: &Table,
+    row: &Row,
+    number: &str,
+) -> Result<Result<Option<Existing>, RowError>, sqlx::Error> {
+    if refs.existing.contains_key(number) {
+        return Ok(Ok(None));
+    }
+    let raw = table
+        .cell(row, Column::NationalId)
+        .filter(|v| !v.is_empty());
+    let Some(raw) = raw else {
+        return Ok(Ok(None));
+    };
+    let country = table
+        .cell(row, Column::NationalIdCountry)
+        .filter(|v| !v.is_empty())
+        .unwrap_or("TR");
+    let Ok(nid) = national_id::parse(country, raw) else {
+        return Ok(Ok(None));
+    };
+    let Some(id) = national_id::find_identity(ctx.pool, ctx.keys.blind_index, &nid).await? else {
+        return Ok(Ok(None));
+    };
+    Ok(Ok(existing_by_id(ctx.pool, id).await?))
 }
 
 /// Dogrulanmis parcalar; satir plani bunlardan kurulur.
@@ -673,6 +776,7 @@ struct RowParts {
     roles: Option<Vec<i64>>,
     national_id: Option<NationalId>,
     manager_ref: Option<String>,
+    renumber: Option<String>,
 }
 
 fn finish_row(
@@ -696,6 +800,7 @@ fn finish_row(
         roles: parts.roles,
         national_id: parts.national_id,
         manager_ref: parts.manager_ref,
+        renumber: parts.renumber,
     };
     if let Some(existing) = existing {
         let (changes, cleared) = changes_of(table, &planned, existing);
@@ -928,7 +1033,8 @@ fn change_of(column: Column, planned: &RowPlan, existing: &Existing) -> (bool, b
     let (new, old) = (&planned.new, &existing.form);
     let opt = |s: &str| (!s.is_empty()).then(|| s.to_string());
     match column {
-        Column::EmployeeNumber | Column::NationalIdCountry => (false, false),
+        Column::EmployeeNumber => (planned.renumber.is_some(), false),
+        Column::NationalIdCountry => (false, false),
         Column::GivenName => (new.given_name != old.given_name, false),
         Column::Surname => (new.surname != old.surname, false),
         Column::NationalId => (planned.national_id.is_some(), false),
@@ -1055,7 +1161,8 @@ const UPDATE_SQL: &str = "UPDATE identities SET given_name = $2, surname = $3, m
      department_id = $5, primary_role_id = $6, employment_type = $7, start_date = $8::date, \
      existing_ad_account_hint = $9, \
      manager_id = CASE WHEN $10 THEN $11 ELSE manager_id END, \
-     end_at = CASE WHEN $12 THEN (($13::date + 1)::timestamp AT TIME ZONE $14) ELSE end_at END \
+     end_at = CASE WHEN $12 THEN (($13::date + 1)::timestamp AT TIME ZONE $14) ELSE end_at END, \
+     employee_number = $15 \
      WHERE id = $1 AND deleted_at IS NULL";
 
 async fn update_row(
@@ -1081,6 +1188,7 @@ async fn update_row(
         .bind(row.end.is_some())
         .bind(row.end.clone().flatten())
         .bind(time_zone)
+        .bind(&new.employee_number)
         .execute(&mut **tx)
         .await?;
     if let Some(nid) = &row.national_id {
@@ -1147,7 +1255,7 @@ pub struct Batch {
     pub by_subject: String,
     pub by_username: String,
     pub age_seconds: i64,
-    pub duplicates_confirmed: bool,
+    pub confirmed: Confirmed,
     pub affected_at_stage: i32,
 }
 
@@ -1172,17 +1280,19 @@ pub async fn stage(
     aead_key: &[u8; crate::crypto::KEY_LEN],
     table: &Table,
     affected: usize,
-    by: (&str, &str, bool),
+    by: (&str, &str, Confirmed),
 ) -> Result<i64, sqlx::Error> {
     let json = serde_json::to_vec(table).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;
     sqlx::query_scalar(
         "INSERT INTO import_batches (rows_enc, row_count, affected, duplicates_confirmed, \
-         by_subject, by_username) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
+         renumber_confirmed, by_subject, by_username) VALUES ($1, $2, $3, $4, $5, $6, $7) \
+         RETURNING id",
     )
     .bind(crate::crypto::encrypt_versioned(aead_key, &json))
     .bind(table.rows.len() as i32)
     .bind(affected as i32)
-    .bind(by.2)
+    .bind(by.2.duplicates)
+    .bind(by.2.renumber)
     .bind(by.0)
     .bind(by.1)
     .fetch_one(pool)
@@ -1194,15 +1304,17 @@ pub async fn pending(
     aead_key: &[u8; crate::crypto::KEY_LEN],
     id: i64,
 ) -> Result<Option<Batch>, sqlx::Error> {
-    type Row = (Vec<u8>, i32, bool, String, String, i64);
+    type Row = (Vec<u8>, i32, bool, bool, String, String, i64);
     let row: Option<Row> = sqlx::query_as(
-        "SELECT rows_enc, affected, duplicates_confirmed, by_subject, by_username, \
-         EXTRACT(EPOCH FROM now() - created_at)::bigint FROM import_batches WHERE id = $1",
+        "SELECT rows_enc, affected, duplicates_confirmed, renumber_confirmed, by_subject, \
+         by_username, EXTRACT(EPOCH FROM now() - created_at)::bigint \
+         FROM import_batches WHERE id = $1",
     )
     .bind(id)
     .fetch_optional(pool)
     .await?;
-    let Some((enc, affected, confirmed, by_subject, by_username, age_seconds)) = row else {
+    let Some((enc, affected, duplicates, renumber, by_subject, by_username, age_seconds)) = row
+    else {
         return Ok(None);
     };
     let json = crate::crypto::decrypt_versioned(aead_key, &enc)
@@ -1215,7 +1327,10 @@ pub async fn pending(
         by_subject,
         by_username,
         age_seconds,
-        duplicates_confirmed: confirmed,
+        confirmed: Confirmed {
+            duplicates,
+            renumber,
+        },
         affected_at_stage: affected,
     }))
 }
@@ -1310,6 +1425,7 @@ struct PreviewTemplate {
     rows: Vec<RowPlan>,
     errors: Vec<RowError>,
     duplicates: Vec<Duplicate>,
+    renumbers: Vec<Renumber>,
     /// Esik asiliyor: uygulama yerine onaya gider
     will_stage: bool,
     stage_text: String,
@@ -1326,11 +1442,12 @@ struct BatchTemplate {
     /// ADR-055 madde 1: onay anindaki etkilenen sayisi sahnelendigindekinden farkli
     changed_since: bool,
     changed_text: String,
-    duplicates_confirmed: bool,
+    confirmed: Confirmed,
     summary: Summary,
     rows: Vec<RowPlan>,
     errors: Vec<RowError>,
     duplicates: Vec<Duplicate>,
+    renumbers: Vec<Renumber>,
     can_approve: bool,
     can_reject: bool,
     approver_is_initiator: bool,
@@ -1342,6 +1459,8 @@ struct UploadForm {
     csv: String,
     #[serde(default)]
     confirm_duplicates: Option<String>,
+    #[serde(default)]
+    confirm_renumber: Option<String>,
 }
 
 /// ADR-023 madde 1 → ADR-039: sahiplenme ortak ayar, backend kendi ortamindan okur.
@@ -1443,6 +1562,7 @@ fn render_preview(
         rows: plan.rows.into_iter().take(PREVIEW_ROWS).collect(),
         errors: plan.errors,
         duplicates: plan.duplicates,
+        renumbers: plan.renumbers,
         will_stage,
         stage_text,
     })
@@ -1476,7 +1596,10 @@ async fn upload(
         Ok(parsed) => parsed,
         Err(response) => return *response,
     };
-    let confirmed = form.confirm_duplicates.is_some();
+    let confirmed = Confirmed {
+        duplicates: form.confirm_duplicates.is_some(),
+        renumber: form.confirm_renumber.is_some(),
+    };
     if let Some(key) = blocking_key(&plan, confirmed) {
         let notice = Notice::err(op.lang.t(key).to_string());
         return render_preview(&state, &op, form.csv, plan, notice);
@@ -1488,7 +1611,8 @@ async fn upload(
             Err(e) => return internal("içe aktarma sahnelenemedi", e),
         };
         let detail = serde_json::json!({ "batch_id": id, "rows": table.rows.len(),
-            "affected": plan.affected(), "duplicates_confirmed": confirmed });
+            "affected": plan.affected(), "duplicates_confirmed": confirmed.duplicates,
+            "renumber_confirmed": confirmed.renumber });
         audit_operator(&state, &op, crate::audit::IMPORT_STAGED, None, detail).await;
         return Redirect::to(&format!("/imports/{id}")).into_response();
     }
@@ -1507,12 +1631,15 @@ async fn upload(
     }
 }
 
-/// Uygulamayi engelleyen durum: hatali satir ya da onaylanmamis mukerrer uyarisi.
-fn blocking_key(plan: &Plan, duplicates_confirmed: bool) -> Option<&'static str> {
+/// Uygulamayi engelleyen durum: hatali satir, onaylanmamis mukerrer uyarisi ya da
+/// onaylanmamis sicil no degisimi onerisi.
+fn blocking_key(plan: &Plan, confirmed: Confirmed) -> Option<&'static str> {
     if !plan.valid() {
         Some("import.has_errors")
-    } else if !plan.duplicates.is_empty() && !duplicates_confirmed {
+    } else if !plan.duplicates.is_empty() && !confirmed.duplicates {
         Some("import.confirm_needed")
+    } else if !plan.renumbers.is_empty() && !confirmed.renumber {
+        Some("import.confirm_renumber_needed")
     } else {
         None
     }
@@ -1523,17 +1650,33 @@ async fn apply_and_audit(
     op: &Operator,
     plan: &Plan,
     rows: usize,
-    duplicates_confirmed: bool,
+    confirmed: Confirmed,
 ) -> Result<Applied, sqlx::Error> {
     let applied = apply(&state.pool, &keys_of(state), &state.time_zone, plan).await?;
-    // ADR-018: dosya icerigi degil; kim, ne zaman, kac satir (ve mukerrer onayi, ADR-042)
+    // ADR-018: dosya icerigi degil; kim, ne zaman, kac satir (ve onaylar, ADR-042/055)
     let detail = serde_json::json!({ "rows": rows, "created": applied.created.len(),
         "updated": applied.updated.len(), "cleared": plan.cleared,
-        "duplicates_confirmed": duplicates_confirmed });
+        "renumbered": plan.renumbers.len(), "duplicates_confirmed": confirmed.duplicates,
+        "renumber_confirmed": confirmed.renumber });
     audit_operator(state, op, crate::audit::IMPORT_APPLIED, None, detail).await;
+    // ADR-042 madde 3: sicil no degisimi denetimde once/sonra ile
+    let renumbered: HashMap<i64, (&str, &str)> = plan
+        .renumbers
+        .iter()
+        .map(|r| {
+            (
+                r.identity_id,
+                (r.old_number.as_str(), r.new_number.as_str()),
+            )
+        })
+        .collect();
     for (ids, action) in [(&applied.created, "created"), (&applied.updated, "updated")] {
         for id in ids {
-            let detail = serde_json::json!({ "action": action });
+            let detail = match renumbered.get(id) {
+                Some((before, after)) => serde_json::json!({ "action": action,
+                    "employee_number_before": before, "employee_number_after": after }),
+                None => serde_json::json!({ "action": action }),
+            };
             audit_operator(
                 state,
                 op,
@@ -1584,7 +1727,7 @@ fn render_batch(
     let approver_is_initiator = !batch.approvable_by(&op.subject, state.approval_timelock_hours);
     let can_approve = allowed(op, APPROVE_AUTHORITIES)
         && !approver_is_initiator
-        && blocking_key(&plan, batch.duplicates_confirmed).is_none();
+        && blocking_key(&plan, batch.confirmed).is_none();
     let staged = usize::try_from(batch.affected_at_stage).unwrap_or_default();
     let batch_sub = op.lang.tn(
         "import.batch_sub",
@@ -1602,11 +1745,12 @@ fn render_batch(
         batch_sub,
         changed_since: plan.affected() != staged,
         changed_text,
-        duplicates_confirmed: batch.duplicates_confirmed,
+        confirmed: batch.confirmed,
         summary: Summary::of(&plan),
         rows: plan.rows.into_iter().take(PREVIEW_ROWS).collect(),
         errors: plan.errors,
         duplicates: plan.duplicates,
+        renumbers: plan.renumbers,
         can_approve,
         can_reject: allowed(op, APPROVE_AUTHORITIES) || batch.by_subject == op.subject,
         approver_is_initiator,
@@ -1640,13 +1784,12 @@ async fn approve(
         let notice = Notice::err(op.lang.t("err.approver_is_initiator").to_string());
         return render_batch(&state, &op, batch, plan, notice);
     }
-    if let Some(key) = blocking_key(&plan, batch.duplicates_confirmed) {
+    if let Some(key) = blocking_key(&plan, batch.confirmed) {
         let notice = Notice::err(op.lang.t(key).to_string());
         return render_batch(&state, &op, batch, plan, notice);
     }
     let rows = batch.table.rows.len();
-    let applied = match apply_and_audit(&state, &op, &plan, rows, batch.duplicates_confirmed).await
-    {
+    let applied = match apply_and_audit(&state, &op, &plan, rows, batch.confirmed).await {
         Ok(applied) => applied,
         Err(e) => return internal("içe aktarma partisi uygulanamadı", e),
     };
@@ -1926,6 +2069,17 @@ mod tests {
         national_id::store(&pool, &TEST_KEYS, departed, &nid)
             .await
             .unwrap();
+        // kimlik numarasi olmayan ikinci kimlik: baskasinin numarasini alamaz
+        sqlx::query(
+            "INSERT INTO identities (given_name, surname, employee_number, department_id, \
+             primary_role_id, employment_type, start_date) \
+             VALUES ('Yok', 'Numara', '3500', $1, $2, 'permanent', current_date - 10)",
+        )
+        .bind(department)
+        .bind(primary)
+        .execute(&pool)
+        .await
+        .unwrap();
 
         let header = "employee_number,given_name,surname,department_code,primary_role,employment_type,start_date";
         let errors = |text: String| {
@@ -1947,9 +2101,12 @@ mod tests {
              4002,Yeni,Kişi,BT,Sistem Uzmanı,permanent,2026-01-01,,9999,\n\
              4002,Yeni,Kişi,BT,Sistem Uzmanı,permanent,2026-01-01,,,\n\
              4003,Yeni,Kişi,BT,Sistem Uzmanı,stajyer,2026-01-01,,,\n\
-             4004,Yeni,Kişi,BT,Sistem Uzmanı,permanent,2026-01-01,,,10000000146\n"
+             4004,Yeni,Kişi,BT,Sistem Uzmanı,permanent,2026-01-01,,,10000000146\n\
+             3500,Yok,Numara,BT,Sistem Uzmanı,permanent,2026-01-01,,,10000000146\n"
         ))
         .await;
+        // 8: kimlik no ayrilmis 3000'e ait → sicil no degisimi onerisi (ADR-055), ama bos
+        // bitis ayrilmisin bitisini bosaltamaz (ADR-030); 9: 3500'un numarasi yok, 3000'inkini alamaz
         assert_eq!(
             bad,
             vec![
@@ -1959,7 +2116,8 @@ mod tests {
                 (5, "manager_employee_number", "err.import_manager_unknown"),
                 (6, "employee_number", "err.import_duplicate_employee_number"),
                 (7, "end_date", "err.end_required_non_permanent"),
-                (8, "national_id", "err.import_national_id_other"),
+                (8, "end_date", "err.import_departed_end"),
+                (9, "national_id", "err.import_national_id_other"),
             ]
         );
         // sahiplenme acikken ipucusuz yeni satir reddedilir; ipuculu gecer
@@ -1988,6 +2146,126 @@ mod tests {
                 plan.duplicates[0].existing_number.as_str()
             ),
             (departed, "3000")
+        );
+
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
+    #[test]
+    fn blocking_needs_both_confirmations() {
+        let mut plan = Plan::default();
+        assert_eq!(blocking_key(&plan, Confirmed::default()), None);
+        plan.renumbers.push(Renumber {
+            line: 2,
+            person: "A B".into(),
+            identity_id: 1,
+            old_number: "1".into(),
+            new_number: "2".into(),
+        });
+        let only_duplicates = Confirmed {
+            duplicates: true,
+            renumber: false,
+        };
+        assert_eq!(
+            blocking_key(&plan, only_duplicates),
+            Some("import.confirm_renumber_needed")
+        );
+        let both = Confirmed {
+            duplicates: true,
+            renumber: true,
+        };
+        assert_eq!(blocking_key(&plan, both), None);
+        plan.errors.push(row_error(3, None, "err.x"));
+        assert_eq!(blocking_key(&plan, both), Some("import.has_errors"));
+    }
+
+    /// ADR-055 madde 3: ayni kimlik no, farkli sicil no → hata degil oneri; uygulaninca
+    /// mevcut kimligin sicil nosu degisir, yeni kimlik acilmaz; ayni kimlik no iki satirda hata.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn suggests_employee_number_change_for_a_known_national_id() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        let (department, primary, _) = seed(&pool).await;
+        let intern: i64 = sqlx::query_scalar(
+            "INSERT INTO identities (given_name, surname, employee_number, department_id, \
+             primary_role_id, employment_type, start_date, end_at) \
+             VALUES ('Stajyer', 'Kadro', 'STJ-7', $1, $2, 'intern', current_date - 200, now() + interval '30 days') \
+             RETURNING id",
+        )
+        .bind(department)
+        .bind(primary)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let nid = national_id::parse("TR", "10000000146").unwrap();
+        national_id::store(&pool, &TEST_KEYS, intern, &nid)
+            .await
+            .unwrap();
+
+        // kadroya gecis: yeni sicil no, calisma tipi kadrolu, bitis bos (ADR-042 madde 3)
+        let text = "employee_number,given_name,surname,national_id,department_code,primary_role,\
+                    employment_type,start_date,end_date\n\
+                    K-100,Stajyer,Kadro,10000000146,BT,Sistem Uzmanı,permanent,2026-01-01,\n";
+        let table = table_of(text);
+        let plan = super::plan(&pool, &TEST_KEYS, false, &table).await.unwrap();
+        assert!(plan.valid(), "{:?}", plan.errors);
+        assert_eq!((plan.new, plan.updated), (0, 1), "yeni kimlik acilmaz");
+        assert_eq!(plan.renumbers.len(), 1);
+        let suggestion = &plan.renumbers[0];
+        assert_eq!(
+            (
+                suggestion.identity_id,
+                suggestion.old_number.as_str(),
+                suggestion.new_number.as_str()
+            ),
+            (intern, "STJ-7", "K-100")
+        );
+        let row = &plan.rows[0];
+        assert!(
+            row.changes.contains(&"employee_number") && row.changes.contains(&"employment_type")
+        );
+        assert!(
+            plan.duplicates.is_empty(),
+            "ayni kisi, mukerrer uyarisi yok"
+        );
+        assert_eq!(
+            blocking_key(&plan, Confirmed::default()),
+            Some("import.confirm_renumber_needed")
+        );
+
+        apply(&pool, &TEST_KEYS, TZ, &plan).await.unwrap();
+        let after: (Option<String>, String, Option<i64>) = sqlx::query_as(
+            "SELECT employee_number, employment_type, EXTRACT(EPOCH FROM end_at)::bigint \
+             FROM identities WHERE id = $1",
+        )
+        .bind(intern)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            after,
+            (Some("K-100".to_string()), "permanent".to_string(), None)
+        );
+        let total: i64 = sqlx::query_scalar("SELECT count(*) FROM identities")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(total, 1);
+
+        // ayni kimlik no ile iki satir yine hata
+        let twice = table_of(
+            "employee_number,given_name,surname,national_id,department_code,primary_role,employment_type,start_date\n\
+             K-100,Stajyer,Kadro,10000000146,BT,Sistem Uzmanı,permanent,2026-01-01\n\
+             K-101,Baska,Biri,10000000146,BT,Sistem Uzmanı,permanent,2026-01-01\n",
+        );
+        let plan = super::plan(&pool, &TEST_KEYS, false, &twice).await.unwrap();
+        assert_eq!(
+            plan.errors
+                .iter()
+                .map(|e| (e.line, e.key))
+                .collect::<Vec<_>>(),
+            vec![(3, "err.import_duplicate_national_id")]
         );
 
         drop(pool);
