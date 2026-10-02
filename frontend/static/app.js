@@ -314,9 +314,9 @@
   // `data-ratio` kutusu: aynı kolondaki en büyük sayıya göre oran çubuğu. Genişlik
   // hazır `.v-NN` sınıflarından gelir (beşer adım), satır içi `style` CSP'de yasak.
   function ratioBars() {
-    var tables = document.querySelectorAll(".tbl");
-    for (var t = 0; t < tables.length; t++) {
-      fillRatios(tables[t]);
+    var boxes = document.querySelectorAll(".tbl, .role-grid");
+    for (var t = 0; t < boxes.length; t++) {
+      fillRatios(boxes[t]);
     }
   }
 
@@ -328,8 +328,12 @@
     var values = [];
     var max = 0;
     for (var i = 0; i < slots.length; i++) {
-      var cell = slots[i].closest("td");
-      var n = parseInt((cell ? cell.textContent : "").replace(/[^0-9-]/g, ""), 10);
+      // Değer doğrudan `data-ratio`da gelebilir (rol kartı: hücre metninde ada
+      // ve grup sayısına ait rakamlar da var, kartı okumak yanlış sayı verirdi).
+      // Boşsa eski davranış: sayıyı kendi tablo hücresinden oku.
+      var given = slots[i].getAttribute("data-ratio");
+      var text = given || (slots[i].closest("td") || { textContent: "" }).textContent;
+      var n = parseInt(String(text).replace(/[^0-9-]/g, ""), 10);
       values[i] = isNaN(n) ? 0 : n;
       if (values[i] > max) {
         max = values[i];
@@ -522,6 +526,73 @@
     });
   }
 
+  // Rol kartları: "Kart / Liste" görünümü ve bölüm içi arama (ADR-119 A.4).
+  // Görünüm tercihi tek anahtarda durur ve bütün bölümlere uygulanır; bölüm
+  // başına ayrı tutulsa aynı sayfada iki farklı yerleşim görünürdü.
+  var ROLE_VIEW_KEY = "opensicil-role-view";
+
+  function roleViewStored() {
+    try {
+      return localStorage.getItem(ROLE_VIEW_KEY);
+    } catch (e) {
+      return null; // gizli pencere / site verisi kapalı: kart görünümü kalır
+    }
+  }
+
+  function roleViews() {
+    var grids = document.querySelectorAll(".role-grid");
+    if (!grids.length) {
+      return;
+    }
+    var buttons = document.querySelectorAll("[data-role-view]");
+
+    function paint(view) {
+      for (var i = 0; i < grids.length; i++) {
+        grids[i].setAttribute("data-role-view", view);
+      }
+      for (var j = 0; j < buttons.length; j++) {
+        var on = buttons[j].getAttribute("data-role-view") === view;
+        buttons[j].classList.toggle("segment-item-active", on);
+        buttons[j].setAttribute("aria-pressed", on ? "true" : "false");
+      }
+    }
+
+    paint(roleViewStored() === "list" ? "list" : "grid");
+    for (var k = 0; k < buttons.length; k++) {
+      buttons[k].addEventListener("click", function () {
+        var view = this.getAttribute("data-role-view");
+        try {
+          localStorage.setItem(ROLE_VIEW_KEY, view);
+        } catch (e) {
+          // saklanamadı: seçim yalnızca bu sayfa için geçerli
+        }
+        paint(view);
+      });
+    }
+  }
+
+  function roleFilters() {
+    var inputs = document.querySelectorAll("[data-role-filter]");
+    for (var i = 0; i < inputs.length; i++) {
+      bindRoleFilter(inputs[i]);
+    }
+  }
+
+  function bindRoleFilter(input) {
+    var grid = document.getElementById(input.getAttribute("data-role-filter"));
+    if (!grid) {
+      return;
+    }
+    var cards = grid.querySelectorAll(".role-card");
+    input.addEventListener("input", function () {
+      var needle = input.value.trim().toLocaleLowerCase("tr");
+      for (var i = 0; i < cards.length; i++) {
+        var text = cards[i].textContent.toLocaleLowerCase("tr");
+        cards[i].hidden = needle !== "" && text.indexOf(needle) < 0;
+      }
+    });
+  }
+
   apply(stored());
   navApply(navStored() || navDefault());
 
@@ -534,6 +605,8 @@
     clickableRows();
     dimZeros();
     avatarColors();
+    roleViews();
+    roleFilters();
     ratioBars();
     tree();
     selectAll();

@@ -162,4 +162,5 @@
 - Ayarlarda alan genişliği sınırlandı, bölüm menüsü üst bara göre yapışıyor
 - Personel listesinde departman/rol filtresi ve sıralanabilir kolonlar
 - Halka grafiğinin dilimleri arasına boşluk
+- Roller sayfası tür renkli bölümler ve kart ızgarası
 

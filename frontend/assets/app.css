@@ -846,6 +846,176 @@
     @apply max-w-md text-sm text-fg-faint;
   }
 
+  /* --- Roller (ADR-119 A) ---
+     Tür rengi tek bir `--rc` değişkeninden gelir: bölüm onu kurar, kart /
+     rozet / ikon karesi / oran çubuğu okur. Kart başına renk yazmak yerine
+     bölüme bir sınıf koymak, türün rengini tek yerde tutuyor. */
+  .role-kind--base {
+    --rc: var(--ctp-info);
+  }
+  .role-kind--primary {
+    --rc: var(--ctp-accent);
+  }
+  .role-kind--additional {
+    --rc: var(--ctp-accent-dim);
+  }
+
+  /* Bölümün solunda yukarıdan aşağı solan 3px tür çizgisi */
+  .role-sec {
+    @apply relative overflow-hidden;
+  }
+  .role-sec::before {
+    content: "";
+    @apply pointer-events-none absolute inset-y-0 left-0 w-[3px];
+    background: linear-gradient(to bottom, var(--rc), transparent);
+  }
+  .role-tile {
+    @apply size-10 rounded-xl;
+    color: var(--rc);
+    background-color: color-mix(in srgb, var(--rc) 18%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--rc) 40%, transparent);
+  }
+  .ico-tile-lg.role-tile {
+    @apply size-12 rounded-2xl text-xl;
+  }
+  .role-badge {
+    border-color: transparent;
+    color: var(--rc);
+    background-color: color-mix(in srgb, var(--rc) 16%, transparent);
+  }
+
+  /* Özet kutuları: sayıyı söyler ve `#role-<tür>` çapasıyla bölüme kaydırır */
+  .role-sum {
+    @apply mb-6 grid gap-3 sm:grid-cols-3;
+  }
+  .role-sum-box {
+    @apply flex items-center gap-3 rounded-2xl border border-line bg-card px-4 py-3 no-underline;
+    box-shadow: var(--ctp-shadow-sm);
+    transition:
+      transform 0.15s,
+      border-color 0.15s;
+  }
+  .role-sum-box:hover {
+    transform: translateY(-2px);
+    border-color: color-mix(in srgb, var(--rc) 45%, transparent);
+  }
+  .role-sum-t {
+    @apply block truncate text-sm font-bold text-fg;
+  }
+  .role-sum-h {
+    @apply block text-xs text-fg-faint;
+  }
+  .role-sum-n {
+    @apply shrink-0 text-2xl font-extrabold tabular-nums;
+    color: var(--rc);
+  }
+
+  /* Bölüm başlığının sağı: arama + görünüm düğmesi + sayı rozetleri */
+  /* Dar ekranda arac cubugu kendi satirina iner: `shrink-0` ile ayni satirda
+     kalirsa baslik metnini kelime kelime siksuyor. */
+  .role-sec .card-head {
+    @apply flex-wrap;
+  }
+  .role-tools {
+    @apply flex w-full flex-wrap items-center justify-end gap-1.5 sm:w-auto sm:shrink-0;
+  }
+  /* `.input`in `w-full`u sonra geldigi icin genislik iki sinifli kuralda
+     verilir, yoksa arama kutusu arac cubugunun satirini kapliyor. */
+  .role-tools .role-find {
+    @apply h-8 py-1 text-xs;
+    width: 9rem;
+    max-width: 100%;
+  }
+  .role-view .segment-item {
+    @apply cursor-pointer;
+  }
+
+  /* Kart ızgarası: tablo değil liste; "Liste" görünümü aynı DOM'u tek kolona
+     indirir, böylece iki görünüm için iki şablon tutmak gerekmiyor. */
+  .role-grid {
+    @apply list-none p-0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+    gap: 12px;
+  }
+  .role-grid[data-role-view="list"] {
+    grid-template-columns: 1fr;
+  }
+  .role-card {
+    @apply relative;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 4px 10px;
+    padding: 14px 16px;
+    border: 1px solid var(--ctp-line);
+    border-radius: 14px;
+    background: var(--ctp-bg-soft);
+    transition:
+      transform 0.15s,
+      border-color 0.15s;
+  }
+  .role-card:hover {
+    transform: translateY(-2px);
+    border-color: color-mix(in srgb, var(--rc) 45%, transparent);
+    background: color-mix(in srgb, var(--rc) 7%, transparent);
+  }
+  .role-id {
+    @apply min-w-0;
+  }
+  /* Kartın tamamı bağlantı: ad gerçek metin olarak kalır (erişilebilir ad),
+     `::after` örtüsü kartı kaplar. Satır içi `onclick` CSP'de yasak. */
+  .role-name {
+    @apply block truncate text-sm font-semibold text-fg no-underline;
+  }
+  .role-name::after {
+    content: "";
+    @apply absolute inset-0 rounded-[14px];
+  }
+  .role-title {
+    @apply block truncate text-fg-faint;
+    font-size: 11px;
+  }
+  .role-count {
+    @apply flex flex-col items-end justify-start;
+  }
+  .role-n {
+    @apply block text-fg tabular-nums;
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1;
+  }
+  .role-count .meter-thin {
+    background-color: color-mix(in srgb, var(--rc) 20%, transparent);
+  }
+  .role-count .meter-fill {
+    background-color: var(--rc);
+  }
+  .role-ent {
+    @apply col-span-2 mt-1.5 border-t border-dashed border-line pt-1.5 text-fg-faint;
+    font-size: 11px;
+  }
+  /* Kimse taşımıyorsa kart soluk durur, üstüne gelince tam görünür */
+  .role-card--empty {
+    opacity: 0.55;
+  }
+  .role-card--empty:hover {
+    opacity: 1;
+  }
+  /* Yer tutucu rol (ADR-103): kesikli uyarı kenarlığı; rozet kendi satırında
+     sağ üstte durur — mutlak konum yok, adla üst üste binemez. */
+  .role-card--placeholder {
+    border-style: dashed;
+    border-color: color-mix(in srgb, var(--ctp-warn) 55%, transparent);
+  }
+  .role-flag {
+    @apply col-span-2 flex justify-end;
+  }
+  /* `hidden` özniteliği `display: grid`i yenemez: arama süzgeci kartı gerçekten
+     gizlesin diye açık kural gerekiyor. */
+  .role-card[hidden] {
+    display: none;
+  }
+
   /* --- gösterge paneli (ADR-076, ADR-096 madde 3) ---
      Grafikler native CSS: çubuk yüksekliği ve dağılım çizgisi genişliği `--v`
      değişkeninden gelir. Değer satır içi `style` ile verilemez — nginx CSP'si

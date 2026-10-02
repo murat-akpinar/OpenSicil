@@ -3,8 +3,10 @@
 {% block content %}
 {% if can_edit %}
 {# ADR-114 C: birincil eylem basligin saginda. `<details>` JS istemiyor,
-   satir ici `onclick` CSP'de yasak; form basligin altinda tam genislikte acilir #}
-<details class="page-head-form">
+   satir ici `onclick` CSP'de yasak; form basligin altinda tam genislikte acilir.
+   ADR-119 A.6: bos turun "rol ekle" dugmesi `?new=<tur>` ile buraya doner ve
+   formu acik, turu secili basar — JS'siz acmanin tek yolu bu. #}
+<details class="page-head-form"{% if !new_kind.is_empty() %} open{% endif %}>
   <summary>
     <div class="page-head">
       <h1 class="h1">{{ lang.t("nav.roles") }}</h1>
@@ -15,7 +17,7 @@
     <div>
       <label class="label" for="kind">{{ lang.t("field.kind") }}</label>
       <select class="input" id="kind" name="kind">
-        {% for k in kinds %}<option value="{{ k }}">{{ lang.key("rolekind", k) }}</option>{% endfor %}
+        {% for k in kinds %}<option value="{{ k }}"{% if self.kind_selected(k) %} selected{% endif %}>{{ lang.key("rolekind", k) }}</option>{% endfor %}
       </select>
     </div>
     <div>
@@ -45,51 +47,81 @@
   <p class="empty-hint">{{ lang.t("roles.empty_hint") }}</p>
 </div>
 {% else %}
-{# Tur basina ayri bolum: birincil ve ek rol ayni tabloda karismasin, turun
-   ne ise yaradigi veri gelince de ekranda kalsin #}
+{# ADR-119 A.7: tur basina ozet kutusu, kendi renginde; capa ilgili bolume kaydirir #}
+<div class="role-sum">
+  {% for s in sections %}
+  <a class="role-sum-box role-kind--{{ s.kind }}" href="#role-{{ s.kind }}">
+    <span class="ico-tile role-tile"><i class="ico ico-key" aria-hidden="true"></i></span>
+    <span class="min-w-0 flex-1">
+      <span class="role-sum-t">{{ lang.key("rolekind", s.kind) }} {{ lang.t("roles.role_word") }}</span>
+      <span class="role-sum-h">{{ lang.t1(s.people_key, s.people) }}</span>
+    </span>
+    <span class="role-sum-n">{{ s.roles.len() }}</span>
+  </a>
+  {% endfor %}
+</div>
+
+{# Tur basina ayri bolum: birincil ve ek rol karismasin, turun ne ise yaradigi
+   veri gelince de ekranda kalsin. Bolum `--rc`yi kurar (ADR-119 A.1) #}
 {% for s in sections %}
-<section class="card mb-6">
+<section class="card mb-6 role-sec role-kind--{{ s.kind }}" id="role-{{ s.kind }}">
   <div class="card-head">
-    <span class="ico-tile"><i class="ico ico-key" aria-hidden="true"></i></span>
+    <span class="ico-tile role-tile"><i class="ico ico-key" aria-hidden="true"></i></span>
     <div class="min-w-0 flex-1">
       <h2 class="h2">{{ lang.key("rolekind", s.kind) }} {{ lang.t("roles.role_word") }}</h2>
       <p class="hint">{{ lang.key("rolekind_hint", s.kind) }}</p>
     </div>
     {% if !s.roles.is_empty() %}
-    <span class="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
-      <span class="badge badge-muted">{{ lang.t1("roles.count_n", s.roles.len()) }}</span>
+    <span class="role-tools">
+      <input class="input role-find" type="search" data-role-filter="role-grid-{{ s.kind }}"
+             placeholder="{{ lang.t("roles.find") }}" aria-label="{{ lang.t("roles.find") }}">
+      {# Gorunum dugmesi: ucu de ayni tercihi yazar (`localStorage`), bolumler
+         ayri gorunumde kalirsa goz ayni sayfada iki duzen gorurdu #}
+      <span class="segment role-view" role="group" aria-label="{{ lang.t("roles.view") }}">
+        <button class="segment-item" type="button" data-role-view="grid">{{ lang.t("roles.view_card") }}</button>
+        <button class="segment-item" type="button" data-role-view="list">{{ lang.t("roles.view_list") }}</button>
+      </span>
+      <span class="badge role-badge">{{ lang.t1("roles.count_n", s.roles.len()) }}</span>
       {# Ikinci sayinin ne saydigi ture gore degisir (org::role_sections): birincil
          ve temel rolde kisi, ek rolde atama — bir kisi birden fazla ek rol tasiyabilir #}
-      <span class="badge badge-muted">{{ lang.t1(s.people_key, s.people) }}</span>
+      <span class="badge role-badge">{{ lang.t1(s.people_key, s.people) }}</span>
     </span>
     {% endif %}
   </div>
   {% if s.roles.is_empty() %}
-  <p class="muted text-sm">{{ lang.t("roles.section_empty") }}</p>
-  {% else %}
-  <div class="tbl-page">
-    <table class="tbl">
-      <thead><tr>
-        <th>{{ lang.t("field.name") }}</th>
-        {% if s.kind == "primary" %}<th>{{ lang.t("field.title") }}</th>{% endif %}
-        <th class="num">{{ lang.t("roles.group_count") }}</th>
-        <th class="num">{{ lang.t("def.people") }}</th>
-      </tr></thead>
-      <tbody>
-      {% for r in s.roles %}
-        <tr>
-          <td>
-            <a class="link" href="/roles/{{ r.key() }}">{{ r.name }}</a>
-            {% if r.key() == "tanimsiz" %}<span class="badge badge-warn ml-1.5">{{ lang.t("roles.placeholder") }}</span>{% endif %}
-          </td>
-          {% if s.kind == "primary" %}<td class="muted">{% if r.title.is_empty() %}—{% else %}{{ r.title }}{% endif %}</td>{% endif %}
-          <td class="num">{{ r.entitlements }}</td>
-          <td class="num"><span class="block tabular-nums">{{ r.people }}</span><span class="meter-thin" data-ratio></span></td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
+  <div class="empty">
+    <span class="ico-tile ico-tile-lg role-tile"><i class="ico ico-key" aria-hidden="true"></i></span>
+    {# Turun aciklamasi bolum basliginda zaten duruyor, burada tekrar edilmez #}
+    <p class="empty-title">{{ lang.t("roles.section_empty") }}</p>
+    {% if can_edit %}
+    <a class="btn btn-primary" href="/roles?new={{ s.kind }}">
+      <i class="ico ico-plus" aria-hidden="true"></i>{{ lang.t1("roles.add_kind", lang.key("rolekind", s.kind)) }}
+    </a>
+    {% endif %}
   </div>
+  {% else %}
+  <ul class="role-grid" id="role-grid-{{ s.kind }}">
+  {% for r in s.roles %}
+    {# Karti baglantiya ceviren sey `.role-name::after`: ad gercek metin olarak
+       kalir (erisilebilir ad), ortu karti kaplar. Satir ici `onclick` yasak #}
+    <li class="role-card{% if r.people == 0 %} role-card--empty{% endif %}{% if r.key() == "tanimsiz" %} role-card--placeholder{% endif %}">
+      {% if r.key() == "tanimsiz" %}
+      <span class="role-flag"><span class="badge badge-warn">{{ lang.t("roles.placeholder") }}</span></span>
+      {% endif %}
+      <span class="role-id">
+        <a class="role-name" href="/roles/{{ r.key() }}">{{ r.name }}</a>
+        {% if !r.title.is_empty() && r.title != r.name %}<span class="role-title">{{ r.title }}</span>{% endif %}
+      </span>
+      <span class="role-count">
+        <span class="role-n">{{ r.people }}</span>
+        {# Sifirda cubuk hic basilmaz: bos iz "bir sey var" gibi okunuyor
+           (app.js'in tablo kolonundaki kurali ile ayni) #}
+        {% if r.people > 0 %}<span class="meter-thin" data-ratio="{{ r.people }}"></span>{% endif %}
+      </span>
+      <span class="role-ent">{{ lang.t1("roles.group_n", r.entitlements) }}</span>
+    </li>
+  {% endfor %}
+  </ul>
   {% endif %}
 </section>
 {% endfor %}

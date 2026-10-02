@@ -3,7 +3,7 @@
 // okuma her operator. Kayit sonrasi etkilenen kimlikler icin toplu is acilir.
 
 use askama::Template;
-use axum::extract::{Form, Path, State};
+use axum::extract::{Form, Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
@@ -464,8 +464,20 @@ struct RolesTemplate {
     /// Hic rol yoksa ekran bolum tablolari yerine bos durumu basar
     any: bool,
     kinds: &'static [&'static str],
+    /// ADR-119 A.6: `?new=<tur>` ile gelindiyse form acik ve bu tur secili
+    /// basilir. Izinli listeden gecer (`ROLE_KINDS`), bos = form kapali.
+    new_kind: &'static str,
     error: String,
     can_edit: bool,
+}
+
+impl RolesTemplate {
+    /// Secili tur karsilastirmasi Rust tarafinda durur: askama'nin ifade
+    /// ayristiricisi `*k` yazamiyor, `k.to_string()` ise clippy'nin
+    /// `cmp_owned`una takiliyor.
+    fn kind_selected(&self, kind: &str) -> bool {
+        self.new_kind == kind
+    }
 }
 
 #[derive(Template)]
@@ -628,7 +640,25 @@ struct TargetsTemplate {
     can_edit: bool,
 }
 
-async fn render_roles(state: &AppState, op: &Operator, error: String) -> Response {
+/// `?new=` degeri izinli listeden gecer: ekrana yalnizca `ROLE_KINDS`'teki bir
+/// tur girer, kullanici metni formun `selected`ina hic ulasmaz.
+fn role_kind_of(requested: Option<&str>) -> &'static str {
+    let Some(requested) = requested else {
+        return "";
+    };
+    org::ROLE_KINDS
+        .iter()
+        .copied()
+        .find(|kind| *kind == requested)
+        .unwrap_or("")
+}
+
+async fn render_roles(
+    state: &AppState,
+    op: &Operator,
+    error: String,
+    new_kind: &'static str,
+) -> Response {
     match org::list_roles(&state.pool).await {
         Ok(roles) => render(&RolesTemplate {
             lang: op.lang,
@@ -636,6 +666,7 @@ async fn render_roles(state: &AppState, op: &Operator, error: String) -> Respons
             any: !roles.is_empty(),
             sections: org::role_sections(roles),
             kinds: &org::ROLE_KINDS,
+            new_kind,
             error,
             can_edit: allowed(op, WRITE_AUTHORITIES),
         }),
@@ -643,11 +674,17 @@ async fn render_roles(state: &AppState, op: &Operator, error: String) -> Respons
     }
 }
 
+#[derive(serde::Deserialize)]
+struct RolesQuery {
+    new: Option<String>,
+}
+
 async fn roles_page(
     OperatorSession(op): OperatorSession,
     State(state): State<AppState>,
+    Query(q): Query<RolesQuery>,
 ) -> Response {
-    render_roles(&state, &op, String::new()).await
+    render_roles(&state, &op, String::new(), role_kind_of(q.new.as_deref())).await
 }
 
 async fn create_role(
@@ -666,7 +703,11 @@ async fn create_role(
             Redirect::to(&address(&state, Owner::Role, id).await).into_response()
         }
         Err(e) => match save_error(e, "rol oluşturulamadı") {
-            Ok(key) => render_roles(&state, &op, op.lang.t(key).to_string()).await,
+            // Hata halinde form acik kalir: operator yazdigi turu yeniden secmesin
+            Ok(key) => {
+                let kind = role_kind_of(Some(f.get("kind")));
+                render_roles(&state, &op, op.lang.t(key).to_string(), kind).await
+            }
             Err(response) => *response,
         },
     }
@@ -1499,6 +1540,20 @@ mod tests {
 
     fn location(response: &Response) -> String {
         response.headers()["location"].to_str().unwrap().to_string()
+    }
+
+    /// ADR-119 A.6: `?new=` yalnizca izinli listeden bir tur gecirir. Keyfi
+    /// metin formun `selected`ina ulasirsa ekranda var olmayan bir tur secili
+    /// gorunurdu; bilinmeyen deger formu hic acmaz.
+    #[test]
+    fn only_a_known_role_kind_opens_the_new_role_form() {
+        for kind in org::ROLE_KINDS {
+            assert_eq!(role_kind_of(Some(kind)), kind, "{kind}");
+        }
+        for junk in ["", "yok", "primary'; DROP", "BASE"] {
+            assert_eq!(role_kind_of(Some(junk)), "", "{junk}");
+        }
+        assert_eq!(role_kind_of(None), "");
     }
 
     #[tokio::test]

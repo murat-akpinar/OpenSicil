@@ -84,7 +84,8 @@ async function detailRoutes(page) {
   };
   const kisi = await first("/identities", '.tbl tbody a[href^="/identities/"]');
   if (kisi) found.push(["kisi", kisi]);
-  const rol = await first("/roles", '.tbl tbody a[href^="/roles/"]');
+  // Roller sayfasi kart izgarasi (ADR-119 A.2): baglanti artik tabloda degil
+  const rol = await first("/roles", '.role-grid a[href^="/roles/"], .tbl tbody a[href^="/roles/"]');
   if (rol) found.push(["rol", rol]);
   const departman = await first("/departments", '.tbl tbody a[href^="/departments/"]');
   if (departman) found.push(["departman", departman]);

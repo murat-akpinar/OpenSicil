@@ -235,6 +235,12 @@ pub fn role_sections(roles: Vec<RoleRow>) -> Vec<RoleSection> {
         }
     }
     for section in &mut sections {
+        // ADR-119 A.4: kalabalik rol onde. Esitlikte ada gore, yoksa iki
+        // yenilemede kartlarin sirasi degisirdi (SQL'in `ORDER BY r.name`i
+        // burada korunur).
+        section
+            .roles
+            .sort_by(|a, b| b.people.cmp(&a.people).then_with(|| a.name.cmp(&b.name)));
         let counts = section.roles.iter().map(|r| r.people);
         (section.people, section.people_key) = match section.kind {
             // Temel rol herkese uygulanir: satirlarin hepsi ayni sayiyi tasir
@@ -1025,6 +1031,41 @@ mod tests {
         assert_eq!(
             (by("additional").people, by("additional").people_key),
             (7, "roles.assignments_n")
+        );
+    }
+
+    /// ADR-119 A.4: kart izgarasinda kalabalik rol onde durur, esitlikte ad
+    /// karar verir — yoksa iki yenilemede kartlarin sirasi degisebilirdi.
+    #[test]
+    fn roles_in_a_section_come_crowded_first_then_by_name() {
+        let role = |name: &str, people: i64| RoleRow {
+            id: 0,
+            slug: name.to_string(),
+            kind: "primary".to_string(),
+            name: name.to_string(),
+            title: String::new(),
+            entitlements: 0,
+            people,
+        };
+        let sections = role_sections(vec![
+            role("Zumrut", 2),
+            role("Ogrenci", 9),
+            role("Asistan", 2),
+            role("Ogretmen", 9),
+            role("Bos", 0),
+        ]);
+        let order: Vec<&str> = sections
+            .iter()
+            .find(|s| s.kind == "primary")
+            .expect("primary")
+            .roles
+            .iter()
+            .map(|r| r.name.as_str())
+            .collect();
+        assert_eq!(
+            order,
+            ["Ogrenci", "Ogretmen", "Asistan", "Zumrut", "Bos"],
+            "kisi sayisi azalan, esitlikte ad artan"
         );
     }
 

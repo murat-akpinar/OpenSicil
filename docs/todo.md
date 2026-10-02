@@ -693,6 +693,45 @@ Kurallar:
   - Doğrulama (2026-10-02): backend **222** / worker **102** test geçti (gerçek Postgres `--include-ignored` + lab Keycloak + lab Samba; Hogwarts AD'ye hesap yazan `windows_ad_answers_open_questions` `--skip` — onay bekliyor), fmt + clippy `-D warnings` iki crate'te temiz, `cargo audit` yalnızca [ADR-073](decisions/073-cargo-audit-rsa-bulgusu-kabul-edilen-risk.md) `rsa` (worker 0); kapsam satır backend **%94,31** / worker **%93,20** (`cargo llvm-cov --fail-under-lines 80` ikisinde de geçti); imaj taraması dört imajda `Status: fixed` **yok** (backend 61, worker 59, migrate 61 — `affected`/`fix_deferred`/`will_not_fix`; **nginx 0**, [ADR-071](decisions/071-imaj-taramasi-temiz-tanimi.md)); sır sızıntısı taraması (`8bc623c..HEAD`, üretilen CSS ve CHANGELOG hariç) yalnızca alan adlarını (`people_key`), i18n anahtarlarını, `localStorage` anahtarlarını ve var olan lab-only test değerini yakaladı — yeni sır yok; `.env.example` env adlarıyla birebir (yalnızca lab/test ve compose'un kurduğu adlar dışarıda); `docs/MAP.md` güncel (bölüm yeni dosya açmadı); kodda TODO yok, şablonda satır içi stil ve CDN yok, `app.js`'te `innerHTML`/`eval` yok; 38 feature marker ↔ MAP birebir
   - Güvenlik listesi bulgusu: dört fonksiyon 50 satırı aştı (`identity::page` 73, `identity_web::list_page` 99, `reports::page` 62, `reconcile::fill_linked_identities` 59). Dördünde de iç içe blok ≤ 3, parametre ≤ 5 ve dallanma 15'in altında; aşan tek şey ham satır sayısı (Rust'ın `match … return internal(…)` töreni, alan başına bir satırlık şablon, `bind` zinciri). Bölmek tek çağıranı olan yardımcılar üretirdi — [ADR-118](decisions/118-fonksiyon-uzunlugu-yerine-bilissel-karmasiklik.md) ile karara yazıldı: ölçü satır değil bilişsel karmaşıklık. `AssertSqlSafe` taraması temiz — `sort_clause` derleme zamanı sabiti döndürüyor, kullanıcı değeri yalnızca satır seçiyor
   - Doğrulama (çalışan yığın): `docker compose build backend worker nginx migrate` sonrası imajlar değişmedi (HEAD çalışanla aynı), beş servis sağlıklı; `sh scripts/e2e-lab.sh` geçti (kayıt → AD'de pasif hesap (UAC 514) → "açıldı"; "kaydet ve ilk parolayı ver" **N-13 = 5 sn**, AD'de etkin hesap UAC 512); `sh scripts/ui-shots.sh tmp/ekran-goruntuleri/13-kapanis` 13 sayfa × iki tema × 1440/390px çekti ve **"bulgu yok"** dedi; `sh scripts/build-css.sh` (71660 bayt, commit'liyle aynı) ve `sh scripts/check-glyphs.sh` temiz; **duman testi** gerçek operatör oturumuyla 20 rota 200 (`/`, personel + `unassigned`/`days`, roller, departmanlar, hedefler, mutabakat, toplu yönetim, raporlar, silinmeyi bekleyenler, müdahaleler, Yapılandırma, içe aktarma + örnek CSV, arama, yaklaşan bitişler, kullanılmış adlar, kişi, eşlemeler), `/metrics` nginx'ten 404, backend ve worker log'unda hata yok
+## Roller, Departmanlar, Raporlar ([ADR-119](decisions/119-roller-kart-izgarasi-departman-seviye-rengi.md))
+
+> Kullanıcı isteği (2026-10-02): "Roller, Departmanlar ve Raporlar sayfalarını aşağıdaki gibi yap. Roller ve Departmanlar tasarımı tarayıcıda denenip onaylandı; Raporlar'ın tek sayfa akışı yeni." Değerler birebir uygulanır. Kısıtlar ADR-114'ün aynısı: CSP satır içi stil ve script yasak (ADR-088 madde 4), gövde ve `.ico` fontu dokunulmaz (ADR-067 madde 3, ADR-116), renkler `--ctp-*`'tan ve iki temada çalışır, TR/EN birlikte, backend'de olmayan veri uydurulmaz.
+>
+> **Sıra bağlayıcı:** Roller → Departmanlar → Raporlar, her sayfa ayrı commit. Doğrulama her kutucukta aynı: `sh scripts/build-css.sh` → `sh scripts/check-glyphs.sh` → `cd backend && cargo test && cargo fmt --all -- --check && cargo clippy --all-targets -- -D warnings` → `sh scripts/ui-shots.sh tmp/ekran-goruntuleri/<kutu>`.
+
+- [x] Roller: tür renkli bölüm + kart ızgarası ([ADR-119](decisions/119-roller-kart-izgarasi-departman-seviye-rengi.md) A)
+  - Kabul: bölüm `role-kind--base/--primary/--additional` sınıfını taşıyor ve `--rc`yi kuruyor (`--ctp-info` / `--ctp-accent` / `--ctp-accent-dim`); solda 3px solan çizgi, başlıkta 40px `.ico-tile`, "N rol" rozeti `--rc` renginde
+  - Kabul: tablo yerine `<ul class="role-grid">` / `<li class="role-card">`; şablonda `<table>` kalmıyor
+  - Kabul: kartta ad (14px/600), unvan (11px soluk, **adla aynıysa basılmıyor**), sağda kişi sayısı (22px/700 `tabular-nums`) + `--rc` oran çubuğu, altta kesikli çizgiyle "Verdiği grup: N"; kartın tamamı `/roles/<slug>`e giden bağlantı
+  - Kabul: kişi sayısı 0 olan kart `role-card--empty` (opacity .55, hover 1)
+  - Kabul: sıralama kişi sayısı azalan, eşitlikte ada göre — `org::role_sections` içinde, saf tablo testiyle
+  - Kabul: bölüm başlığının sağında "Kart / Liste" düğmesi (tercih `localStorage`) ve o bölümü süzen arama kutusu
+  - Kabul: `Tanımsız` kartı kesikli uyarı kenarlığı + sağ üstte kendi satırında "yer tutucu" rozeti (adla üst üste binmiyor)
+  - Kabul: boş türde ikon + açıklama + "`<Tür>` rol ekle" düğmesi; düğme `/roles?new=<tür>`e gidiyor, sayfa formu açık ve tür seçili basıyor
+  - Kabul: sayfa başında üç özet kutusu (tür rengiyle rol + kişi sayısı), `#role-<tür>` çapasına kayıyor
+  - Kabul: `ui-shots.sh` "bulgu yok" diyor; yeni migration yok
+  - Not (2026-10-02): tablo `<ul class="role-grid">`e döndü, `--rc` tür rengini bölümde tek yerde tutuyor. Sıralama `org::role_sections` içinde saf (SQL'in `ORDER BY r.name`i korunur, saf tablo testi var). `?new=<tür>` izinli listeden geçiyor (`role_kind_of`; test keyfi metni ve `BASE`i reddediyor) — form hata halinde de açık kalıyor. `.meter-thin` değerini artık `data-ratio` özniteliğinden okuyor: kart metninde ad ve grup sayısı da var, hücre metnini okumak yanlış sayı verirdi. Kartı bağlantıya çeviren şey `.role-name::after` örtüsü — ad gerçek metin kalıyor, erişilebilir ad kayboluyor değil
+  - Not (ekrandan çıkan üç düzeltme): arama kutusu `.input`in `w-full`ünü yenemediği için araç çubuğunun satırını kaplıyordu (iki sınıflı kural + sabit 9rem); boş türde tür açıklaması hem bölüm başlığında hem boş durumda yazıyordu (boş durumdaki kalktı); dar ekranda `shrink-0` araç çubuğu başlık metnini kelime kelime sıkıştırıyordu (`sm` altında kendi satırına iniyor). Kişi sayısı 0 olan kartta oran çubuğu hiç basılmıyor — boş iz "bir şey var" gibi okunuyordu (app.js'in tablo kuralıyla aynı)
+  - Doğrulama (2026-10-02): backend **224 test** (gerçek Postgres `--include-ignored` + lab Keycloak + lab Samba; +2 yeni: bölüm içi sıralama ve `?new=` izinli listesi), fmt + clippy `-D warnings` temiz, yeni migration yok. `sh scripts/build-css.sh` (77473 bayt) ve `sh scripts/check-glyphs.sh` temiz; `sh scripts/ui-shots.sh tmp/ekran-goruntuleri/14-roller` **"bulgu yok"** (rol detayı yeniden çekiliyor — betiğin seçicisine `.role-grid` eklendi, kart ızgarasında `.tbl` yok)
+  - Doğrulama (**çalışan yığın, tarayıcıda ölçüldü**): başlangıç görünüm `grid` ve "Kart" düğmesi aktif; "Liste"ye basınca üç bölümün ızgarası da `list` oluyor ve yenilemeden sonra `localStorage`tan geri geliyor; `prof` araması 9 karttan 1'ini bırakıyor, kutu temizlenince 9'a dönüyor; en kalabalık rolde dolgu var, sıfırlı kartta çubuk hiç yok; kartın boşluğuna tıklamak `/roles/professor`a gidiyor; "Temel rol ekle" `/roles?new=base`e gidip formu açık ve `base` seçili basıyor; konsolda JS hatası yok
+- [ ] Departmanlar: seviye renkli satır şeridi ([ADR-119](decisions/119-roller-kart-izgarasi-departman-seviye-rengi.md) B)
+  - Kabul: her satır `--dc` alıyor (depth 1 `--ctp-accent`, 2 `--ctp-info`, 3+ `--ctp-accent-dim`)
+  - Kabul: hücre alt çizgisi yok, satır arası 4px, satır tek parça 12px yuvarlak şerit; zemin satırın bütününde (hücre başına ton farkı ve son sütunun ayrı zemini yok)
+  - Kabul: depth 1 zemin %13 / 14px dikey / ad 16px-700, depth 2 zemin %6 / ad 650, depth 3+ zeminsiz / ad 500 `--ctp-fg-dim`; hover %9, satırın tamamı tıklanabilir
+  - Kabul: adın önünde seviye renginde nokta (depth 1–2: 8px + %22 opak 3px hale; 3+: 6px halesiz)
+  - Kabul: `.code` hap biçimli, `--dc` renk / %13 zemin / %28 kenarlık / 10.5px / .04em
+  - Kabul: sıfır hücrede yalnızca metin soluk (zemin etkilenmiyor); "Verdiği grup" > 0 ise sayı `--ctp-fg` + soluk "grup" etiketi; kişi 0 olan satırda çubuk soluk, dolgu `--dc`
+  - Kabul: tablo başlığı zeminsiz 11px büyük harf .07em `--ctp-fg-faint`, yapışkan ve zemini opak
+  - Kabul: özet kutuları (toplam departman, toplam kişi, boş departman); "Tümünü aç / kapat" ve "Boş departmanları gizle" (tercih `localStorage`); kılavuz çizgileri son öğede bitiyor; aramada eşleşme vurgulanıyor ve üst dallar açık kalıyor
+  - Kabul: `ui-shots.sh` "bulgu yok" diyor; yeni migration yok
+- [ ] Raporlar: tek sayfa akışı ([ADR-119](decisions/119-roller-kart-izgarasi-departman-seviye-rengi.md) C)
+  - **Engel:** spec eksik geldi — altı raporun adı ve kutucukların davranışı gelmedi. Kullanıcı metni tamamlanmadan başlanmaz
+  - Kabul: rapor seçilince başka sayfaya gidilmiyor, içerik kutucukların altında açılıyor; Mutabakat ve Listeler kartları kalkıyor; altı rapor tek satırda kutucuk
+- [ ] Kapanış: güvenlik ve test
+  - (1a'daki kapanış şablonunun aynısı)
+
+---
+
 
 ---
 
