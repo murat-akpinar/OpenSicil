@@ -588,6 +588,43 @@ Kurallar:
 
 ---
 
+## AD'den geri dolum ve ayrılışta silmeme (kullanıcı isteği)
+
+> Fazlar arası iş, "Faz" olarak numaralanmaz. Kullanıcı isteği (2026-10-02): "çift taraflı sync" — AD'de duran veriyi OpenSicil'e tek tek elle girmek saçma; ve ayrılan hesap silinmesin, pasif OU'da açıklamasında tarih-nedeniyle dursun. İki karar yazıldı: [ADR-112](decisions/112-alan-bazli-yetki-ve-geri-dolum.md) (alan bazlı yetki: boş alan otomatik dolar, çakışmada toplu karar) ve [ADR-111](decisions/111-ayriliste-silme-yok-pasif-ou.md) (AD'de saklama sonu varsayılanı silme değil).
+>
+> **Sıra bağlayıcıdır:** motor, DB'de boş olan alanı eşleme satırı varsa AD'de siler ([ADR-034](decisions/034-sam-upn-esleme-disi-ve-bossa-yaz.md)). Dolum kutucuğu bitmeden Eşlemeler ekranında `employeeID` satırı `employeeNumber`'a çevrilmez, Hogwarts hesapları da yönetime alınmaz.
+
+- [ ] Mutabakat sonrası boşluk dolumu: AD → kimlik, yalnızca boş alanlar ([ADR-112](decisions/112-alan-bazli-yetki-ve-geri-dolum.md) madde 1)
+  - Kabul: gece taraması bittikten sonra hedefin bağlı (yönetilen + gözlemdeki) bütün kimliklerinde `employee_number`, `mobile_phone`, `email`, `upn`, `username` yalnızca boşken `reconcile_findings`'teki değerden dolar; dolu alan değişmez
+  - Kabul: sicil başka bir kimlikte duruyorsa yazılmaz (mevcut tekillik kuralı), dolum geri kalan alanları yine yazar
+  - Kabul: okuma şeridinde kalır — hedefe yazma yok, denetim niyet satırı yok, fren sayacı harcanmaz ([ADR-051](decisions/051-okuma-seridi.md))
+  - Kabul: her dolum kimlik olayı olarak denetime girer (hangi alan, nereden)
+  - Kabul: çalışan yığında Cedric Diggory'nin sicili ve cebi tarama sonrası kişi sayfasında görünür (elle giriş yok)
+  - Not: `adoption::fill_person_fields` (`worker/src/adoption.rs:190`) aynı kuralı zaten yazıyor; sahiplenme ve dolum tek fonksiyonu paylaşır, ikinci bir kopya açılmaz
+- [ ] Eşleme düzeltmesi: `employeeID` → `employeeNumber` (kod değil, ekran işi)
+  - Kabul: dolum kutucuğu bittikten **sonra** Eşlemeler ekranında satır silinip `employeeNumber` ile eklenir; iki öznitelik de izinli listede (`worker/src/mapping_rules.rs:19-20`)
+  - Kabul: değişiklikten sonra Hogwarts hesaplarında sicil değeri silinmiyor (yönetime almadan önce `manage_diff` ile doğrulanır)
+  - Not: varsayılan eşleme (`0011_attribute_mappings.sql`) değişmez — hangi özniteliğin sicil tuttuğu kurum kararıdır
+- [ ] "AD'de farklı" listesi + toplu "AD'dekini al" ([ADR-112](decisions/112-alan-bazli-yetki-ve-geri-dolum.md) madde 2)
+  - Kabul: mutabakat ekranında kişi · alan · AD'deki değer · OpenSicil'deki değer satırları; yalnızca ikisi de dolu ve farklı olanlar listelenir
+  - Kabul: satırlar seçilip tek eylemle alınır; seçilmeyen satır değişmez, otomatik yazma hiç yok
+  - Kabul: `auditor` listeyi görür, eylemi göremez (403)
+  - Kabul: her alınan değer denetime önce/sonra olarak girer
+- [ ] TC kimlik no: öznitelik ayarı + toplu dolum ([ADR-112](decisions/112-alan-bazli-yetki-ve-geri-dolum.md) madde 5, [ADR-106](decisions/106-sahiplenmede-ad-kisi-alanlari.md))
+  - Kabul: `ad_national_id_attribute` Yapılandırma'da girilince tarama değeri okur; boşken hiç okunmaz (bugünkü davranış korunur)
+  - Kabul: dolum backend toplu eylemidir — AEAD + blind index backend'de üretilir ([ADR-010](decisions/010-kisisel-veri-kimlik-no-telefon.md)); worker düz değeri kimliğe yazmaz
+  - Kabul: denetim satırına değer değil "dolduruldu" bilgisi girer
+- [ ] Ayrılışta silme yok: pasif OU + açıklamada tarih ve neden ([ADR-111](decisions/111-ayriliste-silme-yok-pasif-ou.md))
+  - **Önce cevaplanacak (ADR-111 madde 4):** hesap silinmiyorsa kimlik ne zaman `silindi` olur ve kişisel veri ne zaman temizlenir? Öneri (a): saklama dolunca temizlenir, hesap pasif OU'da kalır — bağlantıya motorun bir daha dokunmayacağı bir işaret gerekir. Kullanıcı cevabı olmadan kod yazılmaz
+  - Kabul: AD hedefinde saklama sonu varsayılanı "onay bekler"; süre dolunca hesap "silinmeyi bekleyenler" listesine düşer, onaysız silinmez
+  - Kabul: ayrılış formunda serbest metin `departure_note`; `description` eşleme satırı `template` ile `{end_date}` ve `{departure_note}` token'larını çözer
+  - Kabul: varsayılan `description` eşleme satırı gelmez; `docs/09`'a örnek girer
+  - Kabul: ayrılış işinden sonra lab/gerçek AD'de hesap pasif OU'da, devre dışı ve `description` dolu
+- [ ] Kapanış: güvenlik ve test
+  - (1a'daki kapanış şablonunun aynısı)
+
+---
+
 ## Ek Hedef Sistem: Zimbra
 
 > **Beklemede (kullanıcı kararı, 2026-10-02):** "Zimbra dursun, onu proje bitince bakacağım bir şey." Lab Zimbra'sı bir altyapı kararı ister (ADR-069: üçüncü taraf 10.1 derlemesi ya da ayrı VM) ve bu bölümün ilk kutucuğu ona bağlı; kullanıcı açıkça erteledi, kendi başına seçilmez.
