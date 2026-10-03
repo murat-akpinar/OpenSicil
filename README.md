@@ -17,7 +17,9 @@ OpenSicil, kendi Active Directory'sini işleten kurumlar için açık kaynak bir
 
 ## Durum
 
-**v1 hazır (2026-10-02): ilk beş faz tamamlandı.** Sıfırdan kurulan ya da mevcut personeli olan bir kurum ürünü Active Directory üstünde tek başına kullanabilir: kayıt, görev değişikliği, askı, planlı ve acil ayrılış, ilk parola teslimi, roller ve departman ağacı, değişiklik seti eşiği ve onayı, mutabakat raporu ve gece koşusu, CSV ile toplu içe aktarma, mevcut hesapların sahiplenilmesi ve toplu yönetime alınması, metrik ucu, Kubernetes'te çalışma. Zimbra v1'e dahil değildir ([ADR-090](docs/decisions/090-zimbra-v1-sonrasina-alindi.md)); sırada o bölüm var. Tasarım 12 belge ve 100'den fazla karar kaydı (ADR) olarak yazıldı; her faz güvenlik ve test kapanışıyla bitti (gerçek Postgres + lab Keycloak + lab Samba AD'ye karşı testler, kapsam ≥ %90, imaj taraması, N-03 yük ölçümü 20.000 kimlikte). Kurulum: [docs/09](docs/09-kurulum.md).
+**v1 hazır (2026-10-02): ilk beş faz tamamlandı.** Sıfırdan kurulan ya da mevcut personeli olan bir kurum ürünü Active Directory üstünde tek başına kullanabilir: kayıt, görev değişikliği, askı, planlı ve acil ayrılış, ilk parola teslimi, roller ve departman ağacı, değişiklik seti eşiği ve onayı, mutabakat raporu ve gece koşusu, CSV ile toplu içe aktarma, mevcut hesapların sahiplenilmesi ve toplu yönetime alınması, metrik ucu, Kubernetes'te çalışma. Zimbra v1'e dahil değildir ([ADR-090](docs/decisions/090-zimbra-v1-sonrasina-alindi.md)); sırada o bölüm var. Tasarım 12 belge ve 124 karar kaydı (ADR) olarak yazıldı; her faz güvenlik ve test kapanışıyla bitti (gerçek Postgres + lab Keycloak + lab Samba AD'ye karşı testler, kapsam ≥ %90, imaj taraması, N-03 yük ölçümü 20.000 kimlikte). Kurulum: [docs/09](docs/09-kurulum.md).
+
+**v1'den sonra eklendi:** AD'den geri dolum ve mutabakatta "AD'de farklı" listesi ([ADR-112](docs/decisions/112-alan-bazli-yetki-ve-geri-dolum.md)), fark listesine departman ve rol ([ADR-120](docs/decisions/120-ad-fark-listesine-departman-girer.md)), kapsam köklerinin altından katalog OU keşfi ([ADR-121](docs/decisions/121-katalog-ou-kesfi-kapsam-koklerinin-altindan.md)), kayıp hesabın bağlantısının kaldırılması ([ADR-122](docs/decisions/122-kayip-hesabin-baglantisi-kaldirilabilir.md)), yenilenen arayüz kabuğu ([ADR-114](docs/decisions/114-cam-yuzeyli-turkuaz-tema.md)).
 
 ## Hangi sorunu çözer
 
@@ -149,6 +151,8 @@ flowchart LR
 
 Olaylar yalnızca girdiyi değiştirir: işe giriş başlangıç tarihini, ayrılış bitiş anını, askı iki tarihi, rol değişikliği rol listesini. Durumun kendisi **türetilir, saklanmaz** ([ADR-038](docs/decisions/038-kimlik-durumu-turetilir.md)). Aynı iş iki kez çalışırsa zararsızdır: ikincisi fark bulamaz. Mutabakat raporu da aynı hesaplamayı kullanır; sürüklenecek ikinci bir fark kodu yoktur.
 
+**Ters yön alan bazlıdır** ([ADR-112](docs/decisions/112-alan-bazli-yetki-ve-geri-dolum.md)): kimlikte boş olan bir alanın AD'de değeri varsa gece taramasından sonra onaysız yazılır — boş alan sahipsizdir. İkisi de dolu ve farklıysa otomatik yazma yoktur; mutabakat ekranındaki "AD'de farklı" listesinden operatör satırları seçip "AD'dekini al" der. "En yeni kazanır" kurulmaz: AD'de alan düzeyinde değişiklik zamanı yoktur.
+
 ### Kimlik yaşam döngüsü
 
 ```mermaid
@@ -195,7 +199,7 @@ Aynı imajlar ve tek `compose.yaml` dört topolojide çalışır ([ADR-061](docs
 
 ## Neyi, neden, nasıl kararlaştırdık
 
-62 kaydın tamamı [docs/decisions/](docs/decisions/) altındadır; açıklamalı liste [docs/PROJECT.md](docs/PROJECT.md#kararlar) içindedir. Ürünü biçimlendirenler:
+124 kaydın tamamı [docs/decisions/](docs/decisions/) altındadır; açıklamalı liste [docs/PROJECT.md](docs/PROJECT.md#kararlar) içindedir. Ürünü biçimlendirenler:
 
 ### Konumlandırma
 
@@ -261,14 +265,14 @@ Aynı imajlar ve tek `compose.yaml` dört topolojide çalışır ([ADR-061](docs
 
 ## Yol haritası
 
-Her faz atlanamayan bir güvenlik ve test kapanışıyla biter ([docs/08](docs/08-gereksinimler.md#önerilen-faz-sırası)).
+Her faz atlanamayan bir güvenlik ve test kapanışıyla biter ([docs/08](docs/08-gereksinimler.md#önerilen-faz-sırası); oradaki numaralandırma tarihsel sırayı, aşağıdaki liste uygulanan sırayı gösterir — Zimbra [ADR-090](docs/decisions/090-zimbra-v1-sonrasina-alindi.md) ile v1'den sonraya alındı).
 
-1. **Altyapı** — iskelet ve süreç sözleşmesi, giriş (önce OIDC; sonra [ADR-095](docs/decisions/095-giris-kendi-ekranimiz-ad-bind-asil.md) ile AD bind asıl kapı oldu), kod olarak Samba AD + Keycloak lab'ı (midPoint denemesi burada yapılır), Zimbra keşfi
-2. **Kayıt ve model** — veritabanı rolleri, kimlik, departman ağacı, roller, katalog, denetim kaydı, saf modül olarak olması gereken durum fonksiyonu
-3. **AD provisioning** — motor ve kuyruk, roller ve adlar, yaşam döngüsü, ilk parola, gözlem modunda sahiplenme, fren ve onay
-4. **Zimbra** — connector, COS ve liste kataloğu, yaşam döngüsü karşılıkları
-5. **İşletme** — okuma şeridi, mutabakat raporu, saklama, metrikler, kuru çalıştırma
-6. **Mevcut kurum** — CSV içe aktarma ve toplu sahiplenme
+1. ✅ **Altyapı** — iskelet ve süreç sözleşmesi, giriş (önce OIDC; sonra [ADR-095](docs/decisions/095-giris-kendi-ekranimiz-ad-bind-asil.md) ile AD bind asıl kapı oldu), kod olarak Samba AD + Keycloak lab'ı (midPoint denemesi burada yapıldı)
+2. ✅ **Kayıt ve model** — veritabanı rolleri, kimlik, departman ağacı, roller, katalog, denetim kaydı, saf modül olarak olması gereken durum fonksiyonu
+3. ✅ **AD provisioning** — motor ve kuyruk, roller ve adlar, yaşam döngüsü, ilk parola, gözlem modunda sahiplenme, fren ve onay
+4. ✅ **İşletme** — okuma şeridi, mutabakat raporu, saklama, metrikler, kuru çalıştırma
+5. ✅ **Mevcut kurum** — CSV içe aktarma ve toplu sahiplenme. **v1 burada hazır oldu.**
+6. ⬜ **Zimbra** — lab keşfi, connector, COS ve liste kataloğu, yaşam döngüsü karşılıkları; mutabakat, metrik, sahiplenme ve CSV'nin Zimbra'yı kapsayacak şekilde genişlemesi
 
 ## Belge haritası
 
@@ -280,4 +284,4 @@ Her faz atlanamayan bir güvenlik ve test kapanışıyla biter ([docs/08](docs/0
 | [docs/05](docs/05-active-directory.md) · [06](docs/06-zimbra.md) | Active Directory · Zimbra |
 | [docs/07](docs/07-guvenlik-ve-kvkk.md) · [08](docs/08-gereksinimler.md) · [09](docs/09-kurulum.md) | Tehdit modeli ve kişisel veri · gereksinimler ve fazlar · kurulum ve dağıtım |
 | [docs/10](docs/10-saha-notlari.md) · [11](docs/11-dogrulama-notlari.md) | Gerçek kurumdan saha notları · birincil kaynak doğrulaması |
-| [docs/decisions/](docs/decisions/) | ADR 001–062 |
+| [docs/decisions/](docs/decisions/) | ADR 001–123 |

@@ -32,6 +32,7 @@
 - AD'de farklı listesine sicil ve ölçüm notu
 - MAP'ten Inter satırları çıktı (ADR-116)
 - Rol kutucuğuna saha ölçümü ve oturum devri notları
+- README v1 sonrasına göre güncellendi (ADR sayısı, faz sırası, geri dolum)
 
 ### Düzeltmeler
 

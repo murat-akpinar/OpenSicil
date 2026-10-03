@@ -17,7 +17,9 @@ OpenSicil is an open-source **IGA** (Identity Governance & Administration) produ
 
 ## Status
 
-**v1 ready (2026-10-02): the first five phases are complete.** An organisation starting from scratch or with existing staff can use the product on Active Directory alone: registration, job changes, suspension, planned and emergency departure, first-password delivery, roles and the department tree, change-set threshold and approval, reconciliation report with a nightly run, bulk import from CSV, adoption of existing accounts and bulk management takeover, a metrics endpoint, and running on Kubernetes. Zimbra is not part of v1 ([ADR-090](docs/decisions/090-zimbra-v1-sonrasina-alindi.md)); that section is next. The design is written as 12 documents and more than 100 decision records (ADRs); every phase ended with a security and test closure (tests against a real Postgres, a lab Keycloak and a lab Samba AD, coverage ≥ 90%, image scans, the N-03 load measurement at 20,000 identities). Setup: [docs/09](docs/09-kurulum.md).
+**v1 ready (2026-10-02): the first five phases are complete.** An organisation starting from scratch or with existing staff can use the product on Active Directory alone: registration, job changes, suspension, planned and emergency departure, first-password delivery, roles and the department tree, change-set threshold and approval, reconciliation report with a nightly run, bulk import from CSV, adoption of existing accounts and bulk management takeover, a metrics endpoint, and running on Kubernetes. Zimbra is not part of v1 ([ADR-090](docs/decisions/090-zimbra-v1-sonrasina-alindi.md)); that section is next. The design is written as 12 documents and 124 decision records (ADRs); every phase ended with a security and test closure (tests against a real Postgres, a lab Keycloak and a lab Samba AD, coverage ≥ 90%, image scans, the N-03 load measurement at 20,000 identities). Setup: [docs/09](docs/09-kurulum.md).
+
+**Added after v1:** backfill from AD and the "differs in AD" list in reconciliation ([ADR-112](docs/decisions/112-alan-bazli-yetki-ve-geri-dolum.md)), department and role in the diff list ([ADR-120](docs/decisions/120-ad-fark-listesine-departman-girer.md)), catalog OU discovery under the scope roots ([ADR-121](docs/decisions/121-katalog-ou-kesfi-kapsam-koklerinin-altindan.md)), unlinking a lost account ([ADR-122](docs/decisions/122-kayip-hesabin-baglantisi-kaldirilabilir.md)), and a reworked UI shell ([ADR-114](docs/decisions/114-cam-yuzeyli-turkuaz-tema.md)).
 
 The documentation under `docs/` is in Turkish. This README is the English entry point.
 
@@ -151,6 +153,8 @@ flowchart LR
 
 Events only change the input: a joiner sets a start date, a leaver sets an end instant, a suspension sets two dates, a role change edits the role list. The state itself is **derived, never stored** ([ADR-038](docs/decisions/038-kimlik-durumu-turetilir.md)). Running the same job twice is harmless: the second run finds no diff. The reconciliation report uses the very same computation, so there is no second diff implementation to drift.
 
+**The reverse direction is per field** ([ADR-112](docs/decisions/112-alan-bazli-yetki-ve-geri-dolum.md)): if a field is empty on the identity and has a value in AD, it is written after the nightly scan without approval — an empty field has no owner. If both are filled and differ, nothing is written automatically; the operator picks rows from the "differs in AD" list in reconciliation and says "take the AD value". There is no "newest wins": AD has no per-field change time.
+
 ### Identity lifecycle
 
 ```mermaid
@@ -197,7 +201,7 @@ Instead of a chart the product ships a **process contract**: finish the job in h
 
 ## What we decided, why, and how
 
-All 62 records live in [docs/decisions/](docs/decisions/); the annotated list is in [docs/PROJECT.md](docs/PROJECT.md#kararlar). The ones that shape the product:
+All 124 records live in [docs/decisions/](docs/decisions/); the annotated list is in [docs/PROJECT.md](docs/PROJECT.md#kararlar). The ones that shape the product:
 
 ### Positioning
 
@@ -263,14 +267,14 @@ Added only when the need is proven; written earlier they are just maintenance lo
 
 ## Roadmap
 
-Every phase ends with a security-and-test closing box that cannot be skipped ([docs/08](docs/08-gereksinimler.md#önerilen-faz-sırası)).
+Every phase ends with a security-and-test closing box that cannot be skipped ([docs/08](docs/08-gereksinimler.md#önerilen-faz-sırası); the numbering there records the historical order, the list below the order actually shipped — Zimbra moved past v1 with [ADR-090](docs/decisions/090-zimbra-v1-sonrasina-alindi.md)).
 
-1. **Infrastructure** — skeleton and process contract, login (OIDC first; later [ADR-095](docs/decisions/095-giris-kendi-ekranimiz-ad-bind-asil.md) made AD bind the main gate), Samba AD + Keycloak lab as code (the midPoint trial happens here), Zimbra discovery
-2. **Records and model** — database roles, identities, department tree, roles, catalog, audit log, the desired-state function as a pure module
-3. **AD provisioning** — engine and queue, roles and names, lifecycle, first password, adoption in observe mode, brakes and approval
-4. **Zimbra** — connector, COS and list catalog, lifecycle counterparts
-5. **Operations** — read lane, reconciliation report, retention, metrics, dry run
-6. **Existing organisation** — CSV import and bulk adoption
+1. ✅ **Infrastructure** — skeleton and process contract, login (OIDC first; later [ADR-095](docs/decisions/095-giris-kendi-ekranimiz-ad-bind-asil.md) made AD bind the main gate), Samba AD + Keycloak lab as code (the midPoint trial happened here)
+2. ✅ **Records and model** — database roles, identities, department tree, roles, catalog, audit log, the desired-state function as a pure module
+3. ✅ **AD provisioning** — engine and queue, roles and names, lifecycle, first password, adoption in observe mode, brakes and approval
+4. ✅ **Operations** — read lane, reconciliation report, retention, metrics, dry run
+5. ✅ **Existing organisation** — CSV import and bulk adoption. **v1 became ready here.**
+6. ⬜ **Zimbra** — lab discovery, connector, COS and list catalog, lifecycle counterparts; widening reconciliation, metrics, adoption and CSV to cover Zimbra
 
 ## Documentation map
 
@@ -282,4 +286,4 @@ Every phase ends with a security-and-test closing box that cannot be skipped ([d
 | [docs/05](docs/05-active-directory.md) · [06](docs/06-zimbra.md) | Active Directory · Zimbra |
 | [docs/07](docs/07-guvenlik-ve-kvkk.md) · [08](docs/08-gereksinimler.md) · [09](docs/09-kurulum.md) | Threat model and personal data · requirements and phases · installation and deployment |
 | [docs/10](docs/10-saha-notlari.md) · [11](docs/11-dogrulama-notlari.md) | Field notes from a real organisation · primary-source verification |
-| [docs/decisions/](docs/decisions/) | ADRs 001–062 |
+| [docs/decisions/](docs/decisions/) | ADRs 001–123 |
