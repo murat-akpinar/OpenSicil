@@ -166,7 +166,7 @@ pub async fn complete(
     )
     .bind(job.id)
     .bind(worker_id)
-    .bind(result)
+    .bind(crate::db::pg_text(result))
     .execute(pool)
     .await?;
     Ok(done.rows_affected() == 1)
@@ -195,7 +195,7 @@ pub async fn fail(
     .bind(worker_id)
     .bind(status)
     .bind(attempts)
-    .bind(error)
+    .bind(crate::db::pg_text(error))
     .bind(delay as f64)
     .execute(pool)
     .await?;
@@ -217,7 +217,7 @@ pub async fn intervene(
     )
     .bind(job.id)
     .bind(worker_id)
-    .bind(reason)
+    .bind(crate::db::pg_text(reason))
     .execute(pool)
     .await?;
     Ok(())
@@ -241,7 +241,7 @@ pub async fn defer(
     )
     .bind(job.id)
     .bind(worker_id)
-    .bind(reason)
+    .bind(crate::db::pg_text(reason))
     .bind(retry_after_seconds as f64)
     .execute(pool)
     .await?;

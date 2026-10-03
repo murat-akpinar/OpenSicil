@@ -39,9 +39,28 @@ fn schema_readiness(failed_migrations: i64) -> Result<(), String> {
     }
 }
 
+// Postgres `text` NUL bayti kabul etmez; Windows AD'nin LDAP tani metni tasir
+// ("best match of:" listesini NUL ile bitirir). Temizlenmezse hatayi anlatan
+// satir yazilamaz ve hata GORUNMEZ olur: okuma seridinde is sonsuza dek
+// `running` kalir (acik is kurali yuzunden o tur bir daha istenemez), yazma
+// seridinde kira dolunca ayni is sonsuza dek yeniden denenir, deneme sayaci
+// hic artmaz. Hedeften gelen her metin veritabanina bu suzgecten gecer.
+pub fn pg_text(s: &str) -> String {
+    s.replace('\0', "")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pg_text_drops_nul_bytes_and_keeps_the_rest() {
+        assert_eq!(
+            pg_text("NameErr: best match of:\u{0}\n"),
+            "NameErr: best match of:\n"
+        );
+        assert_eq!(pg_text("8 OU, 20 grup"), "8 OU, 20 grup");
+    }
 
     #[test]
     fn ready_when_no_failed_migrations() {

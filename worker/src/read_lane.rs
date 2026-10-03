@@ -52,7 +52,7 @@ pub async fn finish(
     sqlx::query("UPDATE read_jobs SET status = $2, result = $3, finished_at = now() WHERE id = $1")
         .bind(id)
         .bind(status)
-        .bind(result)
+        .bind(crate::db::pg_text(result))
         .execute(pool)
         .await
         .map(|_| ())
@@ -131,15 +131,28 @@ mod tests {
         );
 
         let second = claim(&pool).await.unwrap().expect("ikinci iş");
-        finish(&pool, second.id, Err("DC'ye ulaşılamadı".to_string()))
-            .await
-            .unwrap();
-        let status: String = sqlx::query_scalar("SELECT status FROM read_jobs WHERE id = $1")
-            .bind(second.id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        // Hata metni hedeften gelir ve NUL tasiyabilir (Windows AD'nin LDAP
+        // tani metni); satir yine yazilmali, yoksa is sonsuza dek `running`
+        // kalir ve hata ekranda hic gorunmez.
+        finish(
+            &pool,
+            second.id,
+            Err("DC'ye ulaşılamadı: best match of:\u{0}\n".to_string()),
+        )
+        .await
+        .unwrap();
+        let (status, result): (String, Option<String>) =
+            sqlx::query_as("SELECT status, result FROM read_jobs WHERE id = $1")
+                .bind(second.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!(status, "failed");
+        assert_eq!(
+            result.as_deref(),
+            Some("DC'ye ulaşılamadı: best match of:\n"),
+            "hata metni iş kaydına yazılmadı"
+        );
 
         drop(pool);
         test_support::drop_temp_db(&admin_pool, &db_name).await;
