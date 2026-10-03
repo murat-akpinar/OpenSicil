@@ -51,6 +51,7 @@
 - Sayfa taramasındaki görsel hatalar ve raporlar kapağındaki yanlış bağlantı
 - Giriş sonrası yönlendirme, boş filtre değeri, favicon ve panelde taşma
 - Iş sonucundaki NUL baytı yazılamayınca iş sonsuza dek çalışır kalıyordu
+- Yönetici kayıtlı değilken AD'deki manager silinmiyor
 
 ### Geri alınanlar
 

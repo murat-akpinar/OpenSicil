@@ -16,7 +16,8 @@ use crate::ad_account::{self, AdWriter};
 use crate::adoption;
 use crate::counters;
 use crate::desired_state::{
-    desired_state, effective_manager, AccountPresence, Container, DesiredState, LifecycleState,
+    desired_state, effective_manager, AccountPresence, Container, DesiredState, IdentityId,
+    LifecycleState, ManagerChain,
 };
 use crate::first_password;
 use crate::mapping;
@@ -524,11 +525,23 @@ async fn sources(
     Ok(mapping::Sources { values, manager_dn })
 }
 
-// ADR-040/041: etkin yonetici yok → temizle (None); var ama bu hedefte yonetilen
-// hesabi yok ya da bulunamiyor → belirsiz (Some(None)), dokunulmaz.
+// ADR-128: kimlikte yonetici kayitli degilse OpenSicil'in bu alanda bir degeri
+// yoktur → belirsiz (Some(None)), hedefteki deger korunur. Kayitli yonetici
+// ayrildi ve devir yoneticisi de yoksa etkin yonetici gercekten yok → temizle
+// (None, ADR-041). Cagiran ayrica: yonetici var ama bu hedefte yonetilen hesabi
+// yok ya da bulunamiyor → belirsiz (ADR-040 madde 3).
+fn manager_to_write(chain: Option<&ManagerChain>) -> Option<Option<IdentityId>> {
+    match chain {
+        None => Some(None),
+        Some(chain) => effective_manager(Some(chain)).map(Some),
+    }
+}
+
 async fn manager_dn(c: &AdJob<'_>, ldap: &mut Ldap) -> Result<Option<Option<String>>, JobError> {
-    let Some(manager) = effective_manager(c.input.manager.as_ref()) else {
-        return Ok(None);
+    let manager = match manager_to_write(c.input.manager.as_ref()) {
+        None => return Ok(None),
+        Some(None) => return Ok(Some(None)),
+        Some(Some(manager)) => manager,
     };
     let guid: Option<String> = sqlx::query_scalar(
         "SELECT external_id FROM account_links WHERE identity_id = $1 AND target_system_id = $2 \
@@ -2290,6 +2303,38 @@ mod tests {
         );
         assert_eq!(add, s(&["nobet"]));
         assert_eq!(remove, s(&["eski-rol"]), "katalog dışı grup dokunulmaz");
+    }
+
+    /// ADR-128: "yonetici kayitli degil" ile "kayitli yonetici ayrildi" ayri
+    /// seylerdir — ilki hedefteki `manager`i korur, ikincisi temizler.
+    #[test]
+    fn manager_to_write_separates_unrecorded_from_no_effective_manager() {
+        use crate::desired_state::LifecycleState::*;
+        let chain = |manager_state, handover| ManagerChain {
+            manager: 1,
+            manager_state,
+            handover,
+        };
+        assert_eq!(
+            manager_to_write(None),
+            Some(None),
+            "kimlikte yönetici kayıtlı değil: belirsiz, AD'deki değer korunur"
+        );
+        assert_eq!(
+            manager_to_write(Some(&chain(Active, None))),
+            Some(Some(1)),
+            "kayıtlı ve çalışıyor: yazılır"
+        );
+        assert_eq!(
+            manager_to_write(Some(&chain(Departed, Some((2, Active))))),
+            Some(Some(2)),
+            "ayrılan yöneticinin devri yazılır"
+        );
+        assert_eq!(
+            manager_to_write(Some(&chain(Departed, None))),
+            None,
+            "kayıtlı yönetici ayrıldı, devir yok: etkin yönetici gerçekten yok, temizlenir"
+        );
     }
 
     #[test]

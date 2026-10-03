@@ -753,6 +753,8 @@ Kurallar:
 > Fazlar arası iş, "Faz" olarak numaralanmaz. Kullanıcı isteği (2026-10-02): "çift taraflı sync" — AD'de duran veriyi OpenSicil'e tek tek elle girmek saçma; ve ayrılan hesap silinmesin, pasif OU'da açıklamasında tarih-nedeniyle dursun. İki karar yazıldı: [ADR-112](decisions/112-alan-bazli-yetki-ve-geri-dolum.md) (alan bazlı yetki: boş alan otomatik dolar, çakışmada toplu karar) ve [ADR-111](decisions/111-ayriliste-silme-yok-pasif-ou.md) (AD'de saklama sonu varsayılanı silme değil).
 >
 > **Sıra bağlayıcıdır:** motor, DB'de boş olan alanı eşleme satırı varsa AD'de siler ([ADR-034](decisions/034-sam-upn-esleme-disi-ve-bossa-yaz.md)). Dolum kutucuğu bitmeden Eşlemeler ekranında `employeeID` satırı `employeeNumber`'a çevrilmez, Hogwarts hesapları da yönetime alınmaz.
+>
+> **Ölçüm (2026-10-03): bu sıra bozuldu ve bir alan silindi.** Kullanıcı Draco Malfoy'u yönetime aldı; iş 58 AD'ye yazarken `manager` özniteliğini **temizledi** (denetim satırı 358, `cleared: true`). Sebep geri dolumun `manager`'ı hiç okumaması (liste beş alan) ve [ADR-040](decisions/040-motor-belirsiz-degere-dokunmaz.md) madde 3'ün `manager_id = NULL`'u "boş" sayarak hedefi temizlemesi. Hogwarts'ta 20 kimliğin 20'sinde `manager_id` NULL'dı; sıra devam etseydi dizinin yönetici grafiği tamamen silinecekti. [ADR-128](decisions/128-yonetici-kayitli-degilse-hedefteki-deger-korunur.md) yıkıcı tarafı kapattı; geri dolum kendi kutucuğunda.
 
 - [x] Mutabakat sonrası boşluk dolumu: AD → kimlik, yalnızca boş alanlar ([ADR-112](decisions/112-alan-bazli-yetki-ve-geri-dolum.md) madde 1)
   - Kabul: gece taraması bittikten sonra hedefin bağlı (yönetilen + gözlemdeki) bütün kimliklerinde `employee_number`, `mobile_phone`, `email`, `username` yalnızca boşken `reconcile_findings`'teki değerden dolar; dolu alan değişmez
@@ -884,6 +886,21 @@ Kurallar:
   - Kabul: ayrılış formunda serbest metin `departure_note`; `description` eşleme satırı `template` ile `{end_date}` ve `{departure_note}` token'larını çözer
   - Kabul: varsayılan `description` eşleme satırı gelmez; `docs/09`'a örnek girer
   - Kabul: ayrılış işinden sonra lab/gerçek AD'de hesap pasif OU'da, devre dışı ve `description` dolu
+- [x] Yönetici kayıtlı değilken AD'deki `manager` silinmez ([ADR-128](decisions/128-yonetici-kayitli-degilse-hedefteki-deger-korunur.md))
+  - Kabul: `manager_id` NULL olan kimlik yönetime alınınca AD'deki `manager` duruyor — işin öznitelik listesinde `manager` hiç görünmez
+  - Kabul: kayıtlı yöneticisi ayrılmış ve devir yöneticisi de olmayan kimlikte öznitelik yine temizlenir (ADR-041 davranışı korunur)
+  - Kabul: ayrım saf fonksiyonda ve testli; `effective_manager`'ın imzası değişmez — ikiz `desired_state.rs` iki crate'te aynı kalır ([ADR-070](decisions/070-bagimsiz-crate-per-crate-komut.md))
+  - Not (2026-10-03): değişiklik `worker/src/engine.rs`te üç satır — `manager_to_write` "kayıt yok" ile "etkin yönetici yok"u ayırır (`None` → `Some(None)` belirsiz; kayıtlı ama çözülemiyor → `None` temizle), `manager_dn` onu okur. Eşleme tablosuna, `write_if_empty` ayarına ve ekranlara dokunulmadı; yeni migration, bağımlılık ve i18n anahtarı yok
+  - Doğrulama (2026-10-03): worker **105/106 test** geçti (gerçek Postgres + lab Samba, `--include-ignored`; yeni test `manager_to_write_separates_unrecorded_from_no_effective_manager` dört hali sayar), backend **235/235** (dokunulmadı, geriye dönük kontrol; gerçek Postgres + lab Keycloak + lab Samba), fmt + clippy `-D warnings` iki crate'te temiz, `cargo audit` yalnızca [ADR-073](decisions/073-cargo-audit-rsa-bulgusu-kabul-edilen-risk.md) `rsa` (worker 0). Koşulmayan tek test `windows_ad_answers_open_questions`: gerçek AD parolasını komut satırına koymak izin sınıflandırıcısına takılıyor, değişen kod yolundan da geçmiyor
+  - Doğrulama (**çalışan yığın, gerçek Hogwarts AD'si, salt okuma**): aynı kişi için önce eski, sonra yeniden derlenmiş worker ile gözlem işi açıldı (`POST /targets/1/reconcile/reapply/5`, Harry Potter — `manager_id` NULL, bağlantı `observed`, hedefe yazma yok). İş 101 (eski): "1 grup çıkarıldı, **2 öznitelik** güncellendi"; iş 102 (düzeltilmiş): "1 grup çıkarıldı, **1 öznitelik** güncellendi". Plandan tam bir öznitelik düştü — `manager`. Geçici operatör oturumu sonunda kapatıldı
+  - Not (kapsam dışı, düzeltilemez): Draco'nun 15:35'te silinen `manager` değeri bu düzeltmeyle geri gelmez — OpenSicil o alanı hiç okumadığı için elinde eski değer yok. Yönetici zinciri yukarıdan aşağı yönetime alınıp kimliklere yönetici girilince sıradaki işler yeniden yazar
+- [ ] `manager` geri dolumu: AD → kimlik ([ADR-112](decisions/112-alan-bazli-yetki-ve-geri-dolum.md) madde 1'in listesine altıncı alan, [ADR-128](decisions/128-yonetici-kayitli-degilse-hedefteki-deger-korunur.md) madde 4)
+  - Kabul: tarama hesabın `manager` DN'ini okur; DN → kimlik çevirisi **ek LDAP sorgusu açmadan** aynı taramanın hesap listesinden yapılır (DN → `objectGUID` → `account_links.external_id` → kimlik)
+  - Kabul: `manager_id` yalnızca **boşken** yazılır; dolu değer değişmez (ADR-112 madde 1 kuralı, `fill_person_fields` ile aynı yol)
+  - Kabul: yöneticinin hesabı henüz sahiplenilmemişse satır atlanır ve sonraki gece taramasında yeniden denenir
+  - Kabul: dolum `identity.fields_filled` denetim satırına `manager` alanıyla girer
+  - Kabul: çalışan yığında Hogwarts hesaplarının yöneticileri kişi sayfasında elle giriş olmadan görünür
+  - Not: `reconcile_findings`'e kolon (`manager_external_id`) ve `DirectoryAccount`'a `manager` okuma gerekir; okuma şeridinde kalır, hedefe yazma yok ([ADR-051](decisions/051-okuma-seridi.md))
 - [ ] `docs/03` ve `docs/09`'a "AD'den geri dolum" bölümü ([ADR-112](decisions/112-alan-bazli-yetki-ve-geri-dolum.md) Sonuçları)
   - Kabul: hangi alan kendiliğinden dolar, hangisi karar bekler, denetimde ne görünür — iki ekran da anlatılır
 - [ ] Kapanış: güvenlik ve test
