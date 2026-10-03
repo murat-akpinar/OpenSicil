@@ -38,6 +38,12 @@ pub struct Candidate {
     /// AD'deki departman adi departman agacinda bulundu mu; bulunmadiysa
     /// formdaki departman kullanilir ve ekran bunu soyler
     pub department_id: Option<i64>,
+    /// AD'nin `title` ozniteligi (ham deger, cogu zaman bos)
+    pub title: String,
+    /// `title`in agactaki tekil karsiligi olan birincil rol; yoksa (eslesme
+    /// yok ya da unvan birden fazla role karsilik geliyor) partinin varsayilan
+    /// rolu kullanilir (ADR-125)
+    pub role_id: Option<i64>,
     /// AD'deki e-posta: kimlige **yazilmaz**, kullanici adi/e-posta uretimi
     /// worker'in isidir (ADR-015) ve sahiplenmede AD'den bos alanlari zaten o
     /// dolduruyor (ADR-086). Burada yalnizca "AD'de ne var" diye gorunur
@@ -96,7 +102,7 @@ impl Candidate {
 }
 
 /// id, hesap adi, displayName, ad, soyad, sicil, departman adi, departman id,
-/// mail, cep, sabit hat, acilis gunu, sifreli TC
+/// mail, cep, sabit hat, acilis gunu, sifreli TC, unvan, unvanin rol id'si
 type CandidateRow = (
     i64,
     String,
@@ -111,11 +117,17 @@ type CandidateRow = (
     String,
     String,
     Option<Vec<u8>>,
+    String,
+    Option<i64>,
 );
 
 /// Son taramadaki yonetilmeyen hesaplar; AD'deki departman adi departman
-/// agaciyla adina gore (buyuk/kucuk harf duyarsiz) eslenir. Sifreli TC kimlik
-/// no burada cozulur; cozulemeyen (anahtar donmus) deger bos sayilir.
+/// agaciyla, unvani (`title`) birincil rollerin `title` koluyla (buyuk/kucuk
+/// harf ve bosluk duyarsiz, tekil eslesme) eslenir — unvan iki role karsilik
+/// geliyorsa (`HAVING count(*) = 1`) eslesme yok sayilir, yer tutucu rol hic
+/// eslesmez (worker'in gece taramasindaki `fill_placeholder_roles` kuralinin
+/// ayni, sahiplenme anina tasindi — ADR-125). Sifreli TC kimlik no burada
+/// cozulur; cozulemeyen (anahtar donmus) deger bos sayilir.
 pub async fn candidates(
     pool: &PgPool,
     aead_key: &[u8; crate::crypto::KEY_LEN],
@@ -127,7 +139,12 @@ pub async fn candidates(
                 COALESCE(f.employee_number, ''), COALESCE(f.department_name, ''), d.id, \
                 COALESCE(f.mail, ''), COALESCE(f.mobile, ''), \
                 COALESCE(f.telephone_number, ''), \
-                COALESCE(to_char(f.when_created, 'YYYY-MM-DD'), ''), f.national_id_enc \
+                COALESCE(to_char(f.when_created, 'YYYY-MM-DD'), ''), f.national_id_enc, \
+                COALESCE(f.title, ''), \
+                (SELECT max(r.id) FROM roles r \
+                   WHERE r.kind = 'primary' AND NOT r.placeholder \
+                     AND lower(btrim(r.title)) = lower(btrim(f.title)) \
+                   HAVING count(*) = 1) \
          FROM reconcile_findings f \
          LEFT JOIN departments d ON lower(d.name) = lower(f.department_name) \
          WHERE f.target_system_id = $1 AND f.kind = 'unmanaged' \
@@ -152,6 +169,8 @@ pub async fn candidates(
             telephone: r.10,
             when_created: r.11,
             national_id: decrypted_national_id(aead_key, r.12.as_deref()),
+            title: r.13,
+            role_id: r.14,
         })
         .collect())
 }
@@ -244,7 +263,10 @@ async fn create_one(
         .department_id
         .or(batch.fallback_department_id)
         .ok_or("err.department_required")?;
-    let form = form_for(candidate, batch, department);
+    // ADR-125: unvan agacta tekil bir role karsilik geliyorsa o rol, yoksa
+    // partinin varsayilani (bugun yer tutucu `Tanimsiz`, ADR-103 madde 4).
+    let role = candidate.role_id.unwrap_or(batch.primary_role_id);
+    let form = form_for(candidate, batch, department, role);
     let new = identity::validate(&form)?;
     match identity::create(pool, keys, time_zone, &new, None).await {
         Ok((id, _)) => Ok(id),
@@ -258,7 +280,7 @@ async fn create_one(
 
 /// Kayit formunun toplu sahiplenmedeki karsiligi: AD'den gelen alanlar
 /// (dogrulamadan gecenler) + partinin ortak alanlari.
-fn form_for(candidate: &Candidate, batch: &Batch, department: i64) -> IdentityForm {
+fn form_for(candidate: &Candidate, batch: &Batch, department: i64, role: i64) -> IdentityForm {
     let (given_name, surname) = candidate.names();
     IdentityForm {
         given_name,
@@ -279,7 +301,7 @@ fn form_for(candidate: &Candidate, batch: &Batch, department: i64) -> IdentityFo
             false => String::new(),
         },
         department_id: department.to_string(),
-        primary_role_id: batch.primary_role_id.to_string(),
+        primary_role_id: role.to_string(),
         employment_type: batch.employment_type.clone(),
         // Baslangic uydurulmaz: AD'deki acilis gunu varsa o, yoksa formdaki
         // tarih (ADR-103 madde 6)
@@ -309,6 +331,8 @@ mod tests {
             employee_number: String::new(),
             department_name: String::new(),
             department_id: None,
+            title: String::new(),
+            role_id: None,
             mail: String::new(),
             mobile: String::new(),
             telephone: String::new(),
@@ -642,6 +666,135 @@ mod tests {
             adopt(&pool, &keys, "Europe/Istanbul", target, &too_many, &batch).await,
             Err(AdoptError::Invalid("err.bulk_adopt_too_many"))
         ));
+
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
+    // ADR-125: unvan agacta tekil bir role karsilik geliyorsa aday dogrudan o
+    // role acilir; eslesmeyen ve belirsiz (iki role karsilik gelen) unvan
+    // partinin varsayilanina duser — worker'in gece taramasindaki
+    // `fill_placeholder_roles` kuralinin ayni, sahiplenme anina tasindi.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn the_role_resolves_from_the_ad_title_and_falls_back_to_the_batch_default() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        let department: i64 =
+            sqlx::query_scalar("INSERT INTO departments (name) VALUES ('Birim') RETURNING id")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let placeholder: i64 = sqlx::query_scalar("SELECT id FROM roles WHERE placeholder")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let matched_role: i64 = sqlx::query_scalar(
+            "INSERT INTO roles (kind, name, title) \
+             VALUES ('primary', 'Sistem Uzmanı', 'Sistem Uzmanı') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        // Ayni unvani tasiyan iki rol: eslesme belirsizlesir, HAVING count(*) = 1 eler.
+        sqlx::query(
+            "INSERT INTO roles (kind, name, title) \
+             VALUES ('primary', 'Kıdemli Uzman', 'Belirsiz Unvan'), \
+                    ('primary', 'İkinci Uzman', 'Belirsiz Unvan')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let target: i64 = sqlx::query_scalar("SELECT id FROM target_systems WHERE kind = 'ad'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let read_job: i64 = sqlx::query_scalar(
+            "INSERT INTO read_jobs (kind, target_system_id, requested_by) \
+             VALUES ('reconcile', $1, 'test') RETURNING id",
+        )
+        .bind(target)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        for (guid, sam, title) in [
+            // Bosluk ve buyuk/kucuk harf farki yok sayilir (worker kuraliyla ayni)
+            ("g1", "eslesen", Some("  sistem uzmanı ")),
+            ("g2", "eslesmeyen", Some("Olmayan Unvan")),
+            ("g3", "belirsiz", Some("Belirsiz Unvan")),
+            ("g4", "unvansiz", None),
+        ] {
+            sqlx::query(
+                "INSERT INTO reconcile_findings (target_system_id, read_job_id, kind, \
+                 external_id, account_name, display_name, container, enabled, \
+                 given_name, surname, department_name, title) \
+                 VALUES ($1, $2, 'unmanaged', $3, $4, $4, 'OU=Users', true, 'Ad', 'Soyad', \
+                 'Birim', $5)",
+            )
+            .bind(target)
+            .bind(read_job)
+            .bind(guid)
+            .bind(sam)
+            .bind(title)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        let keys = Keys {
+            aead: &[3u8; crate::crypto::KEY_LEN],
+            blind_index: &[4u8; crate::crypto::KEY_LEN],
+        };
+        let found = candidates(&pool, keys.aead, target).await.unwrap();
+        let role_of = |sam: &str| {
+            found
+                .iter()
+                .find(|c| c.account_name == sam)
+                .unwrap_or_else(|| panic!("{sam} bulunamadı"))
+                .role_id
+        };
+        assert_eq!(
+            role_of("eslesen"),
+            Some(matched_role),
+            "boşluk ve büyük/küçük harf yok sayılır"
+        );
+        assert_eq!(role_of("eslesmeyen"), None);
+        assert_eq!(
+            role_of("belirsiz"),
+            None,
+            "unvan iki role karşılık geliyorsa eşleşme yok sayılır"
+        );
+        assert_eq!(role_of("unvansiz"), None);
+
+        // Sahiplenince: eslesen kisi dogrudan role acilir, gerisi parti
+        // varsayilanina (burada yer tutucu) duser.
+        let batch = Batch {
+            primary_role_id: placeholder,
+            employment_type: "permanent".to_string(),
+            start_date: "2026-10-01".to_string(),
+            fallback_department_id: Some(department),
+        };
+        let selected: Vec<i64> = found.iter().map(|c| c.id).collect();
+        let outcome = adopt(&pool, &keys, "Europe/Istanbul", target, &selected, &batch)
+            .await
+            .unwrap_or_else(|_| panic!("toplu sahiplenme başarısız"));
+        assert_eq!(outcome.created.len(), 4);
+        let roles: Vec<(String, i64)> = sqlx::query_as(
+            "SELECT existing_ad_account_hint, primary_role_id FROM identities \
+             WHERE existing_ad_account_hint IS NOT NULL ORDER BY existing_ad_account_hint",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            roles,
+            vec![
+                ("belirsiz".to_string(), placeholder),
+                ("eslesen".to_string(), matched_role),
+                ("eslesmeyen".to_string(), placeholder),
+                ("unvansiz".to_string(), placeholder),
+            ]
+        );
 
         drop(pool);
         crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
