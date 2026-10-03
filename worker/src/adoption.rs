@@ -252,6 +252,9 @@ pub struct PersonValues<'a> {
     pub upn: Option<&'a str>,
     pub phone: Option<&'a str>,
     pub employee_number: Option<&'a str>,
+    /// Yoneticinin kimlik id'si (ADR-129). Sahiplenme aninda bos: tek hesap
+    /// okunurken yoneticinin DN'i kimlige cevrilemez, gece taramasi doldurur.
+    pub manager_id: Option<i64>,
 }
 
 impl<'a> PersonValues<'a> {
@@ -262,11 +265,13 @@ impl<'a> PersonValues<'a> {
             upn: cand.upn.as_deref(),
             phone: cand.writable_phone(),
             employee_number: cand.employee_number.as_deref(),
+            manager_id: None,
         }
     }
 }
 
-// Ad, e-posta, UPN, sicil ve cep: hepsi yalnizca kimlikte bosken yazilir, dolu
+// Ad, e-posta, UPN, sicil, cep ve yonetici: hepsi yalnizca kimlikte bosken
+// yazilir (ADR-129 yoneticiyi listeye ekledi), dolu
 // alana dokunulmaz (ADR-034/086/106). Sicil tekil kolondur: ayni deger baska bir
 // kimlikte duruyorsa yazilmaz — yoksa tek mukerrer numara butun sahiplenmeyi
 // (baglanti + denetim satiri) geri alirdi. Sahiplenme ani ve gece mutabakati
@@ -281,7 +286,8 @@ pub async fn fill_person_fields(
          upn = COALESCE(upn, $4), mobile_phone = COALESCE(mobile_phone, $5), \
          employee_number = COALESCE(employee_number, \
            (SELECT $6::text WHERE NOT EXISTS \
-              (SELECT 1 FROM identities o WHERE o.employee_number = $6))) \
+              (SELECT 1 FROM identities o WHERE o.employee_number = $6))), \
+         manager_id = COALESCE(manager_id, $7) \
          WHERE id = $1",
     )
     .bind(identity_id)
@@ -290,6 +296,7 @@ pub async fn fill_person_fields(
     .bind(v.upn)
     .bind(v.phone)
     .bind(v.employee_number)
+    .bind(v.manager_id)
     .execute(&mut **tx)
     .await
     .map(|_| ())

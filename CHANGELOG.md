@@ -182,4 +182,5 @@
 - POST'lar yönlendirir, mesaj operatörün oturumunda bekler
 - Sahiplenme sürerken mutabakat sayfası kendini tazeler
 - Sahiplenilen aday listeden düşer, aynı hesap iki kez sahiplenilemez
+- Yönetici AD'den geri dolar, elle girmek gerekmez
 

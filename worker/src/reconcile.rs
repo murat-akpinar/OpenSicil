@@ -5,7 +5,7 @@
 // Okuma seridinde calisir (ADR-051): hedefe hicbir sey yazmaz, denetim kaydina
 // dokunmaz, fren sayaclarini (ADR-050) harcamaz. Tek yazdigi tablo
 // `reconcile_findings` ve oraya yalnizca worker yazabilir (ADR-015).
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::ad::DirectoryAccount;
 use crate::adoption::{self, PersonValues};
@@ -53,6 +53,9 @@ pub struct Finding {
     /// AD'den okunan TC kimlik no (ayar doluysa, ADR-106 madde 5). Yalnizca
     /// bellekte duz; `store` AEAD ile sifreleyip yazar (ADR-010)
     pub national_id: Option<String>,
+    /// Yoneticinin **hesabinin** objectGUID'i (ADR-129): `manager` DN'i ayni
+    /// taramanin hesap listesinden cozulur. Yonetici kapsam disindaysa bos.
+    pub manager_external_id: Option<String>,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -79,6 +82,13 @@ impl Counts {
 /// `silindi` isaretli baglanti (worker'in kendi sildigi hesap) kayip sayilmaz —
 /// onu zaten biz sildik, dizinde olmamasi beklenen durumdur.
 pub fn compare(accounts: &[DirectoryAccount], links: &[Link]) -> Vec<Finding> {
+    // ADR-129: `manager` DN'i kimlige ancak hesabin GUID'i uzerinden baglanir.
+    // Harita ayni taramanin hesap listesinden kurulur — ikinci bir LDAP sorgusu
+    // yok. DN karsilastirmasi harf buyuklugune duyarsiz (AD de boyle davranir).
+    let by_dn: HashMap<String, &str> = accounts
+        .iter()
+        .map(|a| (a.dn.to_lowercase(), a.guid.as_str()))
+        .collect();
     let mut findings: Vec<Finding> = accounts
         .iter()
         .map(|account| {
@@ -105,6 +115,11 @@ pub fn compare(accounts: &[DirectoryAccount], links: &[Link]) -> Vec<Finding> {
                 telephone: account.telephone.clone(),
                 when_created: account.when_created.clone(),
                 national_id: account.national_id.clone(),
+                manager_external_id: account
+                    .manager_dn
+                    .as_deref()
+                    .and_then(|dn| by_dn.get(&dn.to_lowercase()))
+                    .map(|guid| (*guid).to_string()),
             }
         })
         .collect();
@@ -135,6 +150,7 @@ fn missing_finding(link: &Link) -> Finding {
         telephone: None,
         when_created: None,
         national_id: None,
+        manager_external_id: None,
     }
 }
 
@@ -183,9 +199,9 @@ pub async fn store(
             "INSERT INTO reconcile_findings (target_system_id, read_job_id, kind, \
              external_id, account_name, display_name, container, enabled, identity_id, \
              given_name, surname, employee_number, department_name, title, mail, mobile, \
-             telephone_number, when_created, national_id_enc) \
+             telephone_number, when_created, national_id_enc, manager_external_id) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, \
-             $17, $18::date, $19)",
+             $17, $18::date, $19, $20)",
         )
         .bind(target)
         .bind(read_job_id)
@@ -206,6 +222,7 @@ pub async fn store(
         .bind(&finding.telephone)
         .bind(&finding.when_created)
         .bind(national_id_enc)
+        .bind(&finding.manager_external_id)
         .execute(&mut *tx)
         .await?;
     }
@@ -224,11 +241,16 @@ const FILL_SQL: &str = "SELECT f.identity_id, f.account_name, f.mail AS ad_mail,
     f.employee_number AS ad_employee_number, \
     NOT EXISTS (SELECT 1 FROM identities o WHERE o.employee_number = f.employee_number) \
       AS employee_number_free, \
-    i.username, i.email, i.mobile_phone, i.employee_number \
+    i.username, i.email, i.mobile_phone, i.employee_number, i.manager_id, \
+    mi.id AS ad_manager_id \
     FROM reconcile_findings f JOIN identities i ON i.id = f.identity_id \
+    LEFT JOIN reconcile_findings mf ON mf.target_system_id = f.target_system_id \
+      AND mf.external_id = f.manager_external_id \
+    LEFT JOIN identities mi ON mi.id = mf.identity_id AND mi.deleted_at IS NULL \
+      AND mi.id <> f.identity_id \
     WHERE f.target_system_id = $1 AND i.deleted_at IS NULL \
       AND (i.username IS NULL OR i.email IS NULL OR i.mobile_phone IS NULL \
-           OR i.employee_number IS NULL) \
+           OR i.employee_number IS NULL OR i.manager_id IS NULL) \
     ORDER BY f.identity_id";
 
 /// ADR-112 madde 1: alan kimlikte doluysa dokunulmaz, bossa AD'deki deger yazilir.
@@ -247,6 +269,7 @@ fn filled_field_names(v: &PersonValues<'_>) -> Vec<&'static str> {
         ("email", v.email.is_some()),
         ("mobile_phone", v.phone.is_some()),
         ("employee_number", v.employee_number.is_some()),
+        ("manager", v.manager_id.is_some()),
     ]
     .into_iter()
     .filter_map(|(name, set)| set.then_some(name))
@@ -258,6 +281,9 @@ fn filled_field_names(v: &PersonValues<'_>) -> Vec<&'static str> {
 /// yazilmaz, fren sayaci harcanmaz (ADR-051); degisen tek tablo `identities`,
 /// yanina kimlik olayi dusulur. Silinmis kimlik atlanir — kisisel veri
 /// temizligi (ADR-024) geri doldurulmaz. UPN bulguda tasinmiyor, dolmuyor.
+/// Yonetici (ADR-129): bulgudaki `manager_external_id` ayni taramadaki yonetici
+/// bulgusuna, oradan onun kimligine cevrilir; yoneticinin hesabi bir kimlige
+/// bagli degilse (henuz sahiplenilmemis) alan bos kalir ve sonraki tarama dener.
 /// Doner: alani dolan kimlik sayisi.
 pub async fn fill_linked_identities(pool: &PgPool, target: i64) -> Result<usize, String> {
     let rows = sqlx::query(FILL_SQL)
@@ -282,6 +308,8 @@ pub async fn fill_linked_identities(pool: &PgPool, target: i64) -> Result<usize,
         let have_email: Option<String> = row.get("email");
         let have_phone: Option<String> = row.get("mobile_phone");
         let have_employee: Option<String> = row.get("employee_number");
+        let have_manager: Option<i64> = row.get("manager_id");
+        let ad_manager: Option<i64> = row.get("ad_manager_id");
 
         let phone = adoption::writable_phone(ad_mobile.as_deref().or(ad_telephone.as_deref()));
         let free_employee = ad_employee
@@ -293,6 +321,10 @@ pub async fn fill_linked_identities(pool: &PgPool, target: i64) -> Result<usize,
             upn: None,
             phone: fillable(have_phone.as_deref(), phone),
             employee_number: fillable(have_employee.as_deref(), free_employee),
+            // ADR-129: yonetici de bos alan; dolu olan degismez. Yoneticinin
+            // hesabi henuz sahiplenilmemisse `ad_manager` bostur, sonraki gece
+            // taramasi yeniden dener.
+            manager_id: have_manager.is_none().then_some(ad_manager).flatten(),
         };
         let names = filled_field_names(&values);
         if names.is_empty() {
@@ -367,6 +399,7 @@ mod tests {
             telephone: Some("01632 960001".to_string()),
             when_created: Some("2024-09-01".to_string()),
             national_id: None,
+            manager_dn: None,
         }
     }
 
@@ -481,6 +514,42 @@ mod tests {
         assert_eq!(findings.len(), 29);
         assert!(findings.iter().all(|f| f.kind == UNMANAGED));
         assert_eq!(Counts::of(&findings).unmanaged, 29);
+    }
+
+    /// ADR-129: `manager` DN'i ayni taramanin hesap listesinden GUID'e cevrilir
+    /// (harf buyuklugune duyarsiz); kapsam disindaki yonetici bos kalir.
+    #[test]
+    fn the_scan_resolves_the_manager_dn_to_the_managers_account_guid() {
+        let head = account("g-1", "adumbledore", true);
+        let mut teacher = account("g-2", "ssnape", true);
+        // AD DN'i buyuk harfle dondurebilir; eslesme duyarsiz olmali
+        teacher.manager_dn = Some(head.dn.to_uppercase());
+        let mut outsider = account("g-3", "afilch", true);
+        outsider.manager_dn = Some("CN=Kapsam Disi,OU=Baska,DC=hogwarts,DC=local".to_string());
+        let head_guid = head.guid.clone();
+
+        let findings = compare(&[head, teacher, outsider], &[]);
+        let of = |sam: &str| {
+            findings
+                .iter()
+                .find(|f| f.account_name == sam)
+                .expect("bulgu yok")
+        };
+        assert_eq!(
+            of("ssnape").manager_external_id,
+            Some(head_guid),
+            "yöneticinin hesabının GUID'i bulguya yazılır"
+        );
+        assert_eq!(
+            of("afilch").manager_external_id,
+            None,
+            "kapsam dışındaki yönetici çözülmez"
+        );
+        assert_eq!(
+            of("adumbledore").manager_external_id,
+            None,
+            "`manager` özniteliği boş olan hesap boş kalır"
+        );
     }
 
     // ADR-112 madde 1 saf kural: dolu alana dokunulmaz, degeri olmayan alan dolmaz.
@@ -635,9 +704,13 @@ mod tests {
         let mut ayse = account("g-1", "ayse.yilmaz", true);
         ayse.mobile = Some("+905321234567".to_string());
         ayse.employee_number = Some("7788".to_string());
+        // ADR-129: Ayse kendi kendisinin yoneticisi gosterilmis (koruma denenir)
+        ayse.manager_dn = Some(ayse.dn.clone());
         // Ali'nin cebi yok (sabit hat E.164 degil) ve sicili Ayse'nin sicili
         let mut ali = account("g-2", "ali.kaya", true);
         ali.employee_number = Some("7788".to_string());
+        // ADR-129: Ali'nin AD'deki yoneticisi Ayse'nin hesabi
+        ali.manager_dn = Some(ayse.dn.clone());
         let links = [
             link("g-1", MANAGED, seed.identity, "?"),
             link("g-2", OBSERVED, seed.other_identity, "?"),
@@ -704,6 +777,35 @@ mod tests {
         .unwrap();
         assert!(detail.contains("username"), "{detail}");
         assert!(!detail.contains("email"), "{detail}");
+        assert!(
+            detail.contains("manager"),
+            "yönetici de dolan alan: {detail}"
+        );
+
+        // ADR-129: yonetici AD'den dolar; kendi kendisini yonetici gosteren
+        // hesapta alan bos kalir.
+        let manager_of = |id: i64| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_scalar::<_, Option<i64>>(
+                    "SELECT manager_id FROM identities WHERE id = $1",
+                )
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+            }
+        };
+        assert_eq!(
+            manager_of(seed.other_identity).await,
+            Some(seed.identity),
+            "Ali'nin yöneticisi AD'deki DN'den çözülüp kimliğe yazılır"
+        );
+        assert_eq!(
+            manager_of(seed.identity).await,
+            None,
+            "kendi kendisinin yöneticisi olan hesapta alan boş kalır"
+        );
 
         assert_eq!(
             fill_linked_identities(&pool, seed.ad).await.unwrap(),
@@ -715,7 +817,7 @@ mod tests {
         // icin ayni taramada Ali'nin sicili dolar; bakilan sey silinmis kimlik.)
         sqlx::query(
             "UPDATE identities SET deleted_at = now(), username = NULL, email = NULL, \
-             mobile_phone = NULL, employee_number = NULL WHERE id = $1",
+             mobile_phone = NULL, employee_number = NULL, manager_id = NULL WHERE id = $1",
         )
         .bind(seed.identity)
         .execute(&pool)

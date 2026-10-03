@@ -588,10 +588,15 @@ pub struct DirectoryAccount {
     /// ayar bossa hic okunmaz. Yalnizca bellekte duz: bulguya sifreli yazilir,
     /// log'a ve is sonucuna girmez (ADR-010).
     pub national_id: Option<String>,
+    /// Hesabin `manager` ozniteligi: yoneticinin DN'i (ADR-129). Kimlige
+    /// cevirmek `reconcile::compare`in isi — ayni taramanin hesap listesinden
+    /// DN → objectGUID cozulur, ek LDAP sorgusu acilmaz.
+    pub manager_dn: Option<String>,
 }
 
-const ACCOUNT_ATTRS: [&str; 15] = [
+const ACCOUNT_ATTRS: [&str; 16] = [
     "objectGUID",
+    "manager",
     "sAMAccountName",
     "displayName",
     "cn",
@@ -680,6 +685,7 @@ fn to_account(entry: &SearchEntry, national_id_attr: Option<&str>) -> Option<Dir
         telephone: text_attr(entry, "telephoneNumber"),
         when_created: text_attr(entry, "whenCreated").and_then(|v| generalized_time_date(&v)),
         national_id: national_id_attr.and_then(|attr| text_attr(entry, attr)),
+        manager_dn: text_attr(entry, "manager"),
     })
 }
 
