@@ -172,4 +172,5 @@
 - AD fark listesine departman girer, alım hedefe iş açar
 - Kayıp hesabın bağlantısı kaldırılabilir, kimlik yeniden sahiplenilir
 - AD fark listesine rol girer, yer tutucu rol unvandan dolar
+- Mutabakat kendi menü maddesi olur, Raporlar'dan çıkar
 

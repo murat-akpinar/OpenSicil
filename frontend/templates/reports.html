@@ -3,7 +3,8 @@
 {% block content %}
 {# Kendi verisi olmayan kapak sayfa: var olan rapor ekranlarina giden kartlar.
    ADR-117 D: ustte ozet kutulari, her satirda bekleyen kayit rozeti. Rozet sifirsa
-   soluk — "yapacak is yok" da bir bilgi, ama goze batmasin. #}
+   soluk — "yapacak is yok" da bir bilgi, ama goze batmasin.
+   Mutabakat burada degil, kendi menu maddesinde (ADR-123). #}
 <div class="page-head">
   <div>
     <h1 class="h1">{{ lang.t("nav.reports") }}</h1>
@@ -11,7 +12,7 @@
   </div>
 </div>
 
-<div class="grid gap-4 sm:grid-cols-3 mb-5">
+<div class="grid gap-4 sm:grid-cols-2 mb-5">
   {# Sayi uc ayri listenin toplami (mudahale + silme onayi + sahiplenme), tek bir
      sayfasi yok: kart baglanti degil. Eskiden `/interventions`e gidiyordu ve
      "26" diyen kart bos liste aciyordu. Her bilesenin kendi satiri asagida,
@@ -36,74 +37,39 @@
       </div>
     </div>
   </a>
-  <div class="stat stat--joined">
-    <div class="stat-head">
-      <span class="stat-ico"><i class="ico ico-link" aria-hidden="true"></i></span>
-      <div class="min-w-0 flex-1">
-        <p class="stat-label">{{ lang.t("reports.last_reconcile") }}</p>
-        {# Tarama hic yapilmadiysa sayi uydurulmaz: tire ve "henuz taranmadi" #}
-        <p class="stat-row"><span class="{% if summary.last_reconcile.is_empty() %}stat-value{% else %}text-base font-bold tabular-nums{% endif %}">{% if summary.last_reconcile.is_empty() %}—{% else %}{{ summary.last_reconcile }}{% endif %}</span></p>
-        <p class="stat-foot">{% if summary.last_reconcile.is_empty() %}{{ lang.t("reports.never_scanned") }}{% else %}{{ lang.t1("adopt.pending", summary.unadopted) }}{% endif %}</p>
-      </div>
-    </div>
+</div>
+
+<section class="card">
+  <div class="card-head">
+    <span class="ico-tile ico-tile-warn"><i class="ico ico-calendar" aria-hidden="true"></i></span>
+    <h2 class="h2">{{ lang.t("reports.lists") }}</h2>
   </div>
-</div>
-
-{# ADR-114 C: kartlar sayfayi doldurur ve satir bazinda ayni yuksekligi alir #}
-<div class="grid gap-4 md:grid-cols-2 md:items-stretch">
-  <section class="card card-fill">
-    <div class="card-head">
-      <span class="ico-tile ico-tile-accent"><i class="ico ico-link" aria-hidden="true"></i></span>
-      <h2 class="h2">{{ lang.t("reports.reconcile") }}</h2>
-    </div>
-    <p class="sub mt-0 mb-3">{{ lang.t("reports.reconcile_hint") }}</p>
-    <div class="qa">
-      {% for t in targets %}
-      <a class="qa-row" href="/targets/{{ t.id }}/reconcile">
-        <span class="ico-tile ico-tile-accent"><i class="ico ico-server" aria-hidden="true"></i></span>
-        <span class="min-w-0 flex-1">{{ t.name }}
-          {# Son tarama zamani: hic taranmadiysa satir bunu soyler #}
-          <span class="meta block font-normal">{% if t.scanned.is_empty() %}{{ lang.t("reports.never_scanned") }}{% else %}{{ lang.t1("reports.scanned_at", t.scanned) }}{% endif %}</span>
-        </span>
-        <span class="badge {% if t.pending > 0 %}badge-warn{% else %}badge-muted{% endif %}">{{ t.pending }}</span>
-        <i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i>
-      </a>
-      {% endfor %}
-    </div>
-  </section>
-
-  <section class="card card-fill">
-    <div class="card-head">
+  <p class="sub mt-0 mb-3">{{ lang.t("reports.lists_hint") }}</p>
+  <div class="qa">
+    <a class="qa-row" href="/upcoming">
       <span class="ico-tile ico-tile-warn"><i class="ico ico-calendar" aria-hidden="true"></i></span>
-      <h2 class="h2">{{ lang.t("reports.lists") }}</h2>
-    </div>
-    <p class="sub mt-0 mb-3">{{ lang.t("reports.lists_hint") }}</p>
-    <div class="qa">
-      <a class="qa-row" href="/upcoming">
-        <span class="ico-tile ico-tile-warn"><i class="ico ico-calendar" aria-hidden="true"></i></span>
-        <span class="min-w-0 flex-1">{{ lang.t("nav.upcoming") }}</span>
-        <span class="badge {% if summary.upcoming > 0 %}badge-warn{% else %}badge-muted{% endif %}">{{ summary.upcoming }}</span>
-        <i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i>
-      </a>
-      <a class="qa-row" href="/used-names">
-        <span class="ico-tile ico-tile-info"><i class="ico ico-tag" aria-hidden="true"></i></span>
-        <span class="min-w-0 flex-1">{{ lang.t("nav.used_names") }}</span>
-        <span class="badge {% if summary.used_names > 0 %}badge-info{% else %}badge-muted{% endif %}">{{ summary.used_names }}</span>
-        <i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i>
-      </a>
-      <a class="qa-row" href="/deletions">
-        <span class="ico-tile ico-tile-warn"><i class="ico ico-trash" aria-hidden="true"></i></span>
-        <span class="min-w-0 flex-1">{{ lang.t("nav.deletions") }}</span>
-        <span class="badge {% if summary.deletions > 0 %}badge-warn{% else %}badge-muted{% endif %}">{{ summary.deletions }}</span>
-        <i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i>
-      </a>
-      <a class="qa-row" href="/interventions">
-        <span class="ico-tile ico-tile-err"><i class="ico ico-inbox" aria-hidden="true"></i></span>
-        <span class="min-w-0 flex-1">{{ lang.t("nav.interventions") }}</span>
-        <span class="badge {% if summary.interventions > 0 %}badge-err{% else %}badge-muted{% endif %}">{{ summary.interventions }}</span>
-        <i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i>
-      </a>
-    </div>
-  </section>
-</div>
+      <span class="min-w-0 flex-1">{{ lang.t("nav.upcoming") }}</span>
+      <span class="badge {% if summary.upcoming > 0 %}badge-warn{% else %}badge-muted{% endif %}">{{ summary.upcoming }}</span>
+      <i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i>
+    </a>
+    <a class="qa-row" href="/used-names">
+      <span class="ico-tile ico-tile-info"><i class="ico ico-tag" aria-hidden="true"></i></span>
+      <span class="min-w-0 flex-1">{{ lang.t("nav.used_names") }}</span>
+      <span class="badge {% if summary.used_names > 0 %}badge-info{% else %}badge-muted{% endif %}">{{ summary.used_names }}</span>
+      <i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i>
+    </a>
+    <a class="qa-row" href="/deletions">
+      <span class="ico-tile ico-tile-warn"><i class="ico ico-trash" aria-hidden="true"></i></span>
+      <span class="min-w-0 flex-1">{{ lang.t("nav.deletions") }}</span>
+      <span class="badge {% if summary.deletions > 0 %}badge-warn{% else %}badge-muted{% endif %}">{{ summary.deletions }}</span>
+      <i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i>
+    </a>
+    <a class="qa-row" href="/interventions">
+      <span class="ico-tile ico-tile-err"><i class="ico ico-inbox" aria-hidden="true"></i></span>
+      <span class="min-w-0 flex-1">{{ lang.t("nav.interventions") }}</span>
+      <span class="badge {% if summary.interventions > 0 %}badge-err{% else %}badge-muted{% endif %}">{{ summary.interventions }}</span>
+      <i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i>
+    </a>
+  </div>
+</section>
 {% endblock %}

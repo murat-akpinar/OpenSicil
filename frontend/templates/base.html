@@ -20,12 +20,14 @@
     <aside class="side" id="side">
       <a class="side-brand" href="/"><span class="brand-mark"><i class="ico ico-shield" aria-hidden="true"></i></span><span class="nav-label">OpenSicil</span></a>
       {# Kullanilmis adlar ve yaklasan bitisler /reports altinda; menu mockup'taki
-         gibi kisa kalir. Ayarlar yalnizca `admin`e gorunur — sayfa zaten reddediyor. #}
+         gibi kisa kalir. Mutabakat kendi maddesi (ADR-123): rapor okunup kapatilir,
+         mutabakat uzerinde calisilan ekran. Ayarlar yalnizca `admin`e gorunur. #}
       <nav class="side-nav">
         <a class="nav-link" href="/" title="{{ lang.t("nav.home") }}"><i class="ico ico-home" aria-hidden="true"></i><span class="nav-label">{{ lang.t("nav.home") }}</span><i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
         <a class="nav-link" href="/identities" title="{{ lang.t("nav.identities") }}"><i class="ico ico-users" aria-hidden="true"></i><span class="nav-label">{{ lang.t("nav.identities") }}</span><i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
         <a class="nav-link" href="/roles" title="{{ lang.t("nav.roles") }}"><i class="ico ico-key" aria-hidden="true"></i><span class="nav-label">{{ lang.t("nav.roles") }}</span><i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
         <a class="nav-link" href="/departments" title="{{ lang.t("nav.departments") }}"><i class="ico ico-sitemap" aria-hidden="true"></i><span class="nav-label">{{ lang.t("nav.departments") }}</span><i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
+        <a class="nav-link" href="/reconcile" title="{{ lang.t("reconcile.title") }}"><i class="ico ico-link" aria-hidden="true"></i><span class="nav-label">{{ lang.t("reconcile.title") }}</span><i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
         <a class="nav-link" href="/reports" title="{{ lang.t("nav.reports") }}"><i class="ico ico-chart" aria-hidden="true"></i><span class="nav-label">{{ lang.t("nav.reports") }}</span><i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
         <a class="nav-link" href="/targets" title="{{ lang.t("nav.targets") }}"><i class="ico ico-server" aria-hidden="true"></i><span class="nav-label">{{ lang.t("nav.targets") }}</span><i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i></a>
         {% if shell.is_admin %}

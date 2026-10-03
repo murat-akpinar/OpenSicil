@@ -53,15 +53,10 @@ identities.window_departed = "Last {} days: showing {} people who left."
 identities.window_changed = "Last {} days: showing {} people whose role changed."
 
 # --- reports ---
-reports.sub = "Reconciliation scans and dated lists."
-reports.reconcile = "Reconciliation"
-reports.reconcile_hint = "Accounts in the target system compared with their OpenSicil counterparts."
+reports.sub = "Dated lists and pending work."
 reports.lists = "Lists"
 reports.pending = "Pending work"
 reports.pending_foot = "{} interventions · {} deletion approvals · {} adoptions"
-reports.last_reconcile = "Last reconcile"
-reports.never_scanned = "Not scanned yet"
-reports.scanned_at = "Last scan: {}"
 reports.lists_hint = "Date-driven work and name records."
 
 # --- jobs needing intervention ---
@@ -632,6 +627,9 @@ search.empty_hint = "Check the spelling; deleted records are excluded from searc
 search.count = "{} records listed."
 reconcile.title = "Reconciliation"
 reconcile.subtitle = "AD accounts in the managed scope and their counterparts in OpenSicil"
+reconcile.hub_hint = "Accounts in the target system compared with their OpenSicil counterparts."
+reconcile.hub_never_scanned = "Not scanned yet"
+reconcile.hub_scanned_at = "Last scan: {}"
 reconcile.link = "Reconciliation"
 reconcile.scan = "Scan again"
 reconcile.last_scan = "Last scan"

@@ -62,6 +62,7 @@ const FIXED_PAGES = [
   ["personel", "/identities"],
   ["roller", "/roles"],
   ["departmanlar", "/departments"],
+  ["mutabakat", "/reconcile"],
   ["raporlar", "/reports"],
   ["uygulamalar", "/targets"],
   ["ayarlar", "/config"],
@@ -94,8 +95,10 @@ async function detailRoutes(page) {
 
   // Hedeflerin hepsi: mutabakat ve esleme sayfalari hedef basina ayri cizilir
   await page.goto(`${BASE}/targets`, { waitUntil: "domcontentloaded" });
+  // Secici hedef basina baglantiyi arar; kenar cubugundaki "Mutabakat" maddesi
+  // de `/reconcile` ile bitiyor (ADR-123) ve ona takilirsa id `undefined` olur
   const targets = await page.evaluate(() =>
-    [...document.querySelectorAll('a[href$="/reconcile"]')].map(
+    [...document.querySelectorAll('a[href^="/targets/"][href$="/reconcile"]')].map(
       (a) => new URL(a.href).pathname.split("/")[2]
     )
   );

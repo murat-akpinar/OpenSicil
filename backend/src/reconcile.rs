@@ -149,6 +149,9 @@ pub async fn request_scan(pool: &PgPool, target: i64, by: &str) -> Result<bool, 
 
 pub fn routes() -> Router<AppState> {
     Router::new()
+        // --- START FEATURE: reconcile-hub ---
+        .route("/reconcile", get(hub))
+        // --- END FEATURE: reconcile-hub ---
         .route("/targets/{id}/reconcile", get(page))
         .route("/targets/{id}/reconcile/scan", post(scan))
         .route(
@@ -191,6 +194,69 @@ struct ReconcileTemplate {
     ad_diffs: Vec<crate::ad_diff::Diff>,
     can_take: bool,
 }
+
+// --- START FEATURE: reconcile-hub ---
+// Kenar cubugundaki "Mutabakat" maddesinin sayfasi (ADR-123): hedef sistem
+// basina bir satir. Kendi verisi yok — ucu de tarama ekranlarinin kendi
+// yardimcilari; rozet "3" diyorsa liste uc satir gosterir.
+//
+// Bu liste eskiden `/reports`taki bir kartti. Rapor okunur ve kapatilir,
+// mutabakat uzerinde calisilir (sahiplenme, "AD'dekini al", baglanti kaldirma):
+// ayni kapak sayfada durmalari operatore fazladan bir durak biniyordu.
+
+/// Mutabakat satiri: hedef sistem adi, sahiplenmeyi bekleyen hesap sayisi ve
+/// son taramanin zamani.
+pub struct TargetLink {
+    pub id: i64,
+    pub name: String,
+    /// Sahiplenmeyi bekleyen hesap; sifirsa rozet soluk
+    pub pending: i64,
+    /// Son mutabakat taramasinin zamani; hic taranmadiysa bos
+    pub scanned: String,
+}
+
+#[derive(Template)]
+#[template(path = "reconcile_hub.html")]
+struct HubTemplate {
+    lang: Lang,
+    shell: Shell,
+    targets: Vec<TargetLink>,
+}
+
+/// `read_jobs.kind`in mutabakat degeri (0016_read_jobs.sql CHECK listesi).
+const RECONCILE_JOB: &str = "reconcile";
+
+async fn hub(OperatorSession(op): OperatorSession, State(state): State<AppState>) -> Response {
+    let loaded = tokio::try_join!(
+        crate::org::list_targets(&state.pool),
+        unadopted(&state.pool),
+        crate::org::last_read_job(&state.pool, &state.time_zone, RECONCILE_JOB),
+    );
+    let (rows, unadopted, scans) = match loaded {
+        Ok(loaded) => loaded,
+        Err(e) => return internal("mutabakat sayfası okunamadı", e),
+    };
+    render(&HubTemplate {
+        lang: op.lang,
+        shell: Shell::of(&op),
+        targets: rows
+            .into_iter()
+            .map(|t| TargetLink {
+                pending: unadopted
+                    .iter()
+                    .find(|u| u.target_id == t.id)
+                    .map_or(0, |u| u.count),
+                scanned: scans
+                    .iter()
+                    .find(|(id, ..)| *id == t.id)
+                    .map_or(String::new(), |(_, _, at, _)| at.clone()),
+                id: t.id,
+                name: t.name,
+            })
+            .collect(),
+    })
+}
+// --- END FEATURE: reconcile-hub ---
 
 async fn render_page(
     state: &AppState,
@@ -667,6 +733,88 @@ mod tests {
         assert_eq!(audited, 1);
 
         drop(app);
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
+    /// ADR-123: mutabakat kendi menu maddesi. `/reconcile` her hedef sistemi
+    /// listeler (tek hedefe atlamaz), satir tarama ekranina gider ve rozet
+    /// sahiplenmeyi bekleyen hesabi gosterir; `auditor` de okur.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn the_hub_lists_every_target_system_and_every_operator_reads_it() {
+        use axum::body::Body;
+        use axum::http::{header, Request, StatusCode};
+        use tower::ServiceExt;
+
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        let app = crate::web::routes()
+            .with_state(crate::web::test_state(pool.clone(), "https://localhost"));
+        // AD ve Zimbra satirlari migration'da seed ediliyor (0005_catalog.sql)
+        let targets = crate::org::list_targets(&pool).await.unwrap();
+        assert!(targets.len() >= 2, "hedef sistemler seed'den gelmeli");
+
+        let operator = crate::operator_session::Operator {
+            subject: "sub-x".to_string(),
+            username: "denetci".to_string(),
+            email: "denetci@example.org".to_string(),
+            authorities: vec!["auditor".to_string()],
+            auth_source: crate::operator_session::AuthSource::Oidc,
+            lang: crate::i18n::DEFAULT,
+        };
+        let token = crate::operator_session::create_session(&pool, &operator)
+            .await
+            .unwrap();
+        let r = app
+            .oneshot(
+                Request::builder()
+                    .uri("/reconcile")
+                    .header(
+                        header::COOKIE,
+                        format!("{}={token}", crate::cookie::OPERATOR_SESSION_COOKIE_NAME),
+                    )
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(r.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let page = String::from_utf8(body.to_vec()).unwrap();
+        for t in &targets {
+            assert!(
+                page.contains(&format!(r#"href="/targets/{}/reconcile""#, t.id)),
+                "hedef satiri yok: {}",
+                t.name
+            );
+        }
+        // Menude Mutabakat maddesi var ve hedef listesi Raporlar'da degil
+        assert!(page.contains(r#"href="/reconcile""#), "menü maddesi yok");
+        let reports = crate::web::routes()
+            .with_state(crate::web::test_state(pool.clone(), "https://localhost"))
+            .oneshot(
+                Request::builder()
+                    .uri("/reports")
+                    .header(
+                        header::COOKIE,
+                        format!("{}={token}", crate::cookie::OPERATOR_SESSION_COOKIE_NAME),
+                    )
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(reports.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let reports = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            !reports.contains(r#"href="/targets/1/reconcile""#),
+            "mutabakat satiri Raporlar'da kaldı"
+        );
+
         drop(pool);
         crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
     }

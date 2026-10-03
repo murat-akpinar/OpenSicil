@@ -128,6 +128,9 @@
   // Yolu en uzun eşleşen gezinme bağlantısı aktif olur; kimlik sayfaları "/" altında.
   function activeNav() {
     var path = window.location.pathname;
+    // Tarama ekranları adres olarak /targets altında kaldı (ADR-123 madde 3),
+    // menüde ise Mutabakat maddesine aittir.
+    if (/^\/targets\/\d+\/reconcile(\/|$)/.test(path)) path = "/reconcile";
     var best = null;
     var bestLength = -1;
     var links = document.querySelectorAll(".side .nav-link");

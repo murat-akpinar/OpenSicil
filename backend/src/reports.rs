@@ -1,8 +1,12 @@
 // --- START FEATURE: reports ---
-// Raporlar girisi: mutabakat (hedef sistem basina), yaklasan bitisler ve
-// kullanilmis adlar tek sayfada toplanir. Kendi verisi yok — var olan ekranlara
-// giden bir kapak; menudeki uc dagınık madde yerine mockup'taki tek "Raporlar"
-// satirini karsilar. Okuma her operatorde (auditor dahil).
+// Raporlar girisi: yaklasan bitisler, kullanilmis adlar, silinmeyi bekleyenler
+// ve mudahale bekleyen isler tek sayfada toplanir. Kendi verisi yok — var olan
+// ekranlara giden bir kapak; menudeki dagınık maddeler yerine mockup'taki tek
+// "Raporlar" satirini karsilar. Okuma her operatorde (auditor dahil).
+//
+// Mutabakat burada degil: ADR-123 ile kendi menu maddesine ve `/reconcile`
+// sayfasina tasindi. "Bekleyen is" kutusu sahiplenmeyi bekleyen hesabi yine
+// sayar — kutu "bugun yapacak ne var" diye sorar, "Raporlar'da ne var" diye degil.
 
 use askama::Template;
 use axum::extract::State;
@@ -16,17 +20,6 @@ use crate::identity_web::{internal, OperatorSession};
 use crate::shell::Shell;
 use crate::web::{render, AppState};
 
-/// Mutabakat satiri: hedef sistem adi, tarama ekraninin adresi, sahiplenmeyi
-/// bekleyen hesap sayisi ve son taramanin zamani (ADR-117 D).
-pub struct TargetLink {
-    pub id: i64,
-    pub name: String,
-    /// Sahiplenmeyi bekleyen hesap; sifirsa rozet soluk
-    pub pending: i64,
-    /// Son mutabakat taramasinin zamani; hic taranmadiysa bos
-    pub scanned: String,
-}
-
 /// Kapak sayfasinin ozet kutulari ve satir rozetleri. Hepsi var olan
 /// tablolardan okunur, yeni migration yok.
 pub struct Summary {
@@ -38,14 +31,11 @@ pub struct Summary {
     pub pending_foot: String,
     pub interventions: i64,
     pub deletions: i64,
-    pub unadopted: i64,
     /// Yaklasan bitisler ve pencerenin gun sayisi
     pub upcoming: i64,
     pub upcoming_days: i32,
     /// Serbest birakilmamis kullanilmis ad
     pub used_names: i64,
-    /// Hedefler arasindaki en yeni mutabakat taramasi; hic yoksa bos
-    pub last_reconcile: String,
 }
 
 #[derive(Template)]
@@ -53,7 +43,6 @@ pub struct Summary {
 struct ReportsTemplate {
     lang: Lang,
     shell: Shell,
-    targets: Vec<TargetLink>,
     summary: Summary,
 }
 
@@ -65,40 +54,16 @@ async fn page(OperatorSession(op): OperatorSession, State(state): State<AppState
     // Sayilar gidilecek ekranlarin kendi yardimcilarindan okunur, kopya SQL yok:
     // rozet "3" diyorsa liste uc satir gostermek zorunda.
     let loaded = tokio::try_join!(
-        crate::org::list_targets(&state.pool),
         counts(&state.pool),
         crate::reconcile::unadopted(&state.pool),
-        crate::org::last_read_job(&state.pool, &state.time_zone, RECONCILE_JOB),
         crate::deletions::awaiting_count(&state.pool),
         crate::upcoming::list(&state.pool, &state.time_zone, crate::upcoming::DEFAULT_DAYS),
     );
-    let (rows, counts, unadopted, scans, deletions, upcoming) = match loaded {
+    let (counts, unadopted, deletions, upcoming) = match loaded {
         Ok(loaded) => loaded,
         Err(e) => return internal("raporlar sayfası okunamadı", e),
     };
-    let targets: Vec<TargetLink> = rows
-        .into_iter()
-        .map(|t| TargetLink {
-            pending: unadopted
-                .iter()
-                .find(|u| u.target_id == t.id)
-                .map_or(0, |u| u.count),
-            scanned: scans
-                .iter()
-                .find(|(id, ..)| *id == t.id)
-                .map_or(String::new(), |(_, _, at, _)| at.clone()),
-            id: t.id,
-            name: t.name,
-        })
-        .collect();
     let unadopted: i64 = unadopted.iter().map(|u| u.count).sum();
-    // En yeni tarama: zamanlar `YYYY-MM-DD HH24:MI`, sozluk sirasi zaman sirasi
-    let last_reconcile = scans
-        .iter()
-        .map(|(_, _, at, _)| at.as_str())
-        .max()
-        .unwrap_or_default()
-        .to_string();
     render(&ReportsTemplate {
         lang: op.lang,
         shell: Shell::of(&op),
@@ -114,18 +79,12 @@ async fn page(OperatorSession(op): OperatorSession, State(state): State<AppState
             ),
             interventions: counts.interventions,
             deletions,
-            unadopted,
             upcoming: upcoming.len() as i64,
             upcoming_days: crate::upcoming::DEFAULT_DAYS,
             used_names: counts.used_names,
-            last_reconcile,
         },
-        targets,
     })
 }
-
-/// `read_jobs.kind`in mutabakat degeri (0016_read_jobs.sql CHECK listesi).
-const RECONCILE_JOB: &str = "reconcile";
 
 struct Counts {
     interventions: i64,
@@ -163,17 +122,14 @@ mod tests {
         let page = ReportsTemplate {
             lang: crate::i18n::DEFAULT,
             shell: Shell::from_parts("admin", &["admin".to_string()]),
-            targets: Vec::new(),
             summary: Summary {
                 pending: 26,
                 pending_foot: String::new(),
                 interventions: 1,
                 deletions: 2,
-                unadopted: 23,
                 upcoming: 0,
                 upcoming_days: 30,
                 used_names: 0,
-                last_reconcile: String::new(),
             },
         }
         .render()
@@ -191,20 +147,5 @@ mod tests {
             row.contains(">1<") && !row.contains(">26<"),
             "mudahale satiri kendi sayisini gostermeli: {row}"
         );
-    }
-
-    #[tokio::test]
-    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
-    async fn the_hub_lists_every_target_system_for_reconciliation() {
-        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
-        // AD ve Zimbra satirlari migration'da seed ediliyor (0005_catalog.sql)
-        let targets = crate::org::list_targets(&pool).await.unwrap();
-        assert!(
-            targets.len() >= 2,
-            "hedef sistemler seed'den gelmeli: {}",
-            targets.len()
-        );
-        drop(pool);
-        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
     }
 }

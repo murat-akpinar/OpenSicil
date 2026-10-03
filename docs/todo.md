@@ -807,6 +807,27 @@ Kurallar:
 
 ---
 
+## Mutabakat kendi menü maddesi ([ADR-123](decisions/123-mutabakat-kendi-menu-maddesi.md))
+
+> Kullanıcı isteği (2026-10-03): "raporlar bölümünde mutabakat kısmını solda bir menü olarak yap, Rapor sayfası ile bir alakası yok gibi oranın." Karar: mutabakat Raporlar'dan tamamen çıkar ve kenar çubuğunda kendi maddesi olur; tarama ekranlarının adresi değişmez ([ADR-123](decisions/123-mutabakat-kendi-menu-maddesi.md)). [ADR-119](decisions/119-roller-kart-izgarasi-departman-seviye-rengi.md) C'nin "Mutabakat kartı kalkar" hükmü bu kutucukta uygulanır, C'nin kalanı spec beklemeye devam eder.
+
+- [x] Mutabakat kenar çubuğuna girer, `/reports`tan çıkar
+  - Kabul: kenar çubuğunda Departmanlar ile Raporlar arasında "Mutabakat" maddesi (`/reconcile`); etiket `reconcile.title`, yeni i18n anahtarı yok
+  - Kabul: `/reconcile` hedef sistem başına satır basar (ad, son tarama zamanı, sahiplenmeyi bekleyen hesap rozeti); her operatör okur (`auditor` dahil), tek hedefe otomatik atlama yok
+  - Kabul: `/targets/{id}/reconcile` ve POST alt rotaları aynı adreste kalır; o sayfadayken kenar çubuğunda "Mutabakat" maddesi aktif görünür (şablon başına plumbing yok, `app.js` tek satır)
+  - Kabul: `/reports`ta ne "Mutabakat" kartı ne "Son mutabakat" özet kutusu kalır; kalan iki kutu ve "Listeler" kartı tek sütuna geçer, sayfa alt başlığı mutabakattan söz etmez
+  - Kabul: "Bekleyen iş" kutusu sahiplenmeyi bekleyen hesabı saymaya devam eder (ADR-123 madde 5)
+  - Kabul: yeni sorgu/tablo/migration yok — sayfa `org::list_targets`, `reconcile::unadopted` ve `org::last_read_job`'dan okur
+  - Kabul: `sh scripts/build-css.sh` → `sh scripts/check-glyphs.sh` → backend testleri → `sh scripts/ui-shots.sh` "bulgu yok"
+  - Not (2026-10-03): `reconcile::hub` + `reconcile_hub.html`; `TargetLink` `reports.rs`'ten mutabakat modülüne taşındı. Etiket için yeni anahtar açılmadı (`reconcile.title` zaten "Mutabakat"/"Reconciliation"); `reports.reconcile` düştü, `reports.reconcile_hint` → `reconcile.hub_hint`. `reports.rs` küçüldü: hedef listesi, son tarama zamanı ve `Summary.unadopted` alanı kalktı — `pending` toplamı sahiplenmeyi saymaya devam ediyor (ADR-123 madde 5), kırılımı `pending_foot` cümlesi taşıyor
+  - Not (menü vurgusu): adres taşınmadı, `app.js` `activeNav` tek satırla `/targets/<id>/reconcile*` yolunu `/reconcile` sayıyor — şablon başına plumbing yok (ADR-096 notunun kuralı). Altı rotayı ve form `action`'larını taşımanın kazancı kozmetikti; adresler "URL'de id yerine okunur ad" kutucuğunun işi
+  - Not (betik bulgusu): `scripts/ui-shots.mjs` hedefleri `a[href$="/reconcile"]` ile buluyordu, menü maddesi de o desene uyunca `/targets/undefined/reconcile` çekmeye çalışıp TOFU/FONT bulgusu veriyordu (nginx hata sayfası). Seçici `a[href^="/targets/"][href$="/reconcile"]` oldu
+  - Doğrulama (2026-10-03): backend **234 test** (gerçek Postgres `--include-ignored` + lab Keycloak + lab Samba; mutabakat kapak testi `reports.rs`'ten `reconcile.rs`'e taşındı ve büyüdü: `auditor` `/reconcile`i okuyor, iki hedef de satır olarak çıkıyor, menü maddesi basılıyor ve `/reports`ta mutabakat satırı kalmıyor), fmt + clippy `-D warnings` temiz, yeni migration ve yeni bağımlılık yok. `sh scripts/build-css.sh` (81692 bayt — mutabakat kartının sınıfları düştü) ve `sh scripts/check-glyphs.sh` temiz
+  - Not (i18n): `reconcile.never_scanned` zaten vardı (detay sayfasının uzun boş-durum cümlesi), yeni satır anahtarları `reconcile.hub_never_scanned`/`reconcile.hub_scanned_at` oldu — `i18n::tests::no_duplicate_keys` çakışmayı yakalardı. `reports.last_reconcile` kullanan ekran kalmadığı için silindi
+  - Doğrulama (**çalışan yığın, tarayıcıda ölçüldü**): `/reconcile` iki satır — Active Directory (`Son tarama: 2026-10-03 13:06`, rozet 25) ve Zimbra (`Henüz taranmadı`, rozet 0); kenar çubuğunda Mutabakat maddesi Departmanlar ile Raporlar arasında ve sayfada aktif. `/targets/1/reconcile`e girildiğinde **yine Mutabakat** aktif (app.js kuralı çalışıyor). `/reports` iki özet kutusu + tek "Listeler" kartı, mutabakata dair satır yok; alt başlık "Tarihli listeler ve bekleyen işler", "Bekleyen iş" 25 ve kırılımı "0 müdahale · 0 silme onayı · 25 sahiplenme". `sh scripts/ui-shots.sh tmp/ekran-goruntuleri/18-mutabakat-menu` 14 sayfa × iki tema × 1440/390px çekti ve **"bulgu yok"** dedi
+
+---
+
 ## Ek Hedef Sistem: Zimbra
 
 > **Beklemede (kullanıcı kararı, 2026-10-02):** "Zimbra dursun, onu proje bitince bakacağım bir şey." Lab Zimbra'sı bir altyapı kararı ister (ADR-069: üçüncü taraf 10.1 derlemesi ya da ayrı VM) ve bu bölümün ilk kutucuğu ona bağlı; kullanıcı açıkça erteledi, kendi başına seçilmez.
