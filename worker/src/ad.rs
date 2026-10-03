@@ -570,6 +570,9 @@ pub struct DirectoryAccount {
     /// AD'nin serbest metin `department` degeri; departman agacina ad
     /// eslesmesiyle baglanir (ADR-102), burada ham metin durur.
     pub department: Option<String>,
+    /// Hesabin unvani (`title`): rolun AD karsiligi `roles.title` kolonunda
+    /// durur (ADR-120 madde 5), eslestirme rol adi uzerinden yapilmaz.
+    pub title: Option<String>,
     /// Kisinin dizindeki e-postasi; sahiplenmede worker zaten AD'den okuyup
     /// bos alanlari dolduruyor (ADR-086), bu deger ekranda "AD'de ne var"
     /// sorusunu cevaplar (ADR-106).
@@ -587,7 +590,7 @@ pub struct DirectoryAccount {
     pub national_id: Option<String>,
 }
 
-const ACCOUNT_ATTRS: [&str; 14] = [
+const ACCOUNT_ATTRS: [&str; 15] = [
     "objectGUID",
     "sAMAccountName",
     "displayName",
@@ -601,6 +604,7 @@ const ACCOUNT_ATTRS: [&str; 14] = [
     // 29'unda `employeeNumber`, 0'inda `employeeID` dolu — ADR-106).
     "employeeNumber",
     "department",
+    "title",
     "mail",
     "mobile",
     "telephoneNumber",
@@ -670,6 +674,7 @@ fn to_account(entry: &SearchEntry, national_id_attr: Option<&str>) -> Option<Dir
         employee_number: text_attr(entry, "employeeID")
             .or_else(|| text_attr(entry, "employeeNumber")),
         department: text_attr(entry, "department"),
+        title: text_attr(entry, "title"),
         mail: text_attr(entry, "mail"),
         mobile: text_attr(entry, "mobile"),
         telephone: text_attr(entry, "telephoneNumber"),

@@ -674,8 +674,8 @@ mod tests {
     /// ADR-112 madde 2 + ADR-120: liste yalnizca ikisi de dolu ve **gercekten**
     /// farkli alanlari basar, `auditor` okur ama alamaz, secilmeyen satir
     /// degismez ve alinan deger denetime once/sonra girer. Mukerrer sicil
-    /// yazilmaz; departman ada gore eslesirse yazilir ve is acar, eslesmezse
-    /// atlanir.
+    /// yazilmaz; departman ada, rol `roles.title` unvanina gore eslesirse
+    /// yazilir ve is acar, eslesmezse atlanir.
     #[tokio::test]
     #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
     async fn ad_diff_list_is_read_by_everyone_but_only_authority_takes_the_value() {
@@ -714,6 +714,20 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
+        // ADR-120 madde 5: eslestirme rolun adi degil unvani uzerinden.
+        // Iki kimligin rolu "Test Rolü" (unvani "Uzman"); Ayse'nin AD'deki
+        // unvani ikinci rolun unvani, Ali'nin unvaninin karsiligi yok.
+        sqlx::query("UPDATE roles SET title = 'Uzman' WHERE name = 'Test Rolü'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let second_role: i64 = sqlx::query_scalar(
+            "INSERT INTO roles (kind, name, title) \
+             VALUES ('primary', 'İkinci Rol', 'Kıdemli Uzman') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         // Ayse: sicil, cep ve departmanda gercek fark; AD'deki departman adi
         // kucuk harfle yazilmis, agacta yine eslesir. Ali: sicil bastaki sifir
         // farkiyla ayni, cep kimlikte bos (dolumun isi), AD'deki deger sabit hat
@@ -721,11 +735,11 @@ mod tests {
         sqlx::query(
             "INSERT INTO reconcile_findings (target_system_id, read_job_id, kind, external_id, \
              account_name, identity_id, employee_number, mobile, telephone_number, \
-             department_name) VALUES \
+             department_name, title) VALUES \
              ($1, $2, 'managed', 'g1', 'ayse.yilmaz', $3, '00000000009', '+447700900009', NULL, \
-              'ikinci birim'), \
+              'ikinci birim', 'kıdemli uzman'), \
              ($1, $2, 'observed', 'g2', 'ali.kaya', $4, '00000000009', NULL, '01632 960001', \
-              'Olmayan Birim')",
+              'Olmayan Birim', 'Olmayan Unvan')",
         )
         .bind(target)
         .bind(read_job)
@@ -822,11 +836,12 @@ mod tests {
             hr_page.contains(&format!(r#"value="{ayse}.mobile_phone""#)),
             "satır kutusunun değeri kimlik+alan anahtarı değil"
         );
-        // Tam dort satir: Ayse'nin sicil, cep ve departmani + Ali'nin departmani.
-        // Ali'nin sicili (bastaki sifir farki) ve cebi (kimlikte bos) girmez.
+        // Tam alti satir: Ayse'nin sicil, cep, departman ve rolu + Ali'nin
+        // departman ve rolu. Ali'nin sicili (bastaki sifir farki) ve cebi
+        // (kimlikte bos) girmez.
         assert_eq!(
             hr_page.matches(r#"name="diff""#).count(),
-            4,
+            6,
             "listede olmaması gereken satır var"
         );
 
@@ -924,6 +939,48 @@ mod tests {
             vec![ayse],
             "departman alımı iş açmadı ya da fazla açtı"
         );
+
+        // ADR-120 madde 5: rol de ada degil unvana gore eslesir — Ayse'nin
+        // AD'deki unvani ikinci rolun unvani, Ali'nin unvaninin karsiligi yok.
+        // Rol alimi da hedefe is acar: acik is `jobs::enqueue`'da tekilleniyor,
+        // o yuzden kuyruk bosaltilip yeniden bakiliyor.
+        sqlx::query("DELETE FROM jobs")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let (status, page) = send(
+            "POST",
+            cookie("hr").await,
+            format!("diff={ayse}.role&diff={ali}.role"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let role_of = |id: i64| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_scalar::<_, i64>("SELECT primary_role_id FROM identities WHERE id = $1")
+                    .bind(id)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap()
+            }
+        };
+        assert_eq!(role_of(ayse).await, second_role);
+        assert_ne!(
+            role_of(ali).await,
+            second_role,
+            "ağaçta karşılığı olmayan unvan yazıldı"
+        );
+        assert!(
+            page.contains("Olmayan Unvan"),
+            "atlanan rol unvanıyla duyurulmadı"
+        );
+        let jobs: Vec<i64> = sqlx::query_scalar("SELECT identity_id FROM jobs ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(jobs, vec![ayse], "rol alımı iş açmadı ya da fazla açtı");
+
         let taken_fields: Vec<String> = sqlx::query_scalar(
             "SELECT detail->>'field' FROM audit_log WHERE event_type = $1 ORDER BY id",
         )
@@ -931,7 +988,7 @@ mod tests {
         .fetch_all(&pool)
         .await
         .unwrap();
-        assert_eq!(taken_fields, vec!["mobile_phone", "department"]);
+        assert_eq!(taken_fields, vec!["mobile_phone", "department", "role"]);
         let detail: (String, String) = sqlx::query_as(
             "SELECT detail->>'from', detail->>'to' FROM audit_log \
              WHERE event_type = $1 AND detail->>'field' = 'department'",

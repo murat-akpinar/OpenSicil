@@ -171,4 +171,5 @@
 - Katalog OU'ları kapsam köklerinin altından keşfedilir
 - AD fark listesine departman girer, alım hedefe iş açar
 - Kayıp hesabın bağlantısı kaldırılabilir, kimlik yeniden sahiplenilir
+- AD fark listesine rol girer, yer tutucu rol unvandan dolar
 

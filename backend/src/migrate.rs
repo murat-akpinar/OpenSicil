@@ -123,7 +123,8 @@ GRANT SELECT, DELETE ON identity_additional_roles TO {worker};
 GRANT SELECT ON identities TO {backend}, {worker};
 GRANT INSERT ({identity_operator_cols}), UPDATE ({identity_operator_cols}) ON identities TO {backend};
 GRANT UPDATE (username, email, upn, given_name, surname, employee_number, mobile_phone, \
-national_id_enc, national_id_bidx, national_id_country, deleted_at) ON identities TO {worker};
+national_id_enc, national_id_bidx, national_id_country, deleted_at, primary_role_id) \
+ON identities TO {worker};
 GRANT SELECT ON target_systems, catalog_items TO {backend}, {worker};
 GRANT UPDATE (provision_account_default, default_container_item_id, retention_days, \
 delete_requires_approval, password_reset_delay_days) ON target_systems TO {backend};

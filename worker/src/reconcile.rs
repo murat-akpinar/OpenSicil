@@ -39,6 +39,9 @@ pub struct Finding {
     pub surname: Option<String>,
     pub employee_number: Option<String>,
     pub department_name: Option<String>,
+    /// AD'deki unvan (`title`); rol dolumu ve fark listesi bunu `roles.title`
+    /// ile eslestirir (ADR-120 madde 5)
+    pub title: Option<String>,
     /// AD'deki iletisim alanlari (ADR-106): ekran "hangi hesapta hangi alan
     /// geldi" sorusunu cevaplar, toplu sahiplenme telefonu buradan alir.
     pub mail: Option<String>,
@@ -96,6 +99,7 @@ pub fn compare(accounts: &[DirectoryAccount], links: &[Link]) -> Vec<Finding> {
                 surname: account.surname.clone(),
                 employee_number: account.employee_number.clone(),
                 department_name: account.department.clone(),
+                title: account.title.clone(),
                 mail: account.mail.clone(),
                 mobile: account.mobile.clone(),
                 telephone: account.telephone.clone(),
@@ -125,6 +129,7 @@ fn missing_finding(link: &Link) -> Finding {
         surname: None,
         employee_number: None,
         department_name: None,
+        title: None,
         mail: None,
         mobile: None,
         telephone: None,
@@ -177,10 +182,10 @@ pub async fn store(
         sqlx::query(
             "INSERT INTO reconcile_findings (target_system_id, read_job_id, kind, \
              external_id, account_name, display_name, container, enabled, identity_id, \
-             given_name, surname, employee_number, department_name, mail, mobile, \
+             given_name, surname, employee_number, department_name, title, mail, mobile, \
              telephone_number, when_created, national_id_enc) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, \
-             $17::date, $18)",
+             $17, $18::date, $19)",
         )
         .bind(target)
         .bind(read_job_id)
@@ -195,6 +200,7 @@ pub async fn store(
         .bind(&finding.surname)
         .bind(&finding.employee_number)
         .bind(&finding.department_name)
+        .bind(&finding.title)
         .bind(&finding.mail)
         .bind(&finding.mobile)
         .bind(&finding.telephone)
@@ -312,6 +318,31 @@ pub async fn fill_linked_identities(pool: &PgPool, target: i64) -> Result<usize,
     tx.commit().await.map_err(|e| e.to_string())?;
     Ok(filled)
 }
+
+// Yer tutucu rolun dolumu (ADR-120 madde 5): AD'nin `title` degeri agacta bir
+// birincil rolun unvaniysa yazilir. Eslestirme rol **adi** uzerinden degil
+// `roles.title` kolonu uzerinden yapilir — o kolon rolun AD karsiligidir.
+// Unvan iki rolde duruyorsa (`title` tekil degil) `HAVING count(*) = 1`
+// eslesmeyi yok sayar, hangisi oldugu tahmin edilmez.
+//
+// `fill_linked_identities` ile ayni seritte (ADR-051): hedefe yazilmaz, is
+// acilmaz. Dolan rol yer tutucunun yerine gectigi icin AD'deki `title` ile
+// zaten uyumludur; hak seti farki ilk isin hesabina girer.
+const FILL_ROLE_SQL: &str = "WITH filled AS (     UPDATE identities i SET primary_role_id = m.role_id FROM (         SELECT f.identity_id,                (SELECT max(r.id) FROM roles r                   WHERE r.kind = 'primary' AND NOT r.placeholder                     AND lower(btrim(r.title)) = lower(btrim(f.title))                   HAVING count(*) = 1) AS role_id           FROM reconcile_findings f          WHERE f.target_system_id = $1 AND btrim(coalesce(f.title, '')) <> ''     ) m     WHERE i.id = m.identity_id AND m.role_id IS NOT NULL AND i.deleted_at IS NULL       AND EXISTS (SELECT 1 FROM roles p WHERE p.id = i.primary_role_id AND p.placeholder)     RETURNING i.id)     INSERT INTO audit_log (event_type, identity_id, target_system_id, detail)     SELECT $2, id, $1, '{\"fields\":[\"primary_role\"]}'::jsonb FROM filled";
+
+/// Birincil rolu yer tutucu (`Tanimsiz`) olan bagli kimliklerin rolu, AD'deki
+/// unvanin agactaki karsiligiyla dolar. Yer tutucu "bos" sayilir (ADR-112
+/// madde 1); gercek bir rol duruyorsa dokunulmaz — ikisi de doluysa karar
+/// operatorun, satir fark listesine girer. Doner: rolu dolan kimlik sayisi.
+pub async fn fill_placeholder_roles(pool: &PgPool, target: i64) -> Result<u64, String> {
+    Ok(sqlx::query(FILL_ROLE_SQL)
+        .bind(target)
+        .bind(FILLED_EVENT)
+        .execute(pool)
+        .await
+        .map_err(|e| format!("rol dolumu yapılamadı: {e}"))?
+        .rows_affected())
+}
 // --- END FEATURE: reconcile ---
 
 #[cfg(test)]
@@ -330,6 +361,7 @@ mod tests {
             surname: Some("Hogwarts".to_string()),
             employee_number: None,
             department: Some("Teachers".to_string()),
+            title: None,
             mail: Some(format!("{sam}@hogwarts.local")),
             mobile: None,
             telephone: Some("01632 960001".to_string()),
@@ -467,6 +499,115 @@ mod tests {
             vec!["username", "employee_number"]
         );
         assert!(filled_field_names(&PersonValues::default()).is_empty());
+    }
+
+    // ADR-120 madde 5: yer tutucu rol "bos" sayilir ve AD'deki unvanin agactaki
+    // karsiligindan dolar; gercek bir rol duruyorsa dokunulmaz, unvan iki role
+    // karsilik geliyorsa eslesme yok sayilir.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn the_scan_fills_a_placeholder_role_from_the_directory_job_title() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        let seed = crate::test_support::seed_example_model(&pool).await;
+        let read_job: i64 = sqlx::query_scalar(
+            "INSERT INTO read_jobs (kind, target_system_id, requested_by) \
+             VALUES ('reconcile', $1, 'test') RETURNING id",
+        )
+        .bind(seed.ad)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let placeholder: i64 = sqlx::query_scalar("SELECT id FROM roles WHERE placeholder")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let expected: i64 =
+            sqlx::query_scalar("SELECT id FROM roles WHERE title = 'Sistem Uzmanı'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        // Ayse AD'den sahiplenilmis gibi yer tutucu rolde; Ali'nin rolu gercek
+        let set_placeholder = |id: i64| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query("UPDATE identities SET primary_role_id = $2 WHERE id = $1")
+                    .bind(id)
+                    .bind(placeholder)
+                    .execute(&pool)
+                    .await
+                    .unwrap();
+            }
+        };
+        set_placeholder(seed.identity).await;
+
+        // Ayse'nin unvani yazim farkiyla ayni role isaret ediyor, Ali'nin
+        // unvaninin agacta karsiligi yok (zaten gercek rolu de var)
+        let mut ayse = account("g-1", "ayse.yilmaz", true);
+        ayse.title = Some("  sistem uzmanı ".to_string());
+        let mut ali = account("g-2", "ali.kaya", true);
+        ali.title = Some("Olmayan Unvan".to_string());
+        let links = [
+            link("g-1", MANAGED, seed.identity, "?"),
+            link("g-2", OBSERVED, seed.other_identity, "?"),
+        ];
+        let findings = compare(&[ayse, ali], &links);
+        store(
+            &pool,
+            seed.ad,
+            read_job,
+            &findings,
+            &[9u8; crate::crypto::KEY_LEN],
+        )
+        .await
+        .unwrap();
+
+        let role_of = |id: i64| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_scalar::<_, i64>("SELECT primary_role_id FROM identities WHERE id = $1")
+                    .bind(id)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap()
+            }
+        };
+        assert_eq!(fill_placeholder_roles(&pool, seed.ad).await.unwrap(), 1);
+        assert_eq!(role_of(seed.identity).await, expected);
+        assert_eq!(
+            role_of(seed.other_identity).await,
+            expected,
+            "gerçek rol AD'deki unvandan değişmez"
+        );
+        let detail: String = sqlx::query_scalar(
+            "SELECT detail::text FROM audit_log WHERE event_type = $1 AND identity_id = $2",
+        )
+        .bind(FILLED_EVENT)
+        .bind(seed.identity)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(detail.contains("primary_role"), "{detail}");
+
+        assert_eq!(
+            fill_placeholder_roles(&pool, seed.ad).await.unwrap(),
+            0,
+            "yer tutucu kalmadi, ikinci tarama dolum yapmaz"
+        );
+
+        // Unvan iki role karsilik geliyorsa eslesme yok sayilir (ad tekil,
+        // unvan degil): yer tutucu yerinde kalir
+        sqlx::query(
+            "INSERT INTO roles (kind, name, title) VALUES ('primary', 'İkinci', 'Sistem Uzmanı')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        set_placeholder(seed.identity).await;
+        assert_eq!(fill_placeholder_roles(&pool, seed.ad).await.unwrap(), 0);
+        assert_eq!(role_of(seed.identity).await, placeholder);
+
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
     }
 
     // ADR-112 madde 1 uctan uca: tarama bulgusundan bos alanlar dolar; dolu alan,

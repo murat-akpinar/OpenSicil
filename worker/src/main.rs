@@ -227,9 +227,11 @@ async fn run_reconcile(
         .map_err(|e| format!("mutabakat bulguları yazılamadı: {e}"))?;
     // ADR-112 madde 1: bulgular yazildiktan sonra bagli kimliklerin bos alanlari dolar
     let filled = reconcile::fill_linked_identities(pool, target).await?;
+    // ADR-120 madde 5: yer tutucu rol de "bos" sayilir, AD'deki unvandan dolar
+    let roles = reconcile::fill_placeholder_roles(pool, target).await?;
     Ok(format!(
         "{} hesap tarandı: {} yönetiliyor, {} gözlemde, {} yönetilmeyen, {} kayıp; \
-         {filled} kimlikte boş alan AD'den doldu",
+         {filled} kimlikte boş alan AD'den doldu, {roles} kimlikte rol unvandan doldu",
         accounts.len(),
         counts.managed,
         counts.observed,
