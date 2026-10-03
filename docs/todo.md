@@ -280,22 +280,6 @@ Kurallar:
   - Not (2026-10-01, security.md gözden geçirmesi): iki bulgu. (1) **Sır sızıntısı** — tarama `94dcff7`'de repoya girmiş `.env.yedek`'i yakaladı; dosya `86c9964`'te silinmiş ve `10c9484` `.gitignore`'a eklemiş, ama commit public `origin/main`'e push edilmiş durumda, yani üç Postgres parolası + `AEAD_MASTER_KEY` + `BLIND_INDEX_KEY` + `METRICS_TOKEN` yanmış sayılır. Geçmiş yeniden yazılmadı (`CLAUDE.md` force push'u yasaklıyor ve GitHub blob'u yine bir süre sunar); karar ve rotasyon [ADR-104](decisions/104-env-yedegi-public-repoya-push-edildi.md)'te, rotasyon aşağıdaki kendi bölümünde. Taramanın deseni de düzeltildi: eski desen `AEAD_MASTER_KEY=`/`BLIND_INDEX_KEY=` satırlarını hiç yakalamıyordu (`[_-]key|aead|bidx` eklendi, 1a şablonu ve `security.md` güncellendi). (2) `dashboard::setup_steps` 56 satıra çıkmıştı; `setup_step!` makrosuyla 44'e indi (açıklama anahtarı artık `concat!($key, "_hint")` — iki metin anahtarı ayrı yazılıp birbirinden sapmıyor). 50 satırı aşan üretim fonksiyonu kalmadı
   - Not: yetki kontrolleri servis katmanında (toplu sahiplenme `hr`/`admin`, yeniden tarama `role_admin`/`admin`, devreye alma kartının Yapılandırma düğmesi `Shell::is_admin`), SQL'de string birleştirme yok (`listed_select!` derleme anında `concat!`), denetim detayına kişisel veri girmiyor, panel yüzdeleri satır içi `style` yerine `.v-NN` sınıfıyla veriliyor (CSP)
 
-## Sır rotasyonu ([ADR-104](decisions/104-env-yedegi-public-repoya-push-edildi.md))
-
-> Fazlar arası iş, "Faz" olarak numaralanmaz. Arayüz mockup bölümünün kapanışı, `.env` yedeğinin public repoya push edilmiş olduğunu yakaladı. Geçmiş yeniden yazılmıyor; sızan değerler rotasyonla değersizleştirilir.
-
-- [ ] Sızan altı değer döndürülür ve `docs/09`'a "sır sızarsa" adımı girer
-  - Kabul: `AEAD_MASTER_KEY` ve `BLIND_INDEX_KEY` yeniden üretilir; AEAD ile şifreli tek gerçek değer `app_settings`'teki AD servis hesabı parolası (ölçüldü: `national_id_enc` dolu 0 satır, `first_passwords` 0 satır), o Yapılandırma sayfasından yeniden girilir — veritabanı silinmez
-  - Kabul: üç Postgres parolası yeniden üretilir; backend ve worker rolleri `migrate` alt komutunun `ALTER ROLE … PASSWORD` yolundan döner, şema sahibi rolü elle `ALTER ROLE`'le döner
-  - Kabul: `METRICS_TOKEN` yeniden üretilir (metrik ucu henüz yazılmadı, yalnızca değer)
-  - Kabul: rotasyondan sonra yığın ayakta, `/` 200 ve mutabakat taraması gerçek AD'ye yeniden bağlanabiliyor
-  - Kabul: `docs/09-kurulum.md`'ye "sır sızarsa" bölümü: hangi değer neyi açar, rotasyon sırası, AEAD anahtarı değişince neyin yeniden girilmesi gerektiği
-  - Not: yeni değerler `.env`'e yazılır, hiçbiri commit'lenmez; `.gitignore` `.env` ve `.env.yedek*`'i zaten kapsıyor
-  - Not (2026-10-01): **betik ve belge hazır, çalıştırma bekliyor.** `scripts/sir-rotasyonu.sh --onayla` altı değeri döndürür (`.env` tek `sed` geçişi; şema sahibi `ALTER ROLE CURRENT_USER PASSWORD` — `POSTGRES_PASSWORD` yalnızca ilk `initdb`'de okunduğu için etkisizdir; backend/worker rolleri `migrate` alt komutundan; sonra iki servis yeniden oluşturulur) ve `docs/09-kurulum.md` "Sır sızarsa" bölümü hangi değerin neyi açtığını, sırayı ve AEAD sonrası yeniden girilecekleri yazar. Veri kaybı freni: `national_id_enc` dolu kurulumda betik durur (v1'de yeniden şifreleme aracı yok, ADR-010). Ölçüldü: bu veritabanında `national_id_enc` 0 satır, `first_passwords` 0 satır
-  - Not (düzeltme): yukarıdaki kabul satırı "AEAD ile şifreli tek gerçek değer AD servis hesabı parolası" diyor, **eksik** — `app_settings`'te OIDC client secret de şifreli (`oidc_client_secret_enc` dolu). Rotasyondan sonra Yapılandırma sayfasından **ikisi** de yeniden girilir, yoksa OIDC girişi kapalı kalır
-  - Engel (2026-10-01): betiği Claude çalıştıramıyor — `.env` yazma ve rol parolası değiştirme auto-mode classifier tarafından reddediliyor (`Secret-Store Writes`), izin kuralı eklemek de (`Self-Modification`). Kullanıcı ya `.claude/settings.json`'a `"allow": ["Bash(sh scripts/sir-rotasyonu.sh*)"]` ekler ya da betiği kendi terminalinde çalıştırır
-  - Engel (2026-10-02, gece koşusu): yeniden denendi, aynı red (`Secret-Store Writes`; `.env` yedeği alma adımı da aynı sınıfa giriyor). Ölçüm (bu veritabanı): `national_id_enc` 0, `first_passwords` 0, 3 kimlik, 3 bağlantı — fren tetiklenmeyecek. `app_settings`'te şifreli iki sır var (AD servis parolası + OIDC client secret), ikisi de rotasyondan sonra yeniden girilecek. Kullanıcının terminalini bekliyor
-
 ## Gerçek Windows AD doğrulaması
 
 > Fazlar arası iş. Bugüne kadar bütün AD testleri `compose.lab.yaml`'daki **Samba**'ya karşı koştu; `tmp/lab-ad-notlari.md`'deki gerçek Windows Server AD'ye (192.168.1.231, `Hogwarts` örnek OU) hiç bağlanılmadı — kullanıcı 2026-10-01'de bunu sordu ve sıraya aldı. Host o gün ayaktaydı (389 ve 636 açık).
@@ -318,11 +302,9 @@ Kurallar:
   - Doğrulama (2026-10-01, gerçek AD): `scripts/e2e-hogwarts.sh` tek kullanımlık veritabanında gerçek binary'lerle koştu → **"29 hesap tarandı: 0 yönetiliyor, 0 gözlemde, 29 yönetilmeyen, 0 kayıp"**, denetim kaydında **0 worker niyet satırı** (hedefe yazılmadı). Aynı sonuç çalışan yığında da alındı ve `/targets/1/reconcile` ekranı tarayıcıda açılıp ekran görüntüsüne alındı: 29 Hogwarts hesabı ad, konteyner ve "etkin" durumuyla listeleniyor
   - Not (2026-10-01): ilk ekran görüntüsünde sayaç kutularının etiketi ve rakamı bitişik çıkıyordu ("yönetilmeyen29"); kutular panelin `.stat-head`/`.stat-label`/`.stat-value` yapısına alındı ve `View::boxes()` ile tek yerden üretiliyor
   - Doğrulama (2026-10-01): backend **149**, worker **92** test; worker testleri lab Samba + **gerçek Windows AD** (`AD_WIN_*`) ile koştu. Yeni testler: `compare` dört sınıfı ve sıralamayı doğruluyor, boş kurulumun ilk taraması 29 hesabı "yönetilmeyen" sayıyor, `container_of` kaçışlı virgülü atlıyor, lab Samba'da `mevcut.personel` kapsamda görünüyor ve kapsam dışı hesap taramaya girmiyor, ekran testi sayaçları + sıralamayı + açık iş tekilleştirmesini doğruluyor. fmt + clippy iki crate'te temiz; `sh scripts/build-css.sh` ve `sh scripts/check-glyphs.sh` çalıştırıldı
-- [ ] "Unexpire-Password hakkı olmadan parola sıfırlama" sorusu ölçülür ([ADR-019](decisions/019-ilk-parola-teslimi.md))
-  - Engel: lab servis hesabı `Domain Admins` üyesi, yani hak zaten var ([docs/11](11-dogrulama-notlari.md) W10)
-  - Kabul: `OU=Hogwarts`'a yalnızca "Reset user passwords" devredilmiş ikinci bir servis hesabıyla parola sıfırlanır; `pwdLastSet` kendiliğinden 0 oluyor mu ölçülür
-  - Kabul: evet ise bu hak [docs/05](05-active-directory.md#servis-hesabı-yetkileri) delegasyon tablosuna ve docs/09 ön koşullarına eklenir
-  - Not: replikasyon sorusu (W9) ikinci bir DC istiyor; bu lab'da ölçülemez, kapsam dışı bırakıldı
+> **Not (2026-10-03):** "Unexpire-Password" ölçümü ikinci bir servis hesabının devredilmiş haklarını istiyor; kutucuk dosyanın sonundaki **"Bende değil"** bölümüne taşındı.
+
+---
 
 ## Giriş: kendi ekranımız ([ADR-095](decisions/095-giris-kendi-ekranimiz-ad-bind-asil.md))
 
@@ -588,6 +570,184 @@ Kurallar:
 
 ---
 
+## Arayüz: cam yüzeyli turkuaz tema ([ADR-114](decisions/114-cam-yuzeyli-turkuaz-tema.md))
+
+> Kullanıcı isteği (2026-10-02): "OpenSicil'in tüm arayüzünü bu tasarıma çevir. Renkleri ve efektleri tarayıcıda canlı deneyip onayladım; değerleri birebir uygula." Kapsam CSS + şablon + `static/app.js`; son kutucukta salt-okunur sorgular için Rust'a da dokunulur (kullanıcı onayı, veri modeli ve migration değişmez). Kısıtlar: CSP satır içi stili yasaklıyor (ADR-088 madde 4), gövde fontu değişmez (ADR-067 madde 3 — değişse `.ico` glyph'leri tofu olurdu), TR/EN birlikte.
+>
+> Doğrulama her kutucukta aynı: `sh scripts/build-css.sh` → `sh scripts/check-glyphs.sh` → `cd backend && cargo test && cargo fmt --all -- --check && cargo clippy --all-targets -- -D warnings` → `sh scripts/ui-shots.sh tmp/ekran-goruntuleri/<kutu>` (yedi sayfa × iki tema × 1440/390px; betik yatay taşmayı ve tofu kutusunu kendisi ölçer).
+
+- [x] Değişkenler ve tipografi
+  - Kabul: koyu palet kullanıcının verdiği değerlerle, açık palet ADR-114 madde 2'nin AA'lı sürümüyle; üç tema bloğu (açık, `prefers-color-scheme`, `[data-theme]`) senkron
+  - Kabul: zemin ışıması üç radyal gradyan + `background-attachment: fixed`; `.card`/`.side`/`.topbar` `backdrop-filter: blur(18px) saturate(140%)`; `.card` 18px köşe
+  - Kabul: `.page`'in `max-w-7xl` sınırı kalkar, `/config` dahil bütün sayfalar tam genişlik (16px / md 28px yan boşluk, üst bar aynı hizada)
+  - Kabul: `--chart-1 … --chart-8` iki temada tanımlı; tipografi 12/14/16/20/28; gövde `font-family` dokunulmamış
+- [x] Ortak bileşenler ve yerleşim
+  - Kabul: buton üçlüsü (birincil / ikincil cam / hayalet), hiçbiri tam genişlik değil; hover + `focus-visible` + `disabled` durumları
+  - Kabul: input/select/checkbox cam zemin, 10px köşe, odakta vurgu halkası; checkbox'lar anahtar görünümünde
+  - Kabul: tabloda yapışkan başlık, satır hover'ı, sayı sağa + `tabular-nums`, sıfır soluk; rozetler hap biçimli ve anlamsal
+  - Kabul: kenar menüde aktif öğe soft zemin + sol vurgu çizgisi (`.nav-link-active` adı korunur, `app.js` onu yazıyor), dar ekranda ikon modu, mobilde çekmece
+  - Kabul: geçişler 150–200 ms ve `prefers-reduced-motion`a uyuyor
+- [x] Ana sayfa
+  - Kabul: dört sayaç kartı kendi renginde (turkuaz / yeşil / kırmızı / kehribar), 40px ikon halkası, 32px `tabular-nums` sayı, üst kenarda ışıma çizgisi, hover'da yükselme, kart tıklanabilir
+  - Kabul: pencere seçici tek parça segmentli kontrol
+  - Kabul: etkinlik akışı zaman çizgisi (ikonları bağlayan solan dikey çizgi, son satır hariç), 36px daire + iç halka, saat hap rozet; kart yanındaki sütunla eşit yükseklikte, taşarsa kart içinde kayıyor
+  - Kabul: donut ortasındaki "Toplam" sayıyla üst üste binmiyor, tek kategoride sade özet; departman dağılımı sıralı yatay bar; grafik renkleri `--chart-*`'tan
+  - Kabul: AD bandı `--ctp-info` renkleriyle ve sağında belirgin eylem butonu
+- [x] Diğer sayfalar
+  - Kabul: `/identities` araç çubuğu + avatar renkleri (app.js adı hash'ler) + satırın tamamı tıklanabilir + düzgün sayfalama bileşeni
+  - Kabul: `/roles` ve `/departments` başlığın sağında birincil buton, kişi sütununda oran çubuğu (app.js var olan `.v-NN` sınıfını yazar, satır içi stil yok), "Tanımsız" uyarı rozetli
+  - Kabul: `/departments` ağacında bağlantı çizgileri + aç/kapa (durum hatırlanır) + ağaç içi arama; kod monospace hap
+  - Kabul: `/reports` kartları sayfayı dolduruyor, ikon renkleri anlamsal
+  - Kabul: `/targets` geniş ekranda iki sütun, form 2 sütun grid, Kaydet sağ altta normal boy
+  - Kabul: `/config` `.card` dili + sol bölüm menüsü + 2 sütun alanlar + parolada "kayıtlı" rozeti + yapışkan kaydet çubuğu
+- [x] Panelin eksik verisi (salt-okunur sorgular)
+  - Kutu 1–4'te veri olmadığı için **atlanan** maddeler burada tamamlanır: sayaç kartı değişim rozeti ve sparkline, kart → filtrelenmiş liste, `/identities` filtre + sıralama, `/reports` satır sayıları ve mutabakatın son tarama bilgisi, donut dilimleri arası boşluk (`Slice::dash` kısaltılır), akıştaki saatin bugünkü olaylarda yalnızca saat olması (SQL `CASE`), rol türü başlığında kişi toplamı
+  - Kabul: sayaç kartlarında önceki döneme göre değişim rozeti; dördünde de son N günün sparkline'ı
+  - Kabul: `/identities` departman / rol / durum filtresi + sıralanabilir sütun başlıkları (sorgu parametresi, sayfalamayla tutarlı)
+  - Kabul: sayaç kartları ilgili filtrelenmiş listeye gidiyor
+  - Kabul: `/reports` satırlarında bekleyen kayıt sayısı rozeti; mutabakat satırlarında son tarama zamanı ve durumu
+  - Kabul: yeni migration yok, veri modeli değişmedi; kapsam ve kümülatif testler ≥ %80
+  - Not (2026-10-02): madde madde bitti — sayaç kartları kendi renginde, kıvılcımlı ve değişim rozetli (`7b70204`; `cards`/`spark`/`delta` saf fonksiyon, kartın `href`'i filtrelenmiş `/identities`'e gider), etkinlik akışı olay kategorisine göre renklenir ve bugünkü satırda yalnızca saat yazar (`ec390c2`; `when` SQL'de gün farkından türetilir), rol bölümü başlığında kişi/atama sayısı (`ae9c02c`), `/reports` kapağında özet kutuları, satır rozetleri ve mutabakatın son tarama zamanı (`c54b44d`, `4a77f34`; sayılar gidilecek ekranın kendi yardımcısından okunur, kopya SQL yok), `/identities` departman/rol/durum filtresi + sıralanabilir kolonlar (`ca6ef80`), panelde sütun yüksekliği ve eğilim çubukları (`a1da38a`), tablo/yapışkan başlık düzeltmeleri (`6f2231f`, `5feb382`, `82d5951`)
+  - Not (2026-10-02, son madde): halka dilimleri arasına boşluk girdi. `slices` yüzdeyi değil **çizilen** uzunluğu kısaltıyor (`SLICE_GAP = 2`, şerit kalınlığının yarısı kadar); `offset` kümülatif yüzdeden hesaplandığı için dilim yine bir öncekinin bittiği yerde başlar, boşluk kuyruktan gider. Tek dilimde boşluk 0 — halka sebepsiz kesik görünmesin. Yüzdesi sıfıra yuvarlanan dilim yine hiç çizilmez: bir birimlik nokta "görünür bir pay var" yanılgısı verirdi, efsane satırı gerçek sayıyı zaten söylüyor
+  - Doğrulama (2026-10-02): backend **222 test** (gerçek Postgres `--include-ignored` + lab Keycloak + lab Samba), fmt + clippy `-D warnings` temiz, kapsam satır **%94,31** (`cargo llvm-cov --fail-under-lines 80` geçti), yeni migration yok. `sh scripts/build-css.sh` (71660 bayt) ve `sh scripts/check-glyphs.sh` temiz; `sh scripts/ui-shots.sh tmp/ekran-goruntuleri/12-halka-boslugu` yedi sayfa × iki tema × 1440/390px çekti ve **"bulgu yok"** dedi (yatay taşma ve tofu kutusu yok). **Çalışan yığında:** backend yeniden kuruldu, beş servis sağlıklı, panelde rol halkasının iki dilimi arasındaki boşluk ekran görüntüsünde görünüyor
+- [x] Kapanış: güvenlik ve test
+  - (1a'daki kapanış şablonunun aynısı)
+  - Doğrulama (2026-10-02): backend **222** / worker **102** test geçti (gerçek Postgres `--include-ignored` + lab Keycloak + lab Samba; Hogwarts AD'ye hesap yazan `windows_ad_answers_open_questions` `--skip` — onay bekliyor), fmt + clippy `-D warnings` iki crate'te temiz, `cargo audit` yalnızca [ADR-073](decisions/073-cargo-audit-rsa-bulgusu-kabul-edilen-risk.md) `rsa` (worker 0); kapsam satır backend **%94,31** / worker **%93,20** (`cargo llvm-cov --fail-under-lines 80` ikisinde de geçti); imaj taraması dört imajda `Status: fixed` **yok** (backend 61, worker 59, migrate 61 — `affected`/`fix_deferred`/`will_not_fix`; **nginx 0**, [ADR-071](decisions/071-imaj-taramasi-temiz-tanimi.md)); sır sızıntısı taraması (`8bc623c..HEAD`, üretilen CSS ve CHANGELOG hariç) yalnızca alan adlarını (`people_key`), i18n anahtarlarını, `localStorage` anahtarlarını ve var olan lab-only test değerini yakaladı — yeni sır yok; `.env.example` env adlarıyla birebir (yalnızca lab/test ve compose'un kurduğu adlar dışarıda); `docs/MAP.md` güncel (bölüm yeni dosya açmadı); kodda TODO yok, şablonda satır içi stil ve CDN yok, `app.js`'te `innerHTML`/`eval` yok; 38 feature marker ↔ MAP birebir
+  - Güvenlik listesi bulgusu: dört fonksiyon 50 satırı aştı (`identity::page` 73, `identity_web::list_page` 99, `reports::page` 62, `reconcile::fill_linked_identities` 59). Dördünde de iç içe blok ≤ 3, parametre ≤ 5 ve dallanma 15'in altında; aşan tek şey ham satır sayısı (Rust'ın `match … return internal(…)` töreni, alan başına bir satırlık şablon, `bind` zinciri). Bölmek tek çağıranı olan yardımcılar üretirdi — [ADR-118](decisions/118-fonksiyon-uzunlugu-yerine-bilissel-karmasiklik.md) ile karara yazıldı: ölçü satır değil bilişsel karmaşıklık. `AssertSqlSafe` taraması temiz — `sort_clause` derleme zamanı sabiti döndürüyor, kullanıcı değeri yalnızca satır seçiyor
+  - Doğrulama (çalışan yığın): `docker compose build backend worker nginx migrate` sonrası imajlar değişmedi (HEAD çalışanla aynı), beş servis sağlıklı; `sh scripts/e2e-lab.sh` geçti (kayıt → AD'de pasif hesap (UAC 514) → "açıldı"; "kaydet ve ilk parolayı ver" **N-13 = 5 sn**, AD'de etkin hesap UAC 512); `sh scripts/ui-shots.sh tmp/ekran-goruntuleri/13-kapanis` 13 sayfa × iki tema × 1440/390px çekti ve **"bulgu yok"** dedi; `sh scripts/build-css.sh` (71660 bayt, commit'liyle aynı) ve `sh scripts/check-glyphs.sh` temiz; **duman testi** gerçek operatör oturumuyla 20 rota 200 (`/`, personel + `unassigned`/`days`, roller, departmanlar, hedefler, mutabakat, toplu yönetim, raporlar, silinmeyi bekleyenler, müdahaleler, Yapılandırma, içe aktarma + örnek CSV, arama, yaklaşan bitişler, kullanılmış adlar, kişi, eşlemeler), `/metrics` nginx'ten 404, backend ve worker log'unda hata yok
+## Roller, Departmanlar, Raporlar ([ADR-119](decisions/119-roller-kart-izgarasi-departman-seviye-rengi.md))
+
+> Kullanıcı isteği (2026-10-02): "Roller, Departmanlar ve Raporlar sayfalarını aşağıdaki gibi yap. Roller ve Departmanlar tasarımı tarayıcıda denenip onaylandı; Raporlar'ın tek sayfa akışı yeni." Değerler birebir uygulanır. Kısıtlar ADR-114'ün aynısı: CSP satır içi stil ve script yasak (ADR-088 madde 4), gövde ve `.ico` fontu dokunulmaz (ADR-067 madde 3, ADR-116), renkler `--ctp-*`'tan ve iki temada çalışır, TR/EN birlikte, backend'de olmayan veri uydurulmaz.
+>
+> **Sıra bağlayıcı:** Roller → Departmanlar → Raporlar, her sayfa ayrı commit. Doğrulama her kutucukta aynı: `sh scripts/build-css.sh` → `sh scripts/check-glyphs.sh` → `cd backend && cargo test && cargo fmt --all -- --check && cargo clippy --all-targets -- -D warnings` → `sh scripts/ui-shots.sh tmp/ekran-goruntuleri/<kutu>`.
+
+- [x] Roller: tür renkli bölüm + kart ızgarası ([ADR-119](decisions/119-roller-kart-izgarasi-departman-seviye-rengi.md) A)
+  - Kabul: bölüm `role-kind--base/--primary/--additional` sınıfını taşıyor ve `--rc`yi kuruyor (`--ctp-info` / `--ctp-accent` / `--ctp-accent-dim`); solda 3px solan çizgi, başlıkta 40px `.ico-tile`, "N rol" rozeti `--rc` renginde
+  - Kabul: tablo yerine `<ul class="role-grid">` / `<li class="role-card">`; şablonda `<table>` kalmıyor
+  - Kabul: kartta ad (14px/600), unvan (11px soluk, **adla aynıysa basılmıyor**), sağda kişi sayısı (22px/700 `tabular-nums`) + `--rc` oran çubuğu, altta kesikli çizgiyle "Verdiği grup: N"; kartın tamamı `/roles/<slug>`e giden bağlantı
+  - Kabul: kişi sayısı 0 olan kart `role-card--empty` (opacity .55, hover 1)
+  - Kabul: sıralama kişi sayısı azalan, eşitlikte ada göre — `org::role_sections` içinde, saf tablo testiyle
+  - Kabul: bölüm başlığının sağında "Kart / Liste" düğmesi (tercih `localStorage`) ve o bölümü süzen arama kutusu
+  - Kabul: `Tanımsız` kartı kesikli uyarı kenarlığı + sağ üstte kendi satırında "yer tutucu" rozeti (adla üst üste binmiyor)
+  - Kabul: boş türde ikon + açıklama + "`<Tür>` rol ekle" düğmesi; düğme `/roles?new=<tür>`e gidiyor, sayfa formu açık ve tür seçili basıyor
+  - Kabul: sayfa başında üç özet kutusu (tür rengiyle rol + kişi sayısı), `#role-<tür>` çapasına kayıyor
+  - Kabul: `ui-shots.sh` "bulgu yok" diyor; yeni migration yok
+  - Not (2026-10-02): tablo `<ul class="role-grid">`e döndü, `--rc` tür rengini bölümde tek yerde tutuyor. Sıralama `org::role_sections` içinde saf (SQL'in `ORDER BY r.name`i korunur, saf tablo testi var). `?new=<tür>` izinli listeden geçiyor (`role_kind_of`; test keyfi metni ve `BASE`i reddediyor) — form hata halinde de açık kalıyor. `.meter-thin` değerini artık `data-ratio` özniteliğinden okuyor: kart metninde ad ve grup sayısı da var, hücre metnini okumak yanlış sayı verirdi. Kartı bağlantıya çeviren şey `.role-name::after` örtüsü — ad gerçek metin kalıyor, erişilebilir ad kayboluyor değil
+  - Not (ekrandan çıkan üç düzeltme): arama kutusu `.input`in `w-full`ünü yenemediği için araç çubuğunun satırını kaplıyordu (iki sınıflı kural + sabit 9rem); boş türde tür açıklaması hem bölüm başlığında hem boş durumda yazıyordu (boş durumdaki kalktı); dar ekranda `shrink-0` araç çubuğu başlık metnini kelime kelime sıkıştırıyordu (`sm` altında kendi satırına iniyor). Kişi sayısı 0 olan kartta oran çubuğu hiç basılmıyor — boş iz "bir şey var" gibi okunuyordu (app.js'in tablo kuralıyla aynı)
+  - Doğrulama (2026-10-02): backend **224 test** (gerçek Postgres `--include-ignored` + lab Keycloak + lab Samba; +2 yeni: bölüm içi sıralama ve `?new=` izinli listesi), fmt + clippy `-D warnings` temiz, yeni migration yok. `sh scripts/build-css.sh` (77473 bayt) ve `sh scripts/check-glyphs.sh` temiz; `sh scripts/ui-shots.sh tmp/ekran-goruntuleri/14-roller` **"bulgu yok"** (rol detayı yeniden çekiliyor — betiğin seçicisine `.role-grid` eklendi, kart ızgarasında `.tbl` yok)
+  - Doğrulama (**çalışan yığın, tarayıcıda ölçüldü**): başlangıç görünüm `grid` ve "Kart" düğmesi aktif; "Liste"ye basınca üç bölümün ızgarası da `list` oluyor ve yenilemeden sonra `localStorage`tan geri geliyor; `prof` araması 9 karttan 1'ini bırakıyor, kutu temizlenince 9'a dönüyor; en kalabalık rolde dolgu var, sıfırlı kartta çubuk hiç yok; kartın boşluğuna tıklamak `/roles/professor`a gidiyor; "Temel rol ekle" `/roles?new=base`e gidip formu açık ve `base` seçili basıyor; konsolda JS hatası yok
+- [x] Departmanlar: seviye renkli satır şeridi ([ADR-119](decisions/119-roller-kart-izgarasi-departman-seviye-rengi.md) B)
+  - Kabul: her satır `--dc` alıyor (depth 1 `--ctp-accent`, 2 `--ctp-info`, 3+ `--ctp-accent-dim`)
+  - Kabul: hücre alt çizgisi yok, satır arası 4px, satır tek parça 12px yuvarlak şerit; zemin satırın bütününde (hücre başına ton farkı ve son sütunun ayrı zemini yok)
+  - Kabul: depth 1 zemin %13 / 14px dikey / ad 16px-700, depth 2 zemin %6 / ad 650, depth 3+ zeminsiz / ad 500 `--ctp-fg-dim`; hover %9, satırın tamamı tıklanabilir
+  - Kabul: adın önünde seviye renginde nokta (depth 1–2: 8px + %22 opak 3px hale; 3+: 6px halesiz)
+  - Kabul: `.code` hap biçimli, `--dc` renk / %13 zemin / %28 kenarlık / 10.5px / .04em
+  - Kabul: sıfır hücrede yalnızca metin soluk (zemin etkilenmiyor); "Verdiği grup" > 0 ise sayı `--ctp-fg` + soluk "grup" etiketi; kişi 0 olan satırda çubuk soluk, dolgu `--dc`
+  - Kabul: tablo başlığı zeminsiz 11px büyük harf .07em `--ctp-fg-faint`, yapışkan ve zemini opak
+  - Kabul: özet kutuları (toplam departman, toplam kişi, boş departman); "Tümünü aç / kapat" ve "Boş departmanları gizle" (tercih `localStorage`); kılavuz çizgileri son öğede bitiyor; aramada eşleşme vurgulanıyor ve üst dallar açık kalıyor
+  - Kabul: `ui-shots.sh` "bulgu yok" diyor; yeni migration yok
+  - Not (2026-10-02): satır zemini hücrelere **aynı** değerle veriliyor — `<tr>`ye `border-radius` hiçbir tarayıcıda uygulanmıyor, köşe ancak ilk/son hücreden çıkıyor; yatay `border-spacing` sıfır olduğu için hücreler bitişik ve tarayıcıda ölçüldü: depth 1 satırının dört hücresinin hesaplanmış zemini **tek bir değer** (ton farkı ya da ek yeri yok). `last_sibling` SQL'e değil, sorgudan sonra tek geriye dönük geçişe yazıldı (`mark_last_siblings`); `department_summary` kişiyi yalnızca köklerden topluyor — satırlar alt ağaç dahil geldiği için hepsini toplamak 7 yerine 17 derdi (test bunu sınıyor)
+  - Not (CSS sırası): departman bloğu ilk yazıldığında `.tbl td`/`.tbl th`'den **önce** duruyordu; eşit özgüllükte sonra gelen kazandığı için hücre alt çizgileri ekranda kalmıştı. Blok `.tbl` kurallarından sonraya taşındı. Yapışkan başlığın zemini `--ctp-bg` + `--ctp-card` gradyanı: kartın ekrandaki gerçek rengi bu ikisinin toplamı, tek renk yazmak başlığı kartın geri kalanından koyu gösteriyordu
+  - Not (ortak yardımcı): özet kutusu iki sayfada aynı — `.role-sum*` sınıfları `.sum-row`/`.sum-box`/`.sum-t`/`.sum-h`/`.sum-n`e, `.role-tile` `.tile-tone`a çevrildi; kutunun rengi `--rc`den geliyor ve `tone-accent/info/dim` ile veriliyor. `docs/MAP.md` → Ortak yardımcılar'a satır eklendi. Aramada vurgu yalnızca `textContent` ile kuruluyor — `innerHTML` departman adını HTML olarak yorumlardı
+  - Doğrulama (2026-10-02): backend **225 test** (gerçek Postgres `--include-ignored` + lab Keycloak + lab Samba; +1 yeni: son kardeş işareti ve özet toplamı), fmt + clippy `-D warnings` temiz, yeni migration yok. Var olan departman testinin markup iddiası yeni satıra göre güncellendi. `sh scripts/build-css.sh` (81849 bayt) ve `sh scripts/check-glyphs.sh` temiz; `sh scripts/ui-shots.sh tmp/ekran-goruntuleri/15-departmanlar` **"bulgu yok"**
+  - Doğrulama (**çalışan yığın, tarayıcıda ölçüldü**): 20 satır → "Tümünü kapat" 1 → "Tümünü aç" 20; "Boşları gizle" 3 satır bırakıyor, `aria-pressed="true"` ve yenilemeden sonra `localStorage`tan geri geliyor; `charms` araması 3 satır (eşleşme + iki üstü) bırakıyor ve tek `<mark>` "Charms" metnini vurguluyor, kutu temizlenince 20 satır ve 0 vurgu; 5 satır `tree-last` işaretli; `--dc` depth 1/2/3'te `#0f766e` / `#1d4ed8` / `#b45309`; konsolda JS hatası yok
+> **Not (2026-10-03):** A (Roller) ve B (Departmanlar) burada bitti. C (Raporlar) spec beklediği için bölüm kapanışıyla birlikte **"Bende değil"** bölümüne taşındı.
+
+---
+
+## Tarayıcıda görülen hatalar (kullanıcı bildirimi, 2026-10-03)
+
+> Kullanıcı çalışan yığında gezerken dört şey bildirdi: `/login`de F5 "formu yeniden gönder" diyor ve denetim kaydına kendiliğinden tekrar tekrar "Operatör girişi" düşüyor; personel listesinde filtre uygulayınca `Failed to deserialize query string: role: cannot parse integer from empty string`; `/favicon.ico` 404; konsolda CSP "inline script" satırları.
+
+- [x] Dördü de kapandı
+  - **Giriş (kök neden):** başarılı giriş ana sayfayı POST yanıtında çiziyordu, URL `/login`de kalıyordu. F5 formu yeniden gönderiyor → her tazeleme yeni oturum + yeni `operator.login` satırı. Artık POST/Redirect/GET: `establish_operator_session` çerezi kurup `/`ye yönlendiriyor (üç kapı da — yerel, AD, OIDC). OIDC'de ek fayda: `code`/`state` adres çubuğunda kalmıyor. `operator_home_with_cookie` silindi
+  - **Filtre 400 (kök neden):** araç çubuğundaki "Tümü" seçeneği `department=&role=` diye boş dize gönderiyor, serde `Option<i64>` boş dizeyi reddediyor. `identity_web::empty_as_none` deserializer'ı eklendi ve sayısal bütün sorgu parametrelerine takıldı (`department`, `role`, `offset`, `days` + `upcoming`'in `days`i); elle yazılan `?role=abc` de artık sayfayı kırmıyor
+  - **Favicon:** `frontend/static/favicon.svg` (kenar çubuğundaki kalkan işaretiyle aynı dil) gömülü varlıklara ve `<link rel="icon">` iki kabuk şablonuna girdi — tarayıcı artık `/favicon.ico` istemiyor
+  - **CSP:** bizim sayfalarımızda satır içi script yok (`base.html`/`base_auth.html` yalnızca `/static/app.js` çağırıyor). Konsoldaki iki satırın kaynağı `<uuid>:19:51` ve `sandbox eval code` — tarayıcı eklentisinin enjekte ettiği script'ler; CSP onları engelliyor, yani kural **çalışıyor**. Temiz tarayıcıda `ui-shots.sh` CSP satırı görmüyor. Değişiklik yapılmadı
+  - **Taramada çıkan iki yan bulgu (kök neden):** (1) panelde uzun bir olay başlığı 390px'te sayfayı 444px yapıyordu — ızgara hücresinin varsayılan `min-width: auto`su `truncate` metnin tam genişliğini alt sınır yapıyor, `.grid > * { min-w-0 }` ile hücre sıfıra inebiliyor; (2) `glyph_for` tablosunda **13 olay türü** yoktu ve hepsi gri "other" kutusuna düşüyordu (`reconcile.reapply`, `account.manage_requested`, `job.retry_requested`, `account.deletion_approved`, `import.*`, `manage.*`, `identity.imported`, `identity.field_taken`) — tablo dolduruldu; `ui-shots.mjs`'in renk ölçümü de düzeltildi: renk sayısı olay türüyle değil **kategori** sayısıyla karşılaştırılır (beş kategori var, olay türü onlarca)
+  - Not (tekrarlamasın diye): iki tamlık testi eklendi — `audit.rs` kendi kaynağını tarayıp her olay sabitinin i18n etiketi var mı, `dashboard.rs` aynı listeyi tarayıp her olayın `glyph_for` kategorisi "other" dışında mı diye bakıyor. Worker'ın yazdığı `ad.*` dışı olaylar `audit::WORKER_EVENTS`'te, iki test de onu okuyor
+  - Doğrulama (2026-10-03): backend **231 test** (gerçek Postgres `--include-ignored` + lab Keycloak + lab Samba; +2 yeni: boş/bozuk filtre değerleri 200 dönüyor, favicon sunuluyor; +1 tamlık testi; üç giriş testi 303'e göre güncellendi), fmt + clippy `-D warnings` temiz, yeni migration yok. `sh scripts/build-css.sh` (81869 bayt) ve `sh scripts/check-glyphs.sh` temiz (yeni glyph yok); `sh scripts/ui-shots.sh tmp/ekran-goruntuleri/17-duzeltmeler` **"bulgu yok"** ve panel ekran görüntüsü 390px'e döndü (önce 444)
+  - Doğrulama (**çalışan yığın, tarayıcıda ölçüldü**): giriş sonrası URL `https://…/`, F5 "yeniden gönder" sormuyor ve yeni oturum açılmıyor; `link[rel=icon]` = `/static/favicon.svg` ve `/favicon.ico` isteği hiç gitmiyor (`/static/favicon.svg` → 200 `image/svg+xml`); araç çubuğundan "Tümü/Tümü" ile filtre → 200, `?department=&role=` / `?upcoming?days=` / `?role=abc` → 200; konsolda JS hatası yok
+
+---
+
+## Mutabakat kendi menü maddesi ([ADR-123](decisions/123-mutabakat-kendi-menu-maddesi.md))
+
+> Kullanıcı isteği (2026-10-03): "raporlar bölümünde mutabakat kısmını solda bir menü olarak yap, Rapor sayfası ile bir alakası yok gibi oranın." Karar: mutabakat Raporlar'dan tamamen çıkar ve kenar çubuğunda kendi maddesi olur; tarama ekranlarının adresi değişmez ([ADR-123](decisions/123-mutabakat-kendi-menu-maddesi.md)). [ADR-119](decisions/119-roller-kart-izgarasi-departman-seviye-rengi.md) C'nin "Mutabakat kartı kalkar" hükmü bu kutucukta uygulanır, C'nin kalanı spec beklemeye devam eder.
+
+- [x] Mutabakat kenar çubuğuna girer, `/reports`tan çıkar
+  - Kabul: kenar çubuğunda Departmanlar ile Raporlar arasında "Mutabakat" maddesi (`/reconcile`); etiket `reconcile.title`, yeni i18n anahtarı yok
+  - Kabul: `/reconcile` hedef sistem başına satır basar (ad, son tarama zamanı, sahiplenmeyi bekleyen hesap rozeti); her operatör okur (`auditor` dahil), tek hedefe otomatik atlama yok
+  - Kabul: `/targets/{id}/reconcile` ve POST alt rotaları aynı adreste kalır; o sayfadayken kenar çubuğunda "Mutabakat" maddesi aktif görünür (şablon başına plumbing yok, `app.js` tek satır)
+  - Kabul: `/reports`ta ne "Mutabakat" kartı ne "Son mutabakat" özet kutusu kalır; kalan iki kutu ve "Listeler" kartı tek sütuna geçer, sayfa alt başlığı mutabakattan söz etmez
+  - Kabul: "Bekleyen iş" kutusu sahiplenmeyi bekleyen hesabı saymaya devam eder (ADR-123 madde 5)
+  - Kabul: yeni sorgu/tablo/migration yok — sayfa `org::list_targets`, `reconcile::unadopted` ve `org::last_read_job`'dan okur
+  - Kabul: `sh scripts/build-css.sh` → `sh scripts/check-glyphs.sh` → backend testleri → `sh scripts/ui-shots.sh` "bulgu yok"
+  - Not (2026-10-03): `reconcile::hub` + `reconcile_hub.html`; `TargetLink` `reports.rs`'ten mutabakat modülüne taşındı. Etiket için yeni anahtar açılmadı (`reconcile.title` zaten "Mutabakat"/"Reconciliation"); `reports.reconcile` düştü, `reports.reconcile_hint` → `reconcile.hub_hint`. `reports.rs` küçüldü: hedef listesi, son tarama zamanı ve `Summary.unadopted` alanı kalktı — `pending` toplamı sahiplenmeyi saymaya devam ediyor (ADR-123 madde 5), kırılımı `pending_foot` cümlesi taşıyor
+  - Not (menü vurgusu): adres taşınmadı, `app.js` `activeNav` tek satırla `/targets/<id>/reconcile*` yolunu `/reconcile` sayıyor — şablon başına plumbing yok (ADR-096 notunun kuralı). Altı rotayı ve form `action`'larını taşımanın kazancı kozmetikti; adresler "URL'de id yerine okunur ad" kutucuğunun işi
+  - Not (betik bulgusu): `scripts/ui-shots.mjs` hedefleri `a[href$="/reconcile"]` ile buluyordu, menü maddesi de o desene uyunca `/targets/undefined/reconcile` çekmeye çalışıp TOFU/FONT bulgusu veriyordu (nginx hata sayfası). Seçici `a[href^="/targets/"][href$="/reconcile"]` oldu
+  - Doğrulama (2026-10-03): backend **234 test** (gerçek Postgres `--include-ignored` + lab Keycloak + lab Samba; mutabakat kapak testi `reports.rs`'ten `reconcile.rs`'e taşındı ve büyüdü: `auditor` `/reconcile`i okuyor, iki hedef de satır olarak çıkıyor, menü maddesi basılıyor ve `/reports`ta mutabakat satırı kalmıyor), fmt + clippy `-D warnings` temiz, yeni migration ve yeni bağımlılık yok. `sh scripts/build-css.sh` (81692 bayt — mutabakat kartının sınıfları düştü) ve `sh scripts/check-glyphs.sh` temiz
+  - Not (i18n): `reconcile.never_scanned` zaten vardı (detay sayfasının uzun boş-durum cümlesi), yeni satır anahtarları `reconcile.hub_never_scanned`/`reconcile.hub_scanned_at` oldu — `i18n::tests::no_duplicate_keys` çakışmayı yakalardı. `reports.last_reconcile` kullanan ekran kalmadığı için silindi
+  - Doğrulama (**çalışan yığın, tarayıcıda ölçüldü**): `/reconcile` iki satır — Active Directory (`Son tarama: 2026-10-03 13:06`, rozet 25) ve Zimbra (`Henüz taranmadı`, rozet 0); kenar çubuğunda Mutabakat maddesi Departmanlar ile Raporlar arasında ve sayfada aktif. `/targets/1/reconcile`e girildiğinde **yine Mutabakat** aktif (app.js kuralı çalışıyor). `/reports` iki özet kutusu + tek "Listeler" kartı, mutabakata dair satır yok; alt başlık "Tarihli listeler ve bekleyen işler", "Bekleyen iş" 25 ve kırılımı "0 müdahale · 0 silme onayı · 25 sahiplenme". `sh scripts/ui-shots.sh tmp/ekran-goruntuleri/18-mutabakat-menu` 14 sayfa × iki tema × 1440/390px çekti ve **"bulgu yok"** dedi
+
+---
+
+## Sıra: açık kutucuklar buradan başlar
+
+> Buradan yukarısı bitmiş iştir ve kronolojik durur — ölçüm notlarıyla birlikte kayıt olarak kalır.
+> Aşağısı yapılacak iştir ve **sırası bağlayıcıdır**: ilk işaretlenmemiş kutucuktan devam edilir.
+> Sıra: önce sessiz bozulan şey (okuma şeridi kirası), sonra bugünün isteği (tarama saati), sonra
+> küçük değişmez kuralı, sonra AD geri dolumunun kalanı, sonra loglar. Bana bağlı olmayan kutucuklar
+> **"Bende değil"** bölümünde, Zimbra ise en sonda durur ([ADR-090](decisions/090-zimbra-v1-sonrasina-alindi.md)).
+
+---
+
+## Okuma şeridinde yarıda kalan iş geri alınır ([ADR-062](decisions/062-is-kirasi-ve-yarida-kalan-is.md)'nin okuma şeridi karşılığı)
+
+> Tarama sırasında bulundu (2026-10-03): `read_jobs`'ta kira yok. `read_lane::claim` satırı `running` yapıyor, `finish` bitiriyor; arada worker ölürse satır **sonsuza dek** `running` kalıyor ve `read_jobs_open_idx` (kısmi tekil indeks) o tür + hedef için ikinci iş açtırmıyor. Sonuç: gece mutabakatı her gece sessizce düşüyor (`open_nightly_scans` `ON CONFLICT DO NOTHING`), ekrandaki "Yeniden tara" da aynı çatışmaya düşüp `rows_affected`'a bakmadığı için (`backend/src/reconcile.rs:140`) çalışmış görünüyor. Tetikleyici egzotik değil: tarama sürerken worker'ı yeniden kurmak (grace sonunda SIGKILL), host yeniden başlaması, OOM. Varyantı 2026-10-03'te yaşandı (NUL baytı yüzünden sonuç satırı yazılamıyor, iş sonsuza dek `running` kalıyordu — `db::pg_text` o tetikleyiciyi kapattı, yapısal delik durdu). Yazma şeridinde aynı sorun [ADR-062](decisions/062-is-kirasi-ve-yarida-kalan-is.md) ile çözülmüş; yeni karar gerekmiyor, aynı desen okuma şeridine uygulanır.
+
+- [ ] Yarıda kalmış okuma işi geri alınır, tıkanma sessiz kalmaz
+  - Kabul: kira süresi geçmiş `running` okuma işi geri alınır (`failed`, sonuç metni "yarıda kaldı"); aynı tür + hedef için yeni iş açılabilir ve sonraki gece koşusu yürür
+  - Kabul: süresi geçmemiş iş dokunulmaz — başka bir worker kopyasının süren taraması çalınmaz ([ADR-061](decisions/061-dagitim-sozlesmesi-compose-ve-kubernetes.md)); "tek worker" varsayımı koda gömülmez
+  - Kabul: kira süresi ve geri alma deseni [ADR-062](decisions/062-is-kirasi-ve-yarida-kalan-is.md)'nin yazma şeridinde kullandığının aynısı — yeni zaman sabiti uydurulmaz
+  - Kabul: "Yeniden tara" açık iş varken sessizce başarı demez; `rows_affected == 0` ise ekran "tarama zaten sürüyor" der (yeni i18n anahtarı gerekirse iki dosyaya girer)
+  - Kabul: yeni tablo ve yeni bağımlılık yok; metrik ucu değişmez (`opensicil_target_last_reconcile_timestamp_seconds` bayatlığı göstermeye devam eder)
+  - Kabul: worker testi — `running` bırakılmış satır kira süresi geçince geri alınıyor ve yeni iş açılabiliyor, geçmemişken satır olduğu gibi kalıyor; backend testi — açık iş varken düğme uyarı veriyor
+  - Doğrulama: çalışan yığında tarama sürerken worker öldürülür (`docker compose kill worker`), yeniden ayağa kaldırılır; kira dolduktan sonra tarama kendiliğinden yürür ve `/reconcile` "Son tarama"yı günceller
+
+---
+
+## Mutabakat tarama saati ayarlanabilir ([ADR-124](decisions/124-mutabakat-tarama-saati-ayarlanabilir.md))
+
+> Kullanıcı isteği (2026-10-03): "bu her gece 2'de çalışan şey ayarlardan yapılabilsin; kişi her saat başı isteyecek ya da günde 3 defa isteyecek, bu tür ayarları kullanıcıya bırakmak daha iyi değil mi." Karar: saat `.env`'den gelir ve aynı değişkenin virgüllü listesi günde birden çok koşuyu karşılar; cron ifadesi, aralık ayarı ve ekrandan ayar yok ([ADR-124](decisions/124-mutabakat-tarama-saati-ayarlanabilir.md)).
+
+- [ ] Gece taramasının saati `RECONCILE_SCAN_AT` ile verilir
+  - Kabul: değişken yoksa davranış bugünkünün birebir aynısı — kurulum saat diliminde 02:00'den sonra, günde bir, AD yapılandırılmışsa
+  - Kabul: `RECONCILE_SCAN_AT=04:30` → tarama 04:30'u geçen ilk tikte açılır, 02:00'de açılmaz
+  - Kabul: `RECONCILE_SCAN_AT=02:00,10:00,18:00` → aynı gün üç tarama; her dilim için en çok bir kez ve o dilimden sonra operatör "Yeniden tara" dediyse zamanlayıcı ikincisini açmaz (bugünkü tekilleştirme kuralı korunur)
+  - Kabul: bozuk değer açılışta reddedilir ve worker başlamaz, neden tek satırda yazar ([ADR-060](decisions/060-lastlogontimestamp-on-kosulu-acilista-dogrulanir.md) deseni): `9`, `25:00`, `02:0`, boş eleman, yinelenen saat, 24'ten fazla değer. Bozuk değer SQL'e hiç gitmez
+  - Kabul: worker gece kapalıysa açıldığı ilk tikte kaçırdığı **son** dilim için tek tarama açılır, kaç dilim kaçtıysa bir tane (sorguya dayalı zamanlayıcı, [ADR-028](decisions/028-worker-zamanlamasi.md))
+  - Kabul: yeni bağımlılık yok (`HH:MM` elle ayrıştırılır), yeni migration yok, backend'in `common_settings.rs` ikizi değişmez (ayar worker'a özel, [ADR-124](decisions/124-mutabakat-tarama-saati-ayarlanabilir.md) madde 5)
+  - Kabul: `.env.example`, `docs/09-kurulum.md`, `docs/04-yasam-dongusu.md`'nin "Her gece 02:00" satırı ve `docs/MAP.md`'nin scheduler satırı güncellenir
+  - Not: ekranda saat gösterilmez — `/reconcile` "Son tarama"yı yazmaya devam eder; "sonraki tarama" göstergesi istenirse ayrı kutucuk
+  - Doğrulama: worker testleri (saf ayrıştırma ve dilim seçimi + gerçek Postgres'te iki saatli liste), fmt + clippy iki crate'te temiz; çalışan yığında `.env` değiştirilip worker yeniden başlatılarak bir dilimin koştuğu görülür
+
+---
+
+## Yer tutucu rol yönetilen bağlantıda olamaz: değişmez kural teste bağlanır
+
+> Önerilen madde 2'nin **küçültülmüş** hâli (2026-10-03). Asıl soru: gece dolumu (`reconcile::fill_placeholder_roles`) okuma şeridinde kaldığı için rol dolan kimliğe iş açılmıyor, yani yönetilen bir hesap yeni rolün OU'suna taşınmazdı. Kodu okuyunca bugün **ulaşılamaz** bir durum olduğu görüldü: yer tutucu rol yalnızca toplu sahiplenme formunun varsayılanından geliyor (`backend/src/reconcile.rs:289`), o bağlantılar gözlem modunda; "Yönetime al" tek ve toplu yolda yer tutucu rolde reddediliyor (`identity::ManageOutcome::RoleUndefined`, `bulk_manage.rs:75`), CSV ve kayıt formu yer tutucuyu seçtirmiyor (`csv_import.rs:442`). Dolum rolü yazdıktan **sonra** yönetime alma kendi işini açıyor. Bu yüzden iş açan kod bugün savunma kodu olurdu ([ADR-120](decisions/120-ad-fark-listesine-departman-girer.md)'nin "gece tam geçişi şimdi yazılmıyor" gerekçesi duruyor); yazılan şey kuralın **testi** olur, kapının kalkması sessizce fark edilmesin diye.
+
+- [ ] Değişmez kural test edilir: `mode = 'managed'` bağlantının kimliğinde yer tutucu rol bulunmaz
+  - Kabul: backend testi kuralı ihlal etmeyi dener — yer tutucu rolü olan kimliğe tek ve toplu "Yönetime al" reddediliyor (bugünkü davranış), kayıt ve CSV yolunda yer tutucu rol seçilemiyor
+  - Kabul: test kuralın **neden** var olduğunu tek satırda yazar: kapı kalkarsa gece dolumu yönetilen hesabın rolünü değiştirir ve iş açılmadığı için hesap eski OU'da kalır
+  - Kabul: kapı ileride bilerek kaldırılırsa test kırmızı olur ve o zaman iş açma kararı yazılır — bugün ne iş açılır ne kod eklenir
+  - Not: fark listesinden **alım** (`ad_diff::take`) zaten iş açıyor (rol ve departmanda, [ADR-120](decisions/120-ad-fark-listesine-departman-girer.md) madde 3); bu kutucuk onu değiştirmez
+  - Not: sicil/cep/e-posta/kullanıcı adı dolumunda iş açılmaması doğru — değer AD'den geldiği için hedefte fark kalmıyor
+  - Doğrulama: backend testleri + fmt + clippy; kod değişmediği için çalışan yığında ölçüm gerekmez
+
+---
+
 ## AD'den geri dolum ve ayrılışta silmeme (kullanıcı isteği)
 
 > Fazlar arası iş, "Faz" olarak numaralanmaz. Kullanıcı isteği (2026-10-02): "çift taraflı sync" — AD'de duran veriyi OpenSicil'e tek tek elle girmek saçma; ve ayrılan hesap silinmesin, pasif OU'da açıklamasında tarih-nedeniyle dursun. İki karar yazıldı: [ADR-112](decisions/112-alan-bazli-yetki-ve-geri-dolum.md) (alan bazlı yetki: boş alan otomatik dolar, çakışmada toplu karar) ve [ADR-111](decisions/111-ayriliste-silme-yok-pasif-ou.md) (AD'de saklama sonu varsayılanı silme değil).
@@ -699,178 +859,42 @@ Kurallar:
 
 ---
 
-## Arayüz: cam yüzeyli turkuaz tema ([ADR-114](decisions/114-cam-yuzeyli-turkuaz-tema.md))
+## Bende değil: kullanıcı kararı, terminali veya ölçümü bekleyen kutucuklar
 
-> Kullanıcı isteği (2026-10-02): "OpenSicil'in tüm arayüzünü bu tasarıma çevir. Renkleri ve efektleri tarayıcıda canlı deneyip onayladım; değerleri birebir uygula." Kapsam CSS + şablon + `static/app.js`; son kutucukta salt-okunur sorgular için Rust'a da dokunulur (kullanıcı onayı, veri modeli ve migration değişmez). Kısıtlar: CSP satır içi stili yasaklıyor (ADR-088 madde 4), gövde fontu değişmez (ADR-067 madde 3 — değişse `.ico` glyph'leri tofu olurdu), TR/EN birlikte.
->
-> Doğrulama her kutucukta aynı: `sh scripts/build-css.sh` → `sh scripts/check-glyphs.sh` → `cd backend && cargo test && cargo fmt --all -- --check && cargo clippy --all-targets -- -D warnings` → `sh scripts/ui-shots.sh tmp/ekran-goruntuleri/<kutu>` (yedi sayfa × iki tema × 1440/390px; betik yatay taşmayı ve tofu kutusunu kendisi ölçer).
+> Üçü de yazılı ve hazır; ilerlemesi bana bağlı değil (biri kullanıcının terminalini, biri gerçek AD'de ikinci bir servis hesabını, biri eksik gelen spec'i bekliyor). Sıranın sonunda duruyorlar ki "ilk işaretlenmemiş kutucuktan devam et" kuralı yapılabilir işe denk gelsin. Engeli kalkan kutucuk yukarıdaki sıraya taşınır.
 
-- [x] Değişkenler ve tipografi
-  - Kabul: koyu palet kullanıcının verdiği değerlerle, açık palet ADR-114 madde 2'nin AA'lı sürümüyle; üç tema bloğu (açık, `prefers-color-scheme`, `[data-theme]`) senkron
-  - Kabul: zemin ışıması üç radyal gradyan + `background-attachment: fixed`; `.card`/`.side`/`.topbar` `backdrop-filter: blur(18px) saturate(140%)`; `.card` 18px köşe
-  - Kabul: `.page`'in `max-w-7xl` sınırı kalkar, `/config` dahil bütün sayfalar tam genişlik (16px / md 28px yan boşluk, üst bar aynı hizada)
-  - Kabul: `--chart-1 … --chart-8` iki temada tanımlı; tipografi 12/14/16/20/28; gövde `font-family` dokunulmamış
-- [x] Ortak bileşenler ve yerleşim
-  - Kabul: buton üçlüsü (birincil / ikincil cam / hayalet), hiçbiri tam genişlik değil; hover + `focus-visible` + `disabled` durumları
-  - Kabul: input/select/checkbox cam zemin, 10px köşe, odakta vurgu halkası; checkbox'lar anahtar görünümünde
-  - Kabul: tabloda yapışkan başlık, satır hover'ı, sayı sağa + `tabular-nums`, sıfır soluk; rozetler hap biçimli ve anlamsal
-  - Kabul: kenar menüde aktif öğe soft zemin + sol vurgu çizgisi (`.nav-link-active` adı korunur, `app.js` onu yazıyor), dar ekranda ikon modu, mobilde çekmece
-  - Kabul: geçişler 150–200 ms ve `prefers-reduced-motion`a uyuyor
-- [x] Ana sayfa
-  - Kabul: dört sayaç kartı kendi renginde (turkuaz / yeşil / kırmızı / kehribar), 40px ikon halkası, 32px `tabular-nums` sayı, üst kenarda ışıma çizgisi, hover'da yükselme, kart tıklanabilir
-  - Kabul: pencere seçici tek parça segmentli kontrol
-  - Kabul: etkinlik akışı zaman çizgisi (ikonları bağlayan solan dikey çizgi, son satır hariç), 36px daire + iç halka, saat hap rozet; kart yanındaki sütunla eşit yükseklikte, taşarsa kart içinde kayıyor
-  - Kabul: donut ortasındaki "Toplam" sayıyla üst üste binmiyor, tek kategoride sade özet; departman dağılımı sıralı yatay bar; grafik renkleri `--chart-*`'tan
-  - Kabul: AD bandı `--ctp-info` renkleriyle ve sağında belirgin eylem butonu
-- [x] Diğer sayfalar
-  - Kabul: `/identities` araç çubuğu + avatar renkleri (app.js adı hash'ler) + satırın tamamı tıklanabilir + düzgün sayfalama bileşeni
-  - Kabul: `/roles` ve `/departments` başlığın sağında birincil buton, kişi sütununda oran çubuğu (app.js var olan `.v-NN` sınıfını yazar, satır içi stil yok), "Tanımsız" uyarı rozetli
-  - Kabul: `/departments` ağacında bağlantı çizgileri + aç/kapa (durum hatırlanır) + ağaç içi arama; kod monospace hap
-  - Kabul: `/reports` kartları sayfayı dolduruyor, ikon renkleri anlamsal
-  - Kabul: `/targets` geniş ekranda iki sütun, form 2 sütun grid, Kaydet sağ altta normal boy
-  - Kabul: `/config` `.card` dili + sol bölüm menüsü + 2 sütun alanlar + parolada "kayıtlı" rozeti + yapışkan kaydet çubuğu
-- [x] Panelin eksik verisi (salt-okunur sorgular)
-  - Kutu 1–4'te veri olmadığı için **atlanan** maddeler burada tamamlanır: sayaç kartı değişim rozeti ve sparkline, kart → filtrelenmiş liste, `/identities` filtre + sıralama, `/reports` satır sayıları ve mutabakatın son tarama bilgisi, donut dilimleri arası boşluk (`Slice::dash` kısaltılır), akıştaki saatin bugünkü olaylarda yalnızca saat olması (SQL `CASE`), rol türü başlığında kişi toplamı
-  - Kabul: sayaç kartlarında önceki döneme göre değişim rozeti; dördünde de son N günün sparkline'ı
-  - Kabul: `/identities` departman / rol / durum filtresi + sıralanabilir sütun başlıkları (sorgu parametresi, sayfalamayla tutarlı)
-  - Kabul: sayaç kartları ilgili filtrelenmiş listeye gidiyor
-  - Kabul: `/reports` satırlarında bekleyen kayıt sayısı rozeti; mutabakat satırlarında son tarama zamanı ve durumu
-  - Kabul: yeni migration yok, veri modeli değişmedi; kapsam ve kümülatif testler ≥ %80
-  - Not (2026-10-02): madde madde bitti — sayaç kartları kendi renginde, kıvılcımlı ve değişim rozetli (`7b70204`; `cards`/`spark`/`delta` saf fonksiyon, kartın `href`'i filtrelenmiş `/identities`'e gider), etkinlik akışı olay kategorisine göre renklenir ve bugünkü satırda yalnızca saat yazar (`ec390c2`; `when` SQL'de gün farkından türetilir), rol bölümü başlığında kişi/atama sayısı (`ae9c02c`), `/reports` kapağında özet kutuları, satır rozetleri ve mutabakatın son tarama zamanı (`c54b44d`, `4a77f34`; sayılar gidilecek ekranın kendi yardımcısından okunur, kopya SQL yok), `/identities` departman/rol/durum filtresi + sıralanabilir kolonlar (`ca6ef80`), panelde sütun yüksekliği ve eğilim çubukları (`a1da38a`), tablo/yapışkan başlık düzeltmeleri (`6f2231f`, `5feb382`, `82d5951`)
-  - Not (2026-10-02, son madde): halka dilimleri arasına boşluk girdi. `slices` yüzdeyi değil **çizilen** uzunluğu kısaltıyor (`SLICE_GAP = 2`, şerit kalınlığının yarısı kadar); `offset` kümülatif yüzdeden hesaplandığı için dilim yine bir öncekinin bittiği yerde başlar, boşluk kuyruktan gider. Tek dilimde boşluk 0 — halka sebepsiz kesik görünmesin. Yüzdesi sıfıra yuvarlanan dilim yine hiç çizilmez: bir birimlik nokta "görünür bir pay var" yanılgısı verirdi, efsane satırı gerçek sayıyı zaten söylüyor
-  - Doğrulama (2026-10-02): backend **222 test** (gerçek Postgres `--include-ignored` + lab Keycloak + lab Samba), fmt + clippy `-D warnings` temiz, kapsam satır **%94,31** (`cargo llvm-cov --fail-under-lines 80` geçti), yeni migration yok. `sh scripts/build-css.sh` (71660 bayt) ve `sh scripts/check-glyphs.sh` temiz; `sh scripts/ui-shots.sh tmp/ekran-goruntuleri/12-halka-boslugu` yedi sayfa × iki tema × 1440/390px çekti ve **"bulgu yok"** dedi (yatay taşma ve tofu kutusu yok). **Çalışan yığında:** backend yeniden kuruldu, beş servis sağlıklı, panelde rol halkasının iki dilimi arasındaki boşluk ekran görüntüsünde görünüyor
-- [x] Kapanış: güvenlik ve test
-  - (1a'daki kapanış şablonunun aynısı)
-  - Doğrulama (2026-10-02): backend **222** / worker **102** test geçti (gerçek Postgres `--include-ignored` + lab Keycloak + lab Samba; Hogwarts AD'ye hesap yazan `windows_ad_answers_open_questions` `--skip` — onay bekliyor), fmt + clippy `-D warnings` iki crate'te temiz, `cargo audit` yalnızca [ADR-073](decisions/073-cargo-audit-rsa-bulgusu-kabul-edilen-risk.md) `rsa` (worker 0); kapsam satır backend **%94,31** / worker **%93,20** (`cargo llvm-cov --fail-under-lines 80` ikisinde de geçti); imaj taraması dört imajda `Status: fixed` **yok** (backend 61, worker 59, migrate 61 — `affected`/`fix_deferred`/`will_not_fix`; **nginx 0**, [ADR-071](decisions/071-imaj-taramasi-temiz-tanimi.md)); sır sızıntısı taraması (`8bc623c..HEAD`, üretilen CSS ve CHANGELOG hariç) yalnızca alan adlarını (`people_key`), i18n anahtarlarını, `localStorage` anahtarlarını ve var olan lab-only test değerini yakaladı — yeni sır yok; `.env.example` env adlarıyla birebir (yalnızca lab/test ve compose'un kurduğu adlar dışarıda); `docs/MAP.md` güncel (bölüm yeni dosya açmadı); kodda TODO yok, şablonda satır içi stil ve CDN yok, `app.js`'te `innerHTML`/`eval` yok; 38 feature marker ↔ MAP birebir
-  - Güvenlik listesi bulgusu: dört fonksiyon 50 satırı aştı (`identity::page` 73, `identity_web::list_page` 99, `reports::page` 62, `reconcile::fill_linked_identities` 59). Dördünde de iç içe blok ≤ 3, parametre ≤ 5 ve dallanma 15'in altında; aşan tek şey ham satır sayısı (Rust'ın `match … return internal(…)` töreni, alan başına bir satırlık şablon, `bind` zinciri). Bölmek tek çağıranı olan yardımcılar üretirdi — [ADR-118](decisions/118-fonksiyon-uzunlugu-yerine-bilissel-karmasiklik.md) ile karara yazıldı: ölçü satır değil bilişsel karmaşıklık. `AssertSqlSafe` taraması temiz — `sort_clause` derleme zamanı sabiti döndürüyor, kullanıcı değeri yalnızca satır seçiyor
-  - Doğrulama (çalışan yığın): `docker compose build backend worker nginx migrate` sonrası imajlar değişmedi (HEAD çalışanla aynı), beş servis sağlıklı; `sh scripts/e2e-lab.sh` geçti (kayıt → AD'de pasif hesap (UAC 514) → "açıldı"; "kaydet ve ilk parolayı ver" **N-13 = 5 sn**, AD'de etkin hesap UAC 512); `sh scripts/ui-shots.sh tmp/ekran-goruntuleri/13-kapanis` 13 sayfa × iki tema × 1440/390px çekti ve **"bulgu yok"** dedi; `sh scripts/build-css.sh` (71660 bayt, commit'liyle aynı) ve `sh scripts/check-glyphs.sh` temiz; **duman testi** gerçek operatör oturumuyla 20 rota 200 (`/`, personel + `unassigned`/`days`, roller, departmanlar, hedefler, mutabakat, toplu yönetim, raporlar, silinmeyi bekleyenler, müdahaleler, Yapılandırma, içe aktarma + örnek CSV, arama, yaklaşan bitişler, kullanılmış adlar, kişi, eşlemeler), `/metrics` nginx'ten 404, backend ve worker log'unda hata yok
-## Roller, Departmanlar, Raporlar ([ADR-119](decisions/119-roller-kart-izgarasi-departman-seviye-rengi.md))
+### Sır rotasyonu ([ADR-104](decisions/104-env-yedegi-public-repoya-push-edildi.md))
 
-> Kullanıcı isteği (2026-10-02): "Roller, Departmanlar ve Raporlar sayfalarını aşağıdaki gibi yap. Roller ve Departmanlar tasarımı tarayıcıda denenip onaylandı; Raporlar'ın tek sayfa akışı yeni." Değerler birebir uygulanır. Kısıtlar ADR-114'ün aynısı: CSP satır içi stil ve script yasak (ADR-088 madde 4), gövde ve `.ico` fontu dokunulmaz (ADR-067 madde 3, ADR-116), renkler `--ctp-*`'tan ve iki temada çalışır, TR/EN birlikte, backend'de olmayan veri uydurulmaz.
->
-> **Sıra bağlayıcı:** Roller → Departmanlar → Raporlar, her sayfa ayrı commit. Doğrulama her kutucukta aynı: `sh scripts/build-css.sh` → `sh scripts/check-glyphs.sh` → `cd backend && cargo test && cargo fmt --all -- --check && cargo clippy --all-targets -- -D warnings` → `sh scripts/ui-shots.sh tmp/ekran-goruntuleri/<kutu>`.
+> Fazlar arası iş, "Faz" olarak numaralanmaz. Arayüz mockup bölümünün kapanışı, `.env` yedeğinin public repoya push edilmiş olduğunu yakaladı. Geçmiş yeniden yazılmıyor; sızan değerler rotasyonla değersizleştirilir.
 
-- [x] Roller: tür renkli bölüm + kart ızgarası ([ADR-119](decisions/119-roller-kart-izgarasi-departman-seviye-rengi.md) A)
-  - Kabul: bölüm `role-kind--base/--primary/--additional` sınıfını taşıyor ve `--rc`yi kuruyor (`--ctp-info` / `--ctp-accent` / `--ctp-accent-dim`); solda 3px solan çizgi, başlıkta 40px `.ico-tile`, "N rol" rozeti `--rc` renginde
-  - Kabul: tablo yerine `<ul class="role-grid">` / `<li class="role-card">`; şablonda `<table>` kalmıyor
-  - Kabul: kartta ad (14px/600), unvan (11px soluk, **adla aynıysa basılmıyor**), sağda kişi sayısı (22px/700 `tabular-nums`) + `--rc` oran çubuğu, altta kesikli çizgiyle "Verdiği grup: N"; kartın tamamı `/roles/<slug>`e giden bağlantı
-  - Kabul: kişi sayısı 0 olan kart `role-card--empty` (opacity .55, hover 1)
-  - Kabul: sıralama kişi sayısı azalan, eşitlikte ada göre — `org::role_sections` içinde, saf tablo testiyle
-  - Kabul: bölüm başlığının sağında "Kart / Liste" düğmesi (tercih `localStorage`) ve o bölümü süzen arama kutusu
-  - Kabul: `Tanımsız` kartı kesikli uyarı kenarlığı + sağ üstte kendi satırında "yer tutucu" rozeti (adla üst üste binmiyor)
-  - Kabul: boş türde ikon + açıklama + "`<Tür>` rol ekle" düğmesi; düğme `/roles?new=<tür>`e gidiyor, sayfa formu açık ve tür seçili basıyor
-  - Kabul: sayfa başında üç özet kutusu (tür rengiyle rol + kişi sayısı), `#role-<tür>` çapasına kayıyor
-  - Kabul: `ui-shots.sh` "bulgu yok" diyor; yeni migration yok
-  - Not (2026-10-02): tablo `<ul class="role-grid">`e döndü, `--rc` tür rengini bölümde tek yerde tutuyor. Sıralama `org::role_sections` içinde saf (SQL'in `ORDER BY r.name`i korunur, saf tablo testi var). `?new=<tür>` izinli listeden geçiyor (`role_kind_of`; test keyfi metni ve `BASE`i reddediyor) — form hata halinde de açık kalıyor. `.meter-thin` değerini artık `data-ratio` özniteliğinden okuyor: kart metninde ad ve grup sayısı da var, hücre metnini okumak yanlış sayı verirdi. Kartı bağlantıya çeviren şey `.role-name::after` örtüsü — ad gerçek metin kalıyor, erişilebilir ad kayboluyor değil
-  - Not (ekrandan çıkan üç düzeltme): arama kutusu `.input`in `w-full`ünü yenemediği için araç çubuğunun satırını kaplıyordu (iki sınıflı kural + sabit 9rem); boş türde tür açıklaması hem bölüm başlığında hem boş durumda yazıyordu (boş durumdaki kalktı); dar ekranda `shrink-0` araç çubuğu başlık metnini kelime kelime sıkıştırıyordu (`sm` altında kendi satırına iniyor). Kişi sayısı 0 olan kartta oran çubuğu hiç basılmıyor — boş iz "bir şey var" gibi okunuyordu (app.js'in tablo kuralıyla aynı)
-  - Doğrulama (2026-10-02): backend **224 test** (gerçek Postgres `--include-ignored` + lab Keycloak + lab Samba; +2 yeni: bölüm içi sıralama ve `?new=` izinli listesi), fmt + clippy `-D warnings` temiz, yeni migration yok. `sh scripts/build-css.sh` (77473 bayt) ve `sh scripts/check-glyphs.sh` temiz; `sh scripts/ui-shots.sh tmp/ekran-goruntuleri/14-roller` **"bulgu yok"** (rol detayı yeniden çekiliyor — betiğin seçicisine `.role-grid` eklendi, kart ızgarasında `.tbl` yok)
-  - Doğrulama (**çalışan yığın, tarayıcıda ölçüldü**): başlangıç görünüm `grid` ve "Kart" düğmesi aktif; "Liste"ye basınca üç bölümün ızgarası da `list` oluyor ve yenilemeden sonra `localStorage`tan geri geliyor; `prof` araması 9 karttan 1'ini bırakıyor, kutu temizlenince 9'a dönüyor; en kalabalık rolde dolgu var, sıfırlı kartta çubuk hiç yok; kartın boşluğuna tıklamak `/roles/professor`a gidiyor; "Temel rol ekle" `/roles?new=base`e gidip formu açık ve `base` seçili basıyor; konsolda JS hatası yok
-- [x] Departmanlar: seviye renkli satır şeridi ([ADR-119](decisions/119-roller-kart-izgarasi-departman-seviye-rengi.md) B)
-  - Kabul: her satır `--dc` alıyor (depth 1 `--ctp-accent`, 2 `--ctp-info`, 3+ `--ctp-accent-dim`)
-  - Kabul: hücre alt çizgisi yok, satır arası 4px, satır tek parça 12px yuvarlak şerit; zemin satırın bütününde (hücre başına ton farkı ve son sütunun ayrı zemini yok)
-  - Kabul: depth 1 zemin %13 / 14px dikey / ad 16px-700, depth 2 zemin %6 / ad 650, depth 3+ zeminsiz / ad 500 `--ctp-fg-dim`; hover %9, satırın tamamı tıklanabilir
-  - Kabul: adın önünde seviye renginde nokta (depth 1–2: 8px + %22 opak 3px hale; 3+: 6px halesiz)
-  - Kabul: `.code` hap biçimli, `--dc` renk / %13 zemin / %28 kenarlık / 10.5px / .04em
-  - Kabul: sıfır hücrede yalnızca metin soluk (zemin etkilenmiyor); "Verdiği grup" > 0 ise sayı `--ctp-fg` + soluk "grup" etiketi; kişi 0 olan satırda çubuk soluk, dolgu `--dc`
-  - Kabul: tablo başlığı zeminsiz 11px büyük harf .07em `--ctp-fg-faint`, yapışkan ve zemini opak
-  - Kabul: özet kutuları (toplam departman, toplam kişi, boş departman); "Tümünü aç / kapat" ve "Boş departmanları gizle" (tercih `localStorage`); kılavuz çizgileri son öğede bitiyor; aramada eşleşme vurgulanıyor ve üst dallar açık kalıyor
-  - Kabul: `ui-shots.sh` "bulgu yok" diyor; yeni migration yok
-  - Not (2026-10-02): satır zemini hücrelere **aynı** değerle veriliyor — `<tr>`ye `border-radius` hiçbir tarayıcıda uygulanmıyor, köşe ancak ilk/son hücreden çıkıyor; yatay `border-spacing` sıfır olduğu için hücreler bitişik ve tarayıcıda ölçüldü: depth 1 satırının dört hücresinin hesaplanmış zemini **tek bir değer** (ton farkı ya da ek yeri yok). `last_sibling` SQL'e değil, sorgudan sonra tek geriye dönük geçişe yazıldı (`mark_last_siblings`); `department_summary` kişiyi yalnızca köklerden topluyor — satırlar alt ağaç dahil geldiği için hepsini toplamak 7 yerine 17 derdi (test bunu sınıyor)
-  - Not (CSS sırası): departman bloğu ilk yazıldığında `.tbl td`/`.tbl th`'den **önce** duruyordu; eşit özgüllükte sonra gelen kazandığı için hücre alt çizgileri ekranda kalmıştı. Blok `.tbl` kurallarından sonraya taşındı. Yapışkan başlığın zemini `--ctp-bg` + `--ctp-card` gradyanı: kartın ekrandaki gerçek rengi bu ikisinin toplamı, tek renk yazmak başlığı kartın geri kalanından koyu gösteriyordu
-  - Not (ortak yardımcı): özet kutusu iki sayfada aynı — `.role-sum*` sınıfları `.sum-row`/`.sum-box`/`.sum-t`/`.sum-h`/`.sum-n`e, `.role-tile` `.tile-tone`a çevrildi; kutunun rengi `--rc`den geliyor ve `tone-accent/info/dim` ile veriliyor. `docs/MAP.md` → Ortak yardımcılar'a satır eklendi. Aramada vurgu yalnızca `textContent` ile kuruluyor — `innerHTML` departman adını HTML olarak yorumlardı
-  - Doğrulama (2026-10-02): backend **225 test** (gerçek Postgres `--include-ignored` + lab Keycloak + lab Samba; +1 yeni: son kardeş işareti ve özet toplamı), fmt + clippy `-D warnings` temiz, yeni migration yok. Var olan departman testinin markup iddiası yeni satıra göre güncellendi. `sh scripts/build-css.sh` (81849 bayt) ve `sh scripts/check-glyphs.sh` temiz; `sh scripts/ui-shots.sh tmp/ekran-goruntuleri/15-departmanlar` **"bulgu yok"**
-  - Doğrulama (**çalışan yığın, tarayıcıda ölçüldü**): 20 satır → "Tümünü kapat" 1 → "Tümünü aç" 20; "Boşları gizle" 3 satır bırakıyor, `aria-pressed="true"` ve yenilemeden sonra `localStorage`tan geri geliyor; `charms` araması 3 satır (eşleşme + iki üstü) bırakıyor ve tek `<mark>` "Charms" metnini vurguluyor, kutu temizlenince 20 satır ve 0 vurgu; 5 satır `tree-last` işaretli; `--dc` depth 1/2/3'te `#0f766e` / `#1d4ed8` / `#b45309`; konsolda JS hatası yok
+- [ ] Sızan altı değer döndürülür ve `docs/09`'a "sır sızarsa" adımı girer
+  - Kabul: `AEAD_MASTER_KEY` ve `BLIND_INDEX_KEY` yeniden üretilir; AEAD ile şifreli tek gerçek değer `app_settings`'teki AD servis hesabı parolası (ölçüldü: `national_id_enc` dolu 0 satır, `first_passwords` 0 satır), o Yapılandırma sayfasından yeniden girilir — veritabanı silinmez
+  - Kabul: üç Postgres parolası yeniden üretilir; backend ve worker rolleri `migrate` alt komutunun `ALTER ROLE … PASSWORD` yolundan döner, şema sahibi rolü elle `ALTER ROLE`'le döner
+  - Kabul: `METRICS_TOKEN` yeniden üretilir (metrik ucu henüz yazılmadı, yalnızca değer)
+  - Kabul: rotasyondan sonra yığın ayakta, `/` 200 ve mutabakat taraması gerçek AD'ye yeniden bağlanabiliyor
+  - Kabul: `docs/09-kurulum.md`'ye "sır sızarsa" bölümü: hangi değer neyi açar, rotasyon sırası, AEAD anahtarı değişince neyin yeniden girilmesi gerektiği
+  - Not: yeni değerler `.env`'e yazılır, hiçbiri commit'lenmez; `.gitignore` `.env` ve `.env.yedek*`'i zaten kapsıyor
+  - Not (2026-10-01): **betik ve belge hazır, çalıştırma bekliyor.** `scripts/sir-rotasyonu.sh --onayla` altı değeri döndürür (`.env` tek `sed` geçişi; şema sahibi `ALTER ROLE CURRENT_USER PASSWORD` — `POSTGRES_PASSWORD` yalnızca ilk `initdb`'de okunduğu için etkisizdir; backend/worker rolleri `migrate` alt komutundan; sonra iki servis yeniden oluşturulur) ve `docs/09-kurulum.md` "Sır sızarsa" bölümü hangi değerin neyi açtığını, sırayı ve AEAD sonrası yeniden girilecekleri yazar. Veri kaybı freni: `national_id_enc` dolu kurulumda betik durur (v1'de yeniden şifreleme aracı yok, ADR-010). Ölçüldü: bu veritabanında `national_id_enc` 0 satır, `first_passwords` 0 satır
+  - Not (düzeltme): yukarıdaki kabul satırı "AEAD ile şifreli tek gerçek değer AD servis hesabı parolası" diyor, **eksik** — `app_settings`'te OIDC client secret de şifreli (`oidc_client_secret_enc` dolu). Rotasyondan sonra Yapılandırma sayfasından **ikisi** de yeniden girilir, yoksa OIDC girişi kapalı kalır
+  - Engel (2026-10-01): betiği Claude çalıştıramıyor — `.env` yazma ve rol parolası değiştirme auto-mode classifier tarafından reddediliyor (`Secret-Store Writes`), izin kuralı eklemek de (`Self-Modification`). Kullanıcı ya `.claude/settings.json`'a `"allow": ["Bash(sh scripts/sir-rotasyonu.sh*)"]` ekler ya da betiği kendi terminalinde çalıştırır
+  - Engel (2026-10-02, gece koşusu): yeniden denendi, aynı red (`Secret-Store Writes`; `.env` yedeği alma adımı da aynı sınıfa giriyor). Ölçüm (bu veritabanı): `national_id_enc` 0, `first_passwords` 0, 3 kimlik, 3 bağlantı — fren tetiklenmeyecek. `app_settings`'te şifreli iki sır var (AD servis parolası + OIDC client secret), ikisi de rotasyondan sonra yeniden girilecek. Kullanıcının terminalini bekliyor
+
+### Unexpire-Password ölçümü (gerçek AD, ikinci servis hesabı)
+
+- [ ] "Unexpire-Password hakkı olmadan parola sıfırlama" sorusu ölçülür ([ADR-019](decisions/019-ilk-parola-teslimi.md))
+  - Engel: lab servis hesabı `Domain Admins` üyesi, yani hak zaten var ([docs/11](11-dogrulama-notlari.md) W10)
+  - Kabul: `OU=Hogwarts`'a yalnızca "Reset user passwords" devredilmiş ikinci bir servis hesabıyla parola sıfırlanır; `pwdLastSet` kendiliğinden 0 oluyor mu ölçülür
+  - Kabul: evet ise bu hak [docs/05](05-active-directory.md#servis-hesabı-yetkileri) delegasyon tablosuna ve docs/09 ön koşullarına eklenir
+  - Not: replikasyon sorusu (W9) ikinci bir DC istiyor; bu lab'da ölçülemez, kapsam dışı bırakıldı
+
+
+### Raporlar: tek sayfa akışı ([ADR-119](decisions/119-roller-kart-izgarasi-departman-seviye-rengi.md) C) — spec bekliyor
+
 - [ ] Raporlar: tek sayfa akışı ([ADR-119](decisions/119-roller-kart-izgarasi-departman-seviye-rengi.md) C)
   - **Engel:** spec eksik geldi — altı raporun adı ve kutucukların davranışı gelmedi. Kullanıcı metni tamamlanmadan başlanmaz
   - Kabul: rapor seçilince başka sayfaya gidilmiyor, içerik kutucukların altında açılıyor; Mutabakat ve Listeler kartları kalkıyor; altı rapor tek satırda kutucuk
 - [ ] Kapanış: güvenlik ve test
   - (1a'daki kapanış şablonunun aynısı)
-
----
-
-
----
-
-## Tarayıcıda görülen hatalar (kullanıcı bildirimi, 2026-10-03)
-
-> Kullanıcı çalışan yığında gezerken dört şey bildirdi: `/login`de F5 "formu yeniden gönder" diyor ve denetim kaydına kendiliğinden tekrar tekrar "Operatör girişi" düşüyor; personel listesinde filtre uygulayınca `Failed to deserialize query string: role: cannot parse integer from empty string`; `/favicon.ico` 404; konsolda CSP "inline script" satırları.
-
-- [x] Dördü de kapandı
-  - **Giriş (kök neden):** başarılı giriş ana sayfayı POST yanıtında çiziyordu, URL `/login`de kalıyordu. F5 formu yeniden gönderiyor → her tazeleme yeni oturum + yeni `operator.login` satırı. Artık POST/Redirect/GET: `establish_operator_session` çerezi kurup `/`ye yönlendiriyor (üç kapı da — yerel, AD, OIDC). OIDC'de ek fayda: `code`/`state` adres çubuğunda kalmıyor. `operator_home_with_cookie` silindi
-  - **Filtre 400 (kök neden):** araç çubuğundaki "Tümü" seçeneği `department=&role=` diye boş dize gönderiyor, serde `Option<i64>` boş dizeyi reddediyor. `identity_web::empty_as_none` deserializer'ı eklendi ve sayısal bütün sorgu parametrelerine takıldı (`department`, `role`, `offset`, `days` + `upcoming`'in `days`i); elle yazılan `?role=abc` de artık sayfayı kırmıyor
-  - **Favicon:** `frontend/static/favicon.svg` (kenar çubuğundaki kalkan işaretiyle aynı dil) gömülü varlıklara ve `<link rel="icon">` iki kabuk şablonuna girdi — tarayıcı artık `/favicon.ico` istemiyor
-  - **CSP:** bizim sayfalarımızda satır içi script yok (`base.html`/`base_auth.html` yalnızca `/static/app.js` çağırıyor). Konsoldaki iki satırın kaynağı `<uuid>:19:51` ve `sandbox eval code` — tarayıcı eklentisinin enjekte ettiği script'ler; CSP onları engelliyor, yani kural **çalışıyor**. Temiz tarayıcıda `ui-shots.sh` CSP satırı görmüyor. Değişiklik yapılmadı
-  - **Taramada çıkan iki yan bulgu (kök neden):** (1) panelde uzun bir olay başlığı 390px'te sayfayı 444px yapıyordu — ızgara hücresinin varsayılan `min-width: auto`su `truncate` metnin tam genişliğini alt sınır yapıyor, `.grid > * { min-w-0 }` ile hücre sıfıra inebiliyor; (2) `glyph_for` tablosunda **13 olay türü** yoktu ve hepsi gri "other" kutusuna düşüyordu (`reconcile.reapply`, `account.manage_requested`, `job.retry_requested`, `account.deletion_approved`, `import.*`, `manage.*`, `identity.imported`, `identity.field_taken`) — tablo dolduruldu; `ui-shots.mjs`'in renk ölçümü de düzeltildi: renk sayısı olay türüyle değil **kategori** sayısıyla karşılaştırılır (beş kategori var, olay türü onlarca)
-  - Not (tekrarlamasın diye): iki tamlık testi eklendi — `audit.rs` kendi kaynağını tarayıp her olay sabitinin i18n etiketi var mı, `dashboard.rs` aynı listeyi tarayıp her olayın `glyph_for` kategorisi "other" dışında mı diye bakıyor. Worker'ın yazdığı `ad.*` dışı olaylar `audit::WORKER_EVENTS`'te, iki test de onu okuyor
-  - Doğrulama (2026-10-03): backend **231 test** (gerçek Postgres `--include-ignored` + lab Keycloak + lab Samba; +2 yeni: boş/bozuk filtre değerleri 200 dönüyor, favicon sunuluyor; +1 tamlık testi; üç giriş testi 303'e göre güncellendi), fmt + clippy `-D warnings` temiz, yeni migration yok. `sh scripts/build-css.sh` (81869 bayt) ve `sh scripts/check-glyphs.sh` temiz (yeni glyph yok); `sh scripts/ui-shots.sh tmp/ekran-goruntuleri/17-duzeltmeler` **"bulgu yok"** ve panel ekran görüntüsü 390px'e döndü (önce 444)
-  - Doğrulama (**çalışan yığın, tarayıcıda ölçüldü**): giriş sonrası URL `https://…/`, F5 "yeniden gönder" sormuyor ve yeni oturum açılmıyor; `link[rel=icon]` = `/static/favicon.svg` ve `/favicon.ico` isteği hiç gitmiyor (`/static/favicon.svg` → 200 `image/svg+xml`); araç çubuğundan "Tümü/Tümü" ile filtre → 200, `?department=&role=` / `?upcoming?days=` / `?role=abc` → 200; konsolda JS hatası yok
-
----
-
-## Mutabakat kendi menü maddesi ([ADR-123](decisions/123-mutabakat-kendi-menu-maddesi.md))
-
-> Kullanıcı isteği (2026-10-03): "raporlar bölümünde mutabakat kısmını solda bir menü olarak yap, Rapor sayfası ile bir alakası yok gibi oranın." Karar: mutabakat Raporlar'dan tamamen çıkar ve kenar çubuğunda kendi maddesi olur; tarama ekranlarının adresi değişmez ([ADR-123](decisions/123-mutabakat-kendi-menu-maddesi.md)). [ADR-119](decisions/119-roller-kart-izgarasi-departman-seviye-rengi.md) C'nin "Mutabakat kartı kalkar" hükmü bu kutucukta uygulanır, C'nin kalanı spec beklemeye devam eder.
-
-- [x] Mutabakat kenar çubuğuna girer, `/reports`tan çıkar
-  - Kabul: kenar çubuğunda Departmanlar ile Raporlar arasında "Mutabakat" maddesi (`/reconcile`); etiket `reconcile.title`, yeni i18n anahtarı yok
-  - Kabul: `/reconcile` hedef sistem başına satır basar (ad, son tarama zamanı, sahiplenmeyi bekleyen hesap rozeti); her operatör okur (`auditor` dahil), tek hedefe otomatik atlama yok
-  - Kabul: `/targets/{id}/reconcile` ve POST alt rotaları aynı adreste kalır; o sayfadayken kenar çubuğunda "Mutabakat" maddesi aktif görünür (şablon başına plumbing yok, `app.js` tek satır)
-  - Kabul: `/reports`ta ne "Mutabakat" kartı ne "Son mutabakat" özet kutusu kalır; kalan iki kutu ve "Listeler" kartı tek sütuna geçer, sayfa alt başlığı mutabakattan söz etmez
-  - Kabul: "Bekleyen iş" kutusu sahiplenmeyi bekleyen hesabı saymaya devam eder (ADR-123 madde 5)
-  - Kabul: yeni sorgu/tablo/migration yok — sayfa `org::list_targets`, `reconcile::unadopted` ve `org::last_read_job`'dan okur
-  - Kabul: `sh scripts/build-css.sh` → `sh scripts/check-glyphs.sh` → backend testleri → `sh scripts/ui-shots.sh` "bulgu yok"
-  - Not (2026-10-03): `reconcile::hub` + `reconcile_hub.html`; `TargetLink` `reports.rs`'ten mutabakat modülüne taşındı. Etiket için yeni anahtar açılmadı (`reconcile.title` zaten "Mutabakat"/"Reconciliation"); `reports.reconcile` düştü, `reports.reconcile_hint` → `reconcile.hub_hint`. `reports.rs` küçüldü: hedef listesi, son tarama zamanı ve `Summary.unadopted` alanı kalktı — `pending` toplamı sahiplenmeyi saymaya devam ediyor (ADR-123 madde 5), kırılımı `pending_foot` cümlesi taşıyor
-  - Not (menü vurgusu): adres taşınmadı, `app.js` `activeNav` tek satırla `/targets/<id>/reconcile*` yolunu `/reconcile` sayıyor — şablon başına plumbing yok (ADR-096 notunun kuralı). Altı rotayı ve form `action`'larını taşımanın kazancı kozmetikti; adresler "URL'de id yerine okunur ad" kutucuğunun işi
-  - Not (betik bulgusu): `scripts/ui-shots.mjs` hedefleri `a[href$="/reconcile"]` ile buluyordu, menü maddesi de o desene uyunca `/targets/undefined/reconcile` çekmeye çalışıp TOFU/FONT bulgusu veriyordu (nginx hata sayfası). Seçici `a[href^="/targets/"][href$="/reconcile"]` oldu
-  - Doğrulama (2026-10-03): backend **234 test** (gerçek Postgres `--include-ignored` + lab Keycloak + lab Samba; mutabakat kapak testi `reports.rs`'ten `reconcile.rs`'e taşındı ve büyüdü: `auditor` `/reconcile`i okuyor, iki hedef de satır olarak çıkıyor, menü maddesi basılıyor ve `/reports`ta mutabakat satırı kalmıyor), fmt + clippy `-D warnings` temiz, yeni migration ve yeni bağımlılık yok. `sh scripts/build-css.sh` (81692 bayt — mutabakat kartının sınıfları düştü) ve `sh scripts/check-glyphs.sh` temiz
-  - Not (i18n): `reconcile.never_scanned` zaten vardı (detay sayfasının uzun boş-durum cümlesi), yeni satır anahtarları `reconcile.hub_never_scanned`/`reconcile.hub_scanned_at` oldu — `i18n::tests::no_duplicate_keys` çakışmayı yakalardı. `reports.last_reconcile` kullanan ekran kalmadığı için silindi
-  - Doğrulama (**çalışan yığın, tarayıcıda ölçüldü**): `/reconcile` iki satır — Active Directory (`Son tarama: 2026-10-03 13:06`, rozet 25) ve Zimbra (`Henüz taranmadı`, rozet 0); kenar çubuğunda Mutabakat maddesi Departmanlar ile Raporlar arasında ve sayfada aktif. `/targets/1/reconcile`e girildiğinde **yine Mutabakat** aktif (app.js kuralı çalışıyor). `/reports` iki özet kutusu + tek "Listeler" kartı, mutabakata dair satır yok; alt başlık "Tarihli listeler ve bekleyen işler", "Bekleyen iş" 25 ve kırılımı "0 müdahale · 0 silme onayı · 25 sahiplenme". `sh scripts/ui-shots.sh tmp/ekran-goruntuleri/18-mutabakat-menu` 14 sayfa × iki tema × 1440/390px çekti ve **"bulgu yok"** dedi
-
----
-
-## Mutabakat tarama saati ayarlanabilir ([ADR-124](decisions/124-mutabakat-tarama-saati-ayarlanabilir.md))
-
-> Kullanıcı isteği (2026-10-03): "bu her gece 2'de çalışan şey ayarlardan yapılabilsin; kişi her saat başı isteyecek ya da günde 3 defa isteyecek, bu tür ayarları kullanıcıya bırakmak daha iyi değil mi." Karar: saat `.env`'den gelir ve aynı değişkenin virgüllü listesi günde birden çok koşuyu karşılar; cron ifadesi, aralık ayarı ve ekrandan ayar yok ([ADR-124](decisions/124-mutabakat-tarama-saati-ayarlanabilir.md)).
-
-- [ ] Gece taramasının saati `RECONCILE_SCAN_AT` ile verilir
-  - Kabul: değişken yoksa davranış bugünkünün birebir aynısı — kurulum saat diliminde 02:00'den sonra, günde bir, AD yapılandırılmışsa
-  - Kabul: `RECONCILE_SCAN_AT=04:30` → tarama 04:30'u geçen ilk tikte açılır, 02:00'de açılmaz
-  - Kabul: `RECONCILE_SCAN_AT=02:00,10:00,18:00` → aynı gün üç tarama; her dilim için en çok bir kez ve o dilimden sonra operatör "Yeniden tara" dediyse zamanlayıcı ikincisini açmaz (bugünkü tekilleştirme kuralı korunur)
-  - Kabul: bozuk değer açılışta reddedilir ve worker başlamaz, neden tek satırda yazar ([ADR-060](decisions/060-lastlogontimestamp-on-kosulu-acilista-dogrulanir.md) deseni): `9`, `25:00`, `02:0`, boş eleman, yinelenen saat, 24'ten fazla değer. Bozuk değer SQL'e hiç gitmez
-  - Kabul: worker gece kapalıysa açıldığı ilk tikte kaçırdığı **son** dilim için tek tarama açılır, kaç dilim kaçtıysa bir tane (sorguya dayalı zamanlayıcı, [ADR-028](decisions/028-worker-zamanlamasi.md))
-  - Kabul: yeni bağımlılık yok (`HH:MM` elle ayrıştırılır), yeni migration yok, backend'in `common_settings.rs` ikizi değişmez (ayar worker'a özel, [ADR-124](decisions/124-mutabakat-tarama-saati-ayarlanabilir.md) madde 5)
-  - Kabul: `.env.example`, `docs/09-kurulum.md`, `docs/04-yasam-dongusu.md`'nin "Her gece 02:00" satırı ve `docs/MAP.md`'nin scheduler satırı güncellenir
-  - Not: ekranda saat gösterilmez — `/reconcile` "Son tarama"yı yazmaya devam eder; "sonraki tarama" göstergesi istenirse ayrı kutucuk
-  - Doğrulama: worker testleri (saf ayrıştırma ve dilim seçimi + gerçek Postgres'te iki saatli liste), fmt + clippy iki crate'te temiz; çalışan yığında `.env` değiştirilip worker yeniden başlatılarak bir dilimin koştuğu görülür
-
----
-
-## Okuma şeridinde yarıda kalan iş geri alınır ([ADR-062](decisions/062-is-kirasi-ve-yarida-kalan-is.md)'nin okuma şeridi karşılığı)
-
-> Tarama sırasında bulundu (2026-10-03): `read_jobs`'ta kira yok. `read_lane::claim` satırı `running` yapıyor, `finish` bitiriyor; arada worker ölürse satır **sonsuza dek** `running` kalıyor ve `read_jobs_open_idx` (kısmi tekil indeks) o tür + hedef için ikinci iş açtırmıyor. Sonuç: gece mutabakatı her gece sessizce düşüyor (`open_nightly_scans` `ON CONFLICT DO NOTHING`), ekrandaki "Yeniden tara" da aynı çatışmaya düşüp `rows_affected`'a bakmadığı için (`backend/src/reconcile.rs:140`) çalışmış görünüyor. Tetikleyici egzotik değil: tarama sürerken worker'ı yeniden kurmak (grace sonunda SIGKILL), host yeniden başlaması, OOM. Varyantı 2026-10-03'te yaşandı (NUL baytı yüzünden sonuç satırı yazılamıyor, iş sonsuza dek `running` kalıyordu — `db::pg_text` o tetikleyiciyi kapattı, yapısal delik durdu). Yazma şeridinde aynı sorun [ADR-062](decisions/062-is-kirasi-ve-yarida-kalan-is.md) ile çözülmüş; yeni karar gerekmiyor, aynı desen okuma şeridine uygulanır.
-
-- [ ] Yarıda kalmış okuma işi geri alınır, tıkanma sessiz kalmaz
-  - Kabul: kira süresi geçmiş `running` okuma işi geri alınır (`failed`, sonuç metni "yarıda kaldı"); aynı tür + hedef için yeni iş açılabilir ve sonraki gece koşusu yürür
-  - Kabul: süresi geçmemiş iş dokunulmaz — başka bir worker kopyasının süren taraması çalınmaz ([ADR-061](decisions/061-dagitim-sozlesmesi-compose-ve-kubernetes.md)); "tek worker" varsayımı koda gömülmez
-  - Kabul: kira süresi ve geri alma deseni [ADR-062](decisions/062-is-kirasi-ve-yarida-kalan-is.md)'nin yazma şeridinde kullandığının aynısı — yeni zaman sabiti uydurulmaz
-  - Kabul: "Yeniden tara" açık iş varken sessizce başarı demez; `rows_affected == 0` ise ekran "tarama zaten sürüyor" der (yeni i18n anahtarı gerekirse iki dosyaya girer)
-  - Kabul: yeni tablo ve yeni bağımlılık yok; metrik ucu değişmez (`opensicil_target_last_reconcile_timestamp_seconds` bayatlığı göstermeye devam eder)
-  - Kabul: worker testi — `running` bırakılmış satır kira süresi geçince geri alınıyor ve yeni iş açılabiliyor, geçmemişken satır olduğu gibi kalıyor; backend testi — açık iş varken düğme uyarı veriyor
-  - Doğrulama: çalışan yığında tarama sürerken worker öldürülür (`docker compose kill worker`), yeniden ayağa kaldırılır; kira dolduktan sonra tarama kendiliğinden yürür ve `/reconcile` "Son tarama"yı günceller
-
----
-
-## Yer tutucu rol yönetilen bağlantıda olamaz: değişmez kural teste bağlanır
-
-> Önerilen madde 2'nin **küçültülmüş** hâli (2026-10-03). Asıl soru: gece dolumu (`reconcile::fill_placeholder_roles`) okuma şeridinde kaldığı için rol dolan kimliğe iş açılmıyor, yani yönetilen bir hesap yeni rolün OU'suna taşınmazdı. Kodu okuyunca bugün **ulaşılamaz** bir durum olduğu görüldü: yer tutucu rol yalnızca toplu sahiplenme formunun varsayılanından geliyor (`backend/src/reconcile.rs:289`), o bağlantılar gözlem modunda; "Yönetime al" tek ve toplu yolda yer tutucu rolde reddediliyor (`identity::ManageOutcome::RoleUndefined`, `bulk_manage.rs:75`), CSV ve kayıt formu yer tutucuyu seçtirmiyor (`csv_import.rs:442`). Dolum rolü yazdıktan **sonra** yönetime alma kendi işini açıyor. Bu yüzden iş açan kod bugün savunma kodu olurdu ([ADR-120](decisions/120-ad-fark-listesine-departman-girer.md)'nin "gece tam geçişi şimdi yazılmıyor" gerekçesi duruyor); yazılan şey kuralın **testi** olur, kapının kalkması sessizce fark edilmesin diye.
-
-- [ ] Değişmez kural test edilir: `mode = 'managed'` bağlantının kimliğinde yer tutucu rol bulunmaz
-  - Kabul: backend testi kuralı ihlal etmeyi dener — yer tutucu rolü olan kimliğe tek ve toplu "Yönetime al" reddediliyor (bugünkü davranış), kayıt ve CSV yolunda yer tutucu rol seçilemiyor
-  - Kabul: test kuralın **neden** var olduğunu tek satırda yazar: kapı kalkarsa gece dolumu yönetilen hesabın rolünü değiştirir ve iş açılmadığı için hesap eski OU'da kalır
-  - Kabul: kapı ileride bilerek kaldırılırsa test kırmızı olur ve o zaman iş açma kararı yazılır — bugün ne iş açılır ne kod eklenir
-  - Not: fark listesinden **alım** (`ad_diff::take`) zaten iş açıyor (rol ve departmanda, [ADR-120](decisions/120-ad-fark-listesine-departman-girer.md) madde 3); bu kutucuk onu değiştirmez
-  - Not: sicil/cep/e-posta/kullanıcı adı dolumunda iş açılmaması doğru — değer AD'den geldiği için hedefte fark kalmıyor
-  - Doğrulama: backend testleri + fmt + clippy; kod değişmediği için çalışan yığında ölçüm gerekmez
 
 ---
 

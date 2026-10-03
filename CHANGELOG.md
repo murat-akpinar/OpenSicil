@@ -34,6 +34,7 @@
 - Rol kutucuğuna saha ölçümü ve oturum devri notları
 - README v1 sonrasına göre güncellendi (ADR sayısı, faz sırası, geri dolum)
 - Mutabakat tarama saati ayarı ve iki yeni kutucuk todo'ya girdi
+- Todo.md sıraya girdi, açık kutucuklar yapılış sırasında
 
 ### Düzeltmeler
 
