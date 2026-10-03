@@ -375,11 +375,15 @@ pub async fn base_dn(ldap: &mut Ldap) -> Result<String, WriteError> {
         .ok_or_else(|| WriteError::Failed("defaultNamingContext okunamadı".to_string()))
 }
 
+// ADR-121: kapsamda yalnizca KOKLER sayilir, alt OU'lar kokun altindan kesfedilir
+// (gruplarin domain kokunden kesfedildigi gibi). Kokun kendisi bulunamazsa hata
+// — beyan edilen kapsam var olmali (ADR-060); kesfedilen bir alt OU silinirse
+// tarama yurur, katalog onu `missing_since` ile kayip isaretler.
 async fn resolve_ous(
     ldap: &mut Ldap,
     scope: &ManagedScope,
 ) -> Result<Vec<DirectoryOu>, WriteError> {
-    let mut ous = Vec::new();
+    let mut ous: Vec<DirectoryOu> = Vec::new();
     for dn in scope
         .user_ous
         .iter()
@@ -389,7 +393,7 @@ async fn resolve_ous(
         let found = search(
             ldap,
             dn,
-            Scope::Base,
+            Scope::Subtree,
             "(objectClass=organizationalUnit)",
             &["ou", "objectGUID"],
         )
@@ -400,15 +404,24 @@ async fn resolve_ous(
             }
             other => other,
         })?;
-        let entry = found
-            .first()
-            .ok_or_else(|| WriteError::Failed(format!("kapsam OU'su bulunamadı: {dn}")))?;
-        ous.push(DirectoryOu {
-            dn: entry.dn.clone(),
-            name: text_attr(entry, "ou").unwrap_or_default(),
-            guid: guid_to_string(&binary_attr(entry, "objectGUID").unwrap_or_default())
-                .ok_or_else(|| WriteError::Failed(format!("OU objectGUID okunamadı: {dn}")))?,
-        });
+        if found.is_empty() {
+            return Err(WriteError::Failed(format!("kapsam OU'su bulunamadı: {dn}")));
+        }
+        for entry in &found {
+            let guid = guid_to_string(&binary_attr(entry, "objectGUID").unwrap_or_default())
+                .ok_or_else(|| {
+                    WriteError::Failed(format!("OU objectGUID okunamadı: {}", entry.dn))
+                })?;
+            // Ic ice kapsam verilmisse ayni OU iki aramadan da gelebilir.
+            if ous.iter().any(|o| o.guid == guid) {
+                continue;
+            }
+            ous.push(DirectoryOu {
+                dn: entry.dn.clone(),
+                name: text_attr(entry, "ou").unwrap_or_default(),
+                guid,
+            });
+        }
     }
     Ok(ous)
 }
@@ -951,7 +964,45 @@ mod tests {
         let names = |v: &[DirectoryGroup]| v.iter().map(|g| g.name.clone()).collect::<Vec<_>>();
         let groups = names(&snapshot.groups);
         let forbidden = names(&snapshot.forbidden);
-        assert_eq!(snapshot.ous.len(), 3, "üç kapsam OU'su çözülmeli");
+        // ADR-121: kok + kokun altindaki alt OU + grup OU'su. Alt OU kapsamda
+        // sayilmasa da kesfedilir, ic ice kok ayni OU'yu iki kez eklemez.
+        let ou_dns = |v: &[DirectoryOu]| {
+            let mut dns: Vec<String> = v.iter().map(|o| o.dn.to_ascii_lowercase()).collect();
+            dns.sort();
+            dns
+        };
+        let found_ous = ou_dns(&snapshot.ous);
+        for expected in [
+            "ou=personel,dc=opensicil,dc=lab",
+            "ou=pasif,ou=personel,dc=opensicil,dc=lab",
+            // seed.sh aciyor ama kapsamda HIC sayilmiyor: kesif bulmali
+            "ou=sistemuzmanlari,ou=personel,dc=opensicil,dc=lab",
+            "ou=gruplar,dc=opensicil,dc=lab",
+        ] {
+            assert!(
+                found_ous.contains(&expected.to_string()),
+                "{expected} katalogda olmalı: {found_ous:?}"
+            );
+        }
+        // Kapsam disi kalanlar: kok altinda degiller
+        for outside in ["ou=disarida,", "ou=domain controllers,"] {
+            assert!(
+                !found_ous.iter().any(|dn| dn.starts_with(outside)),
+                "kapsam dışı OU katalogda: {found_ous:?}"
+            );
+        }
+        let roots_only = ManagedScope {
+            passive_ou: None,
+            ..scope.clone()
+        };
+        let discovered = startup_checks(&mut ldap, &roots_only)
+            .await
+            .expect("kökler çözülmeli");
+        assert_eq!(
+            ou_dns(&discovered.ous),
+            ou_dns(&checks.ous),
+            "kapsamda sayılmayan alt OU kökün altından keşfedilmeli"
+        );
         for expected in ["GG-Internet", "GG-VPN", "GG-Nobet"] {
             assert!(
                 groups.contains(&expected.to_string()),

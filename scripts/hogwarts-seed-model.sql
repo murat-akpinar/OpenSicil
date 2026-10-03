@@ -14,13 +14,13 @@
 --
 -- Yapi (gercek AD'deki OU ve grup duzenine birebir):
 --   Hogwarts
---   ├── Teachers    OU=Users,OU=Teachers        GG-Teachers
+--   ├── Teachers    OU=Teachers        GG-Teachers
 --   │   └── brans adlari (Charms, Potions, Headmaster's Office …) — AD'deki
 --   │       `department` degeri; OU ve grup TEACHERS'tan miras
---   ├── Staff       OU=Users,OU=Staff           GG-Staff
+--   ├── Staff       OU=Staff           GG-Staff
 --   │   └── Facilities, Health Services, Library — ayni sekilde
 --   └── Houses                                  GG-Students-All
---       ├── Gryffindor  OU=Users,OU=Gryffindor,OU=Houses   GG-House-Gryffindor
+--       ├── Gryffindor  OU=Gryffindor,OU=Houses   GG-House-Gryffindor
 --       ├── Hufflepuff  …                                  GG-House-Hufflepuff
 --       ├── Ravenclaw   …                                  GG-House-Ravenclaw
 --       └── Slytherin   …                                  GG-House-Slytherin
@@ -105,12 +105,12 @@ ON CONFLICT DO NOTHING;
 INSERT INTO department_target_settings (department_id, target_system_id, container_item_id)
 SELECT d.id, c.target_system_id, c.id
 FROM (VALUES
-  ('TEACHERS',   'OU=Users,OU=Teachers,OU=Hogwarts,DC=hogwarts,DC=local'),
-  ('STAFF',      'OU=Users,OU=Staff,OU=Hogwarts,DC=hogwarts,DC=local'),
-  ('GRYFFINDOR', 'OU=Users,OU=Gryffindor,OU=Houses,OU=Hogwarts,DC=hogwarts,DC=local'),
-  ('HUFFLEPUFF', 'OU=Users,OU=Hufflepuff,OU=Houses,OU=Hogwarts,DC=hogwarts,DC=local'),
-  ('RAVENCLAW',  'OU=Users,OU=Ravenclaw,OU=Houses,OU=Hogwarts,DC=hogwarts,DC=local'),
-  ('SLYTHERIN',  'OU=Users,OU=Slytherin,OU=Houses,OU=Hogwarts,DC=hogwarts,DC=local')
+  ('TEACHERS',   'OU=Teachers,OU=Hogwarts,DC=hogwarts,DC=local'),
+  ('STAFF',      'OU=Staff,OU=Hogwarts,DC=hogwarts,DC=local'),
+  ('GRYFFINDOR', 'OU=Gryffindor,OU=Houses,OU=Hogwarts,DC=hogwarts,DC=local'),
+  ('HUFFLEPUFF', 'OU=Hufflepuff,OU=Houses,OU=Hogwarts,DC=hogwarts,DC=local'),
+  ('RAVENCLAW',  'OU=Ravenclaw,OU=Houses,OU=Hogwarts,DC=hogwarts,DC=local'),
+  ('SLYTHERIN',  'OU=Slytherin,OU=Houses,OU=Hogwarts,DC=hogwarts,DC=local')
 ) AS v(code, ou_dn)
 JOIN departments d ON d.code = v.code
 JOIN catalog_items c
