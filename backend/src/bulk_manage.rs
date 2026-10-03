@@ -100,6 +100,47 @@ pub async fn load(pool: &PgPool, target: i64) -> Result<Vec<Row>, sqlx::Error> {
         .collect())
 }
 
+/// Hedef basina hesap kapsami: kac baglanti yonetiliyor, kac tanesi gozlemde.
+/// `load` ile ayni dosyada duruyor ki kosullar ayrismasin — rapor "5 gozlemde"
+/// diyorsa o hedefin listesi bes satir gostermeli.
+pub struct Coverage {
+    pub target_id: i64,
+    pub name: String,
+    pub managed: i64,
+    pub observed: i64,
+}
+
+impl Coverage {
+    pub fn total(&self) -> i64 {
+        self.managed + self.observed
+    }
+}
+
+/// Baglantisi olan hedefler; hic hesabi olmayan hedef (henuz baglanmamis
+/// Zimbra gibi) raporda yer kaplamaz.
+pub async fn coverage(pool: &PgPool) -> Result<Vec<Coverage>, sqlx::Error> {
+    let rows: Vec<(i64, String, i64, i64)> = sqlx::query_as(
+        "SELECT t.id, t.name, \
+         count(i.id) FILTER (WHERE l.mode = 'managed'), \
+         count(i.id) FILTER (WHERE l.mode = 'observed') \
+         FROM target_systems t \
+         LEFT JOIN account_links l ON l.target_system_id = t.id AND l.deleted_by_us_at IS NULL \
+         LEFT JOIN identities i ON i.id = l.identity_id AND i.deleted_at IS NULL \
+         GROUP BY t.id, t.name HAVING count(i.id) > 0 ORDER BY t.id",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(target_id, name, managed, observed)| Coverage {
+            target_id,
+            name,
+            managed,
+            observed,
+        })
+        .collect())
+}
+
 /// ADR-037/043: esige yalnizca yetki ya da hesap durumu farki olan secim girer.
 pub fn affected(rows: &[Row], selected: &[i64]) -> usize {
     rows.iter()
@@ -655,6 +696,11 @@ mod tests {
         let rows = load(&pool, target).await.unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!(rows.iter().filter(|r| r.applies == Some(true)).count(), 1);
+        // ADR-130: raporun kapsam satiri ayni kosullardan okur — hesabi olmayan
+        // hedef (Zimbra) listelenmez, iki gozlem baglantisi burada sayilir.
+        let cov = coverage(&pool).await.unwrap();
+        assert_eq!(cov.len(), 1, "yalnizca hesabi olan hedef listelenir");
+        assert_eq!((cov[0].managed, cov[0].observed, cov[0].total()), (0, 2, 2));
 
         let mut state = crate::web::test_state(pool.clone(), "https://localhost");
         state.change_set_threshold = 1;

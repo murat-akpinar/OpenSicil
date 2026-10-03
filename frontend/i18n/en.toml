@@ -53,11 +53,17 @@ identities.window_departed = "Last {} days: showing {} people who left."
 identities.window_changed = "Last {} days: showing {} people whose role changed."
 
 # --- reports ---
-reports.sub = "Dated lists and pending work."
+reports.sub = "Account coverage, dated lists and pending work."
 reports.lists = "Lists"
 reports.pending = "Pending work"
 reports.pending_foot = "{} interventions · {} deletion approvals · {} adoptions"
 reports.lists_hint = "Date-driven work and name records."
+reports.managed = "Managed accounts"
+reports.observed_n = "{} observed"
+reports.coverage = "Account coverage"
+reports.coverage_hint = "How many accounts are managed and how many are observed, per target system. A row opens that target's bulk take-over screen."
+reports.coverage_foot = "{} managed · {} observed"
+reports.coverage_empty = "No linked accounts."
 
 # --- jobs needing intervention ---
 interventions.sub = "Jobs that could not be applied to the target: what is waiting, why, and what to do."

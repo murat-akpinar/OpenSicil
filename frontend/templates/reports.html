@@ -2,9 +2,10 @@
 {% block title %}{{ lang.t("nav.reports") }} — OpenSicil{% endblock %}
 {% block content %}
 {# Kendi verisi olmayan kapak sayfa: var olan rapor ekranlarina giden kartlar.
-   ADR-117 D: ustte ozet kutulari, her satirda bekleyen kayit rozeti. Rozet sifirsa
-   soluk — "yapacak is yok" da bir bilgi, ama goze batmasin.
-   Mutabakat burada degil, kendi menu maddesinde (ADR-123). #}
+   ADR-117 D: ustte ozet, her satirda bekleyen kayit rozeti. Rozet sifirsa soluk —
+   "yapacak is yok" da bir bilgi, ama goze batmasin.
+   ADR-130: ozet seridi Roller/Departmanlar ile ayni `.sum-box` kutusu (ADR-119),
+   ucuncu kutu hesap kapsami. Mutabakat burada degil, kendi menu maddesinde (ADR-123). #}
 <div class="page-head">
   <div>
     <h1 class="h1">{{ lang.t("nav.reports") }}</h1>
@@ -12,32 +13,61 @@
   </div>
 </div>
 
-<div class="grid gap-4 sm:grid-cols-2 mb-5">
+<div class="sum-row">
   {# Sayi uc ayri listenin toplami (mudahale + silme onayi + sahiplenme), tek bir
-     sayfasi yok: kart baglanti degil. Eskiden `/interventions`e gidiyordu ve
-     "26" diyen kart bos liste aciyordu. Her bilesenin kendi satiri asagida,
-     kendi sayisiyla ve kendi adresiyle duruyor. #}
-  <div class="stat stat--left">
-    <div class="stat-head">
-      <span class="stat-ico"><i class="ico ico-inbox" aria-hidden="true"></i></span>
-      <div class="min-w-0 flex-1">
-        <p class="stat-label">{{ lang.t("reports.pending") }}</p>
-        <p class="stat-row"><span class="stat-value">{{ summary.pending }}</span></p>
-        <p class="stat-foot">{{ summary.pending_foot }}</p>
-      </div>
-    </div>
+     sayfasi yok: kutu baglanti degil. Eskiden `/interventions`e gidiyordu ve
+     "26" diyen kutu bos liste aciyordu. Her bilesenin kendi satiri asagida. #}
+  <div class="sum-box tone-dim">
+    <span class="ico-tile tile-tone"><i class="ico ico-inbox" aria-hidden="true"></i></span>
+    <span class="min-w-0 flex-1">
+      <span class="sum-t">{{ lang.t("reports.pending") }}</span>
+      <span class="sum-h">{{ summary.pending_foot }}</span>
+    </span>
+    <span class="sum-n">{{ summary.pending }}</span>
   </div>
-  <a class="stat stat--moved" href="/upcoming">
-    <div class="stat-head">
-      <span class="stat-ico"><i class="ico ico-calendar" aria-hidden="true"></i></span>
-      <div class="min-w-0 flex-1">
-        <p class="stat-label">{{ lang.t("nav.upcoming") }}</p>
-        <p class="stat-row"><span class="stat-value">{{ summary.upcoming }}</span></p>
-        <p class="stat-foot">{{ lang.t1("dash.window_n", summary.upcoming_days) }}</p>
-      </div>
-    </div>
+  <a class="sum-box tone-info" href="/upcoming">
+    <span class="ico-tile tile-tone"><i class="ico ico-calendar" aria-hidden="true"></i></span>
+    <span class="min-w-0 flex-1">
+      <span class="sum-t">{{ lang.t("nav.upcoming") }}</span>
+      <span class="sum-h">{{ lang.t1("dash.window_n", summary.upcoming_days) }}</span>
+    </span>
+    <span class="sum-n">{{ summary.upcoming }}</span>
+  </a>
+  <a class="sum-box tone-accent" href="#coverage">
+    <span class="ico-tile tile-tone"><i class="ico ico-shield" aria-hidden="true"></i></span>
+    <span class="min-w-0 flex-1">
+      <span class="sum-t">{{ lang.t("reports.managed") }}</span>
+      <span class="sum-h">{{ lang.t1("reports.observed_n", summary.observed) }}</span>
+    </span>
+    <span class="sum-n">{{ summary.managed }}</span>
   </a>
 </div>
+
+{# ADR-130: "kaci yonetiliyor, kaci gozlemde" hedef basina; satir dogrudan o
+   hedefin toplu yonetime alma ekranina gider — rapor okunup kapatilmasin. #}
+<section class="card mb-5" id="coverage">
+  <div class="card-head">
+    <span class="ico-tile ico-tile-ok"><i class="ico ico-shield" aria-hidden="true"></i></span>
+    <h2 class="h2">{{ lang.t("reports.coverage") }}</h2>
+  </div>
+  <p class="sub mt-0 mb-3">{{ lang.t("reports.coverage_hint") }}</p>
+  {% if summary.coverage.is_empty() %}
+  <p class="empty-hint">{{ lang.t("reports.coverage_empty") }}</p>
+  {% else %}
+  <div class="qa">
+    {% for c in summary.coverage %}
+    <a class="qa-row" href="/targets/{{ c.target_id }}/manage">
+      <span class="ico-tile ico-tile-ok"><i class="ico ico-shield" aria-hidden="true"></i></span>
+      <span class="min-w-0 flex-1">{{ c.name }}<span class="meta block font-normal">{{ c.foot }}</span></span>
+      {# Dar ekranda cubuk gizlenir: ad ve sayilar bes satira sariyordu #}
+      <span class="meter hidden sm:block"><span class="meter-fill v-{{ c.pct }}"></span></span>
+      <span class="badge {% if c.observed > 0 %}badge-info{% else %}badge-muted{% endif %}">{{ c.observed }}</span>
+      <i class="ico ico-chevron-right nav-chevron" aria-hidden="true"></i>
+    </a>
+    {% endfor %}
+  </div>
+  {% endif %}
+</section>
 
 <section class="card">
   <div class="card-head">

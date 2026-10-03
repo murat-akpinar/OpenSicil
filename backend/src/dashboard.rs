@@ -721,7 +721,7 @@ fn exact_percent(value: i64, total: i64) -> i64 {
 /// Zirveye gore yuzde, en yakin bese yuvarlanmis: sablon `.v-NN` sinifini
 /// secebilsin diye (satir ici `style` CSP'de yasak). Sifir olmayan deger hic
 /// gorunmeyecek kadar kisa cizilmesin diye en az 5 doner.
-fn percent(value: i64, peak: i64) -> i64 {
+pub(crate) fn percent(value: i64, peak: i64) -> i64 {
     if value <= 0 || peak <= 0 {
         return 0;
     }

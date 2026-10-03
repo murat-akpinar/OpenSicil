@@ -53,11 +53,17 @@ identities.window_departed = "Son {} günde ayrılan {} kişi listeleniyor."
 identities.window_changed = "Son {} günde görevi değişen {} kişi listeleniyor."
 
 # --- raporlar ---
-reports.sub = "Tarihli listeler ve bekleyen işler."
+reports.sub = "Hesap kapsamı, tarihli listeler ve bekleyen işler."
 reports.lists = "Listeler"
 reports.pending = "Bekleyen iş"
 reports.pending_foot = "{} müdahale · {} silme onayı · {} sahiplenme"
 reports.lists_hint = "Tarihe bağlı işler ve ad kayıtları."
+reports.managed = "Yönetilen hesap"
+reports.observed_n = "{} gözlemde"
+reports.coverage = "Hesap kapsamı"
+reports.coverage_hint = "Hedef sistem başına kaçı yönetiliyor, kaçı gözlemde. Satır o hedefin toplu yönetime alma ekranına gider."
+reports.coverage_foot = "{} yönetiliyor · {} gözlemde"
+reports.coverage_empty = "Bağlı hesap yok."
 
 # --- müdahale bekleyen işler ---
 interventions.sub = "Hedefe uygulanamamış işler: neyin beklediği, neden beklediği ve ne yapılması gerektiği."

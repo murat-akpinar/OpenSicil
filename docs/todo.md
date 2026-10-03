@@ -692,6 +692,24 @@ Kurallar:
 
 ---
 
+## Raporlar: hesap kapsamı kartı ([ADR-130](decisions/130-raporlar-hesap-kapsami-karti.md))
+
+> Kullanıcı isteği (2026-10-03, çalışan yığında): *"rapor sayfasını güzelleştirme şansın var mı temaya uygun / kaçı gözlemde kaçı yönetiliyor yok / toplu olarak gözlemdekileri yönetime geçirme yok."* Üç şikâyetten ikisi eksik sayı ve eksik bağlantı; toplu yönetime alma zaten var (`/targets/{id}/manage`, ADR-087), Raporlar'dan görünmüyordu. ADR-119 C'nin altı raporluk tek sayfa akışı hâlâ spec bekliyor, bu kutucuk onun yerine geçmez.
+
+- [x] Raporlar'a hesap kapsamı kartı, özet şeridi ortak `.sum-box`a geçer
+  - Kabul: özet şeridi Roller/Departmanlar ile aynı `.sum-row`/`.sum-box` bileşeni (ADR-119), üç kutu: bekleyen iş (bağlantı değil) · yaklaşan bitişler · yönetilen hesap
+  - Kabul: "Hesap kapsamı" kartı hedef sistem başına `{} yönetiliyor · {} gözlemde` + yönetilen payının çubuğu; hiç bağlantısı olmayan hedef (bağlanmamış Zimbra) listelenmez, hiç yoksa tek cümle
+  - Kabul: satırın tamamı o hedefin `/targets/{id}/manage` ekranına gider; Raporlar'a ikinci bir yazma yolu açılmaz (eşik/sahneleme/onay tek ekranda, ADR-026/037/043)
+  - Kabul: sayılar `bulk_manage::coverage`den okunur — `load` ile aynı dosyada ve aynı koşullarla (`mode`, `deleted_by_us_at IS NULL`, `identities.deleted_at IS NULL`); rapor "3 gözlemde" diyorsa liste üç satır gösterir
+  - Kabul: yeni tablo/kolon/migration ve yeni bağımlılık yok; yüzde `dashboard::percent` (bese yuvarlama, `.v-NN`; satır içi `style` CSP'de yasak)
+  - Kabul: `sh scripts/build-css.sh` → backend testleri → `sh scripts/ui-shots.sh` "bulgu yok"
+  - Not (toplu yönetime alma zaten vardı): yeni ekran yazılmadı; `/targets/{id}/manage` (ADR-087) Raporlar'dan görünür oldu. Eşik `CHANGE_SET_THRESHOLD=10` olduğu için 26 hesabın hepsini birden seçmek sahnelenir ve ikinci bir `admin` onaylar (ADR-026/055) — bu kasıtlı, rapordan ikinci bir yazma yolu açılmadı
+  - Not (dar ekran): kapsam satırındaki `.meter` çubuğu 390px'te `hidden sm:block` ile gizleniyor; çubuk dururken hedef adı iki, sayı cümlesi üç satıra sarıyordu (ilk `ui-shots` koşusunda görüldü, ölçüm "bulgu yok" dese de göz yakaladı)
+  - Doğrulama (2026-10-03): backend **235 test** geçti (gerçek Postgres `--include-ignored`; reports.rs'te 1 test → 3, `bulk_manage` entegrasyon testine `coverage` iddiası eklendi. Lab Samba ve lab Keycloak testleri bu koşuda env değişkeni verilmediği için düştü, ikisi de bu değişiklikle ilgisiz), worker 78 test, fmt + clippy `-D warnings` temiz, yeni migration ve yeni bağımlılık yok. `sh scripts/build-css.sh` (81933 bayt), `sh scripts/check-glyphs.sh` temiz (yeni glyph yok)
+  - Doğrulama (**çalışan yığın, tarayıcıda ölçüldü**): `/reports` üç özet kutusu — "Bekleyen iş 0", "Yaklaşan bitişler 0", "Yönetilen hesap 3 / 26 gözlemde"; "Hesap kapsamı" kartında tek satır **Active Directory — 3 yönetiliyor · 26 gözlemde**, rozet 26, çubuk %10, satır `/targets/1/manage`e gidiyor. Zimbra satırı yok (hiç bağlantısı yok). Veritabanı sayımı aynı: `managed 3`, `observed 26`, hiçbiri yer tutucu rollü değil. `sh scripts/ui-shots.sh tmp/ekran-goruntuleri/19-rapor-kapsami` 14 sayfa × iki tema × 1440/390px çekti ve **"bulgu yok"** dedi
+
+---
+
 ## Sıra: açık kutucuklar buradan başlar
 
 > Buradan yukarısı bitmiş iştir ve kronolojik durur — ölçüm notlarıyla birlikte kayıt olarak kalır.
