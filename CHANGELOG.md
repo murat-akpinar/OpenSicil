@@ -31,6 +31,7 @@
 - AD'den geri dolum ve ayrılışta silmeme kutucukları
 - AD'de farklı listesine sicil ve ölçüm notu
 - MAP'ten Inter satırları çıktı (ADR-116)
+- Rol kutucuğuna saha ölçümü ve oturum devri notları
 
 ### Düzeltmeler
 
