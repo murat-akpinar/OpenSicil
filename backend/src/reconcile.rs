@@ -426,8 +426,9 @@ fn adoption_notice(lang: Lang, outcome: &crate::bulk_adopt::Outcome) -> Notice {
 
 // --- START FEATURE: ad-field-diff ---
 /// Secilen "AD'de farkli" satirlarinda AD'deki degeri kimlige yazar (ADR-112
-/// madde 2). Hedefe yazma yok, is acilmaz: deger artik AD'dekiyle ayni. Her
-/// alinan deger denetime once/sonra olarak girer (docs/07 "once/sonra").
+/// madde 2). Hedefe yazma yok: deger artik AD'dekiyle ayni. Departman alinirsa
+/// is acilir (ADR-120 madde 3) — OU ve gruplar ondan turer. Her alinan deger
+/// denetime once/sonra olarak girer (docs/07 "once/sonra").
 async fn take_ad(
     OperatorSession(op): OperatorSession,
     State(state): State<AppState>,
@@ -603,9 +604,11 @@ mod tests {
         crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
     }
 
-    /// ADR-112 madde 2: liste yalnizca ikisi de dolu ve **gercekten** farkli
-    /// alanlari basar, `auditor` okur ama alamaz, secilmeyen satir degismez ve
-    /// alinan deger denetime once/sonra girer. Mukerrer sicil yazilmaz.
+    /// ADR-112 madde 2 + ADR-120: liste yalnizca ikisi de dolu ve **gercekten**
+    /// farkli alanlari basar, `auditor` okur ama alamaz, secilmeyen satir
+    /// degismez ve alinan deger denetime once/sonra girer. Mukerrer sicil
+    /// yazilmaz; departman ada gore eslesirse yazilir ve is acar, eslesmezse
+    /// atlanir.
     #[tokio::test]
     #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
     async fn ad_diff_list_is_read_by_everyone_but_only_authority_takes_the_value() {
@@ -639,13 +642,23 @@ mod tests {
         .fetch_one(&pool)
         .await
         .unwrap();
-        // Ayse: iki alanda da gercek fark. Ali: sicil bastaki sifir farkiyla ayni,
-        // cep kimlikte bos (dolumun isi) ve AD'deki deger sabit hat biciminde.
+        // ADR-120: ikinci departman Ayse'nin AD'deki degerinin agactaki karsiligi
+        sqlx::query("INSERT INTO departments (name) VALUES ('İkinci Birim')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        // Ayse: sicil, cep ve departmanda gercek fark; AD'deki departman adi
+        // kucuk harfle yazilmis, agacta yine eslesir. Ali: sicil bastaki sifir
+        // farkiyla ayni, cep kimlikte bos (dolumun isi), AD'deki deger sabit hat
+        // biciminde — tek satiri agacta karsiligi olmayan departman adi.
         sqlx::query(
             "INSERT INTO reconcile_findings (target_system_id, read_job_id, kind, external_id, \
-             account_name, identity_id, employee_number, mobile, telephone_number) VALUES \
-             ($1, $2, 'managed', 'g1', 'ayse.yilmaz', $3, '00000000009', '+447700900009', NULL), \
-             ($1, $2, 'observed', 'g2', 'ali.kaya', $4, '00000000009', NULL, '01632 960001')",
+             account_name, identity_id, employee_number, mobile, telephone_number, \
+             department_name) VALUES \
+             ($1, $2, 'managed', 'g1', 'ayse.yilmaz', $3, '00000000009', '+447700900009', NULL, \
+              'ikinci birim'), \
+             ($1, $2, 'observed', 'g2', 'ali.kaya', $4, '00000000009', NULL, '01632 960001', \
+              'Olmayan Birim')",
         )
         .bind(target)
         .bind(read_job)
@@ -729,8 +742,8 @@ mod tests {
             !auditor.contains(crate::i18n::DEFAULT.t("addiff.submit")),
             "auditor eylem düğmesi görmez"
         );
-        // Ali hic listeye girmez: sicilde yalnizca bastaki sifir farki var,
-        // AD'deki sabit hat kimligin cep alanina yazilamaz
+        // Ali'nin sicili ve cebi listeye girmez: sicilde yalnizca bastaki sifir
+        // farki var, AD'deki sabit hat kimligin cep alanina yazilamaz
         assert!(!auditor.contains("01632"), "yazılamayan numara listede");
 
         let (_, hr_page) = send("GET", cookie("hr").await, String::new()).await;
@@ -742,11 +755,11 @@ mod tests {
             hr_page.contains(&format!(r#"value="{ayse}.mobile_phone""#)),
             "satır kutusunun değeri kimlik+alan anahtarı değil"
         );
-        // Tam iki satir: Ayse'nin iki alani. Ali hic girmez — sicilinde yalnizca
-        // bastaki sifir farki var, cebi kimlikte bos (onu dolum halleder).
+        // Tam dort satir: Ayse'nin sicil, cep ve departmani + Ali'nin departmani.
+        // Ali'nin sicili (bastaki sifir farki) ve cebi (kimlikte bos) girmez.
         assert_eq!(
             hr_page.matches(r#"name="diff""#).count(),
-            2,
+            4,
             "listede olmaması gereken satır var"
         );
 
@@ -800,6 +813,67 @@ mod tests {
                 .unwrap();
         assert_eq!(employee.as_deref(), Some("7"), "mükerrer sicil yazıldı");
         assert!(page.contains("atlandı"), "atlanan satır duyurulmadı");
+
+        // ADR-120: Ayse'nin departmani agacta eslesir ve yazilir, Ali'nin AD
+        // degeri agacta yok — satir atlanir, yeni departman acilmaz. Departman
+        // alindiginda hedefe is acilir (OU ve gruplar duzelsin); sicil ve cep
+        // alimlarindan once hic is acilmamisti, tek is bu alimin isi.
+        let (status, page) = send(
+            "POST",
+            cookie("hr").await,
+            format!("diff={ayse}.department&diff={ali}.department"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let department_of = |id: i64| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_scalar::<_, String>(
+                    "SELECT d.name FROM identities i JOIN departments d ON d.id = i.department_id \
+                     WHERE i.id = $1",
+                )
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+            }
+        };
+        assert_eq!(department_of(ayse).await, "İkinci Birim");
+        assert_eq!(
+            department_of(ali).await,
+            "Test Birimi",
+            "ağaçta karşılığı olmayan ad yazıldı"
+        );
+        assert!(
+            page.contains("Olmayan Birim"),
+            "atlanan departman adıyla duyurulmadı"
+        );
+        let jobs: Vec<i64> = sqlx::query_scalar("SELECT identity_id FROM jobs")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            jobs,
+            vec![ayse],
+            "departman alımı iş açmadı ya da fazla açtı"
+        );
+        let taken_fields: Vec<String> = sqlx::query_scalar(
+            "SELECT detail->>'field' FROM audit_log WHERE event_type = $1 ORDER BY id",
+        )
+        .bind(crate::audit::IDENTITY_FIELD_TAKEN)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(taken_fields, vec!["mobile_phone", "department"]);
+        let detail: (String, String) = sqlx::query_as(
+            "SELECT detail->>'from', detail->>'to' FROM audit_log \
+             WHERE event_type = $1 AND detail->>'field' = 'department'",
+        )
+        .bind(crate::audit::IDENTITY_FIELD_TAKEN)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(detail, ("Test Birimi".into(), "ikinci birim".into()));
 
         drop(app);
         drop(pool);

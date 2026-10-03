@@ -168,4 +168,5 @@
 - Departman ağacı seviye renkli tek parça satır şeridi
 - Mutabakatta "AD'de farklı" listesi ve toplu "AD'dekini al"
 - Katalog OU'ları kapsam köklerinin altından keşfedilir
+- AD fark listesine departman girer, alım hedefe iş açar
 
