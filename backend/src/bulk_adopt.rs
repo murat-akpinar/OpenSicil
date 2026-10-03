@@ -121,7 +121,13 @@ type CandidateRow = (
     Option<i64>,
 );
 
-/// Son taramadaki yonetilmeyen hesaplar; AD'deki departman adi departman
+/// Son taramadaki **henuz sahiplenilmemis** yonetilmeyen hesaplar. Sahiplenilen
+/// hesap bir sonraki taramayi beklemeden listeden duser (ADR-126): ya kimlik
+/// satiri onu isaretlemistir (`existing_ad_account_hint`) ya da worker
+/// baglantiyi kurmustur (`account_links.external_id`, bulgudaki `objectGUID`).
+/// Kapi ekranda degil sorguda: ikinci kez gonderilen bulgu ikinci kimlik acmaz.
+///
+/// AD'deki departman adi departman
 /// agaciyla, unvani (`title`) birincil rollerin `title` koluyla (buyuk/kucuk
 /// harf ve bosluk duyarsiz, tekil eslesme) eslenir — unvan iki role karsilik
 /// geliyorsa (`HAVING count(*) = 1`) eslesme yok sayilir, yer tutucu rol hic
@@ -148,6 +154,12 @@ pub async fn candidates(
          FROM reconcile_findings f \
          LEFT JOIN departments d ON lower(d.name) = lower(f.department_name) \
          WHERE f.target_system_id = $1 AND f.kind = 'unmanaged' \
+           AND NOT EXISTS (SELECT 1 FROM account_links l \
+             WHERE l.target_system_id = f.target_system_id \
+               AND l.external_id = f.external_id) \
+           AND NOT EXISTS (SELECT 1 FROM identities i \
+             WHERE i.deleted_at IS NULL \
+               AND lower(i.existing_ad_account_hint) = lower(f.account_name)) \
          ORDER BY f.account_name",
     )
     .bind(target)
@@ -239,6 +251,11 @@ pub async fn adopt(
     }
     let all = candidates(pool, keys.aead, target).await?;
     let mut outcome = Outcome::default();
+    // ADR-126: aday sorgusu sahiplenilmis hesabi disarida biraktigi icin ikinci
+    // kimlik acilmaz; hesap sessizce kaybolmasin diye atlananlara girer.
+    for name in already_adopted(pool, target, selected, &all).await? {
+        outcome.skipped.push((name, "err.already_adopted"));
+    }
     for candidate in all.iter().filter(|c| selected.contains(&c.id)) {
         match create_one(pool, keys, time_zone, candidate, batch).await {
             Ok(id) => outcome.created.push(id),
@@ -248,6 +265,33 @@ pub async fn adopt(
         }
     }
     Ok(outcome)
+}
+
+/// Secilen ama artik aday olmayan bulgularin hesap adi: sahiplenme olmus.
+/// Listede hic olmayan id (eski tarama, uydurma deger) bos doner — 404 yerine
+/// atlama, bugunku davranis (ADR-126).
+async fn already_adopted(
+    pool: &PgPool,
+    target: i64,
+    selected: &[i64],
+    candidates: &[Candidate],
+) -> Result<Vec<String>, sqlx::Error> {
+    let gone: Vec<i64> = selected
+        .iter()
+        .copied()
+        .filter(|id| !candidates.iter().any(|c| c.id == *id))
+        .collect();
+    if gone.is_empty() {
+        return Ok(Vec::new());
+    }
+    sqlx::query_scalar(
+        "SELECT account_name FROM reconcile_findings \
+         WHERE target_system_id = $1 AND id = ANY($2) ORDER BY account_name",
+    )
+    .bind(target)
+    .bind(&gone)
+    .fetch_all(pool)
+    .await
 }
 
 /// Tek hesap: kimlik satirini kur, dogrula, ac. Hata i18n anahtari olarak doner
@@ -655,6 +699,51 @@ mod tests {
             .unwrap();
         assert_eq!(jobs, 2 * targets);
         assert_eq!(ids.len(), 2, "seed kimlikleri duruyor");
+
+        // ADR-126: sahiplenilen hesap sonraki taramayi beklemeden listeden
+        // duser — kimlik satiri onu `existing_ad_account_hint` ile isaretledi.
+        let names = |cs: &[Candidate]| -> Vec<String> {
+            cs.iter().map(|c| c.account_name.clone()).collect()
+        };
+        let left = candidates(&pool, keys.aead, target).await.unwrap();
+        assert_eq!(names(&left), ["hagrid", "zz.dup"], "sahiplenilen iki hesap");
+
+        // Ayni secim ikinci kez gelse (cift tik, geri tusu) ikinci kimlik
+        // acilmaz; hesap "zaten sahiplenildi" nedeniyle atlananlara girer
+        let again = adopt(&pool, &keys, "Europe/Istanbul", target, &selected, &batch)
+            .await
+            .unwrap_or_else(|_| panic!("toplu sahiplenme başarısız"));
+        assert!(again.created.is_empty(), "ikinci kimlik açılmaz");
+        assert_eq!(
+            again.skipped,
+            vec![
+                ("harry.potter".to_string(), "err.already_adopted"),
+                ("ron.weasley".to_string(), "err.already_adopted"),
+                ("hagrid".to_string(), "err.given_name_blank"),
+                ("zz.dup".to_string(), "err.duplicate_national_id"),
+            ]
+        );
+        let total: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM identities WHERE existing_ad_account_hint IS NOT NULL",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(total, 2, "mükerrer kayıt açılmadı");
+
+        // Kapinin ikinci yarisi: worker baglantiyi kurduysa (ipucu yok, bulgunun
+        // `objectGUID`i bagli) bulgu yine aday degildir
+        sqlx::query(
+            "INSERT INTO account_links (identity_id, target_system_id, external_id, origin, mode) \
+             VALUES ($1, $2, 'g3', 'adopted', 'observed')",
+        )
+        .bind(ids[0])
+        .bind(target)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let linked = candidates(&pool, keys.aead, target).await.unwrap();
+        assert_eq!(names(&linked), ["zz.dup"], "bağlanan hesap da aday değil");
 
         // Bos secim ve sinir asimi forma hata doner, kimlik acilmaz
         assert!(matches!(
