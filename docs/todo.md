@@ -714,8 +714,9 @@ Kurallar:
 
 > Buradan yukarısı bitmiş iştir ve kronolojik durur — ölçüm notlarıyla birlikte kayıt olarak kalır.
 > Aşağısı yapılacak iştir ve **sırası bağlayıcıdır**: ilk işaretlenmemiş kutucuktan devam edilir.
-> Sıra: önce sessiz bozulan şey (okuma şeridi kirası), sonra bugünün isteği (tarama saati), sonra
-> küçük değişmez kuralı, sonra AD geri dolumunun kalanı, sonra loglar. Bana bağlı olmayan kutucuklar
+> Sıra: önce sessiz bozulan şey (okuma şeridi kirası), sonra bugünün isteği (işletme ayarları ekrana
+> taşınır, tarama saati onun son kutucuğu), sonra küçük değişmez kuralı, sonra AD geri dolumunun
+> kalanı, sonra loglar. Bana bağlı olmayan kutucuklar
 > **"Bende değil"** bölümünde, Zimbra ise en sonda durur ([ADR-090](decisions/090-zimbra-v1-sonrasina-alindi.md)).
 
 ---
@@ -735,21 +736,59 @@ Kurallar:
 
 ---
 
-## Mutabakat tarama saati ayarlanabilir ([ADR-124](decisions/124-mutabakat-tarama-saati-ayarlanabilir.md))
+## İşletme ayarları yapılandırma ekranına taşınır ([ADR-131](decisions/131-isletme-ayarlari-ekrandan-env-sadece-acilis.md))
 
-> Kullanıcı isteği (2026-10-03): "bu her gece 2'de çalışan şey ayarlardan yapılabilsin; kişi her saat başı isteyecek ya da günde 3 defa isteyecek, bu tür ayarları kullanıcıya bırakmak daha iyi değil mi." Karar: saat `.env`'den gelir ve aynı değişkenin virgüllü listesi günde birden çok koşuyu karşılar; cron ifadesi, aralık ayarı ve ekrandan ayar yok ([ADR-124](decisions/124-mutabakat-tarama-saati-ayarlanabilir.md)).
+> Kullanıcı isteği (2026-10-03): "`.env` çok kullanmak istemiyorum, sol menüye yapılandırma ayarları gibi bir menü koy, oradan yapalım hep." Karar: on sekiz işletme ayarı `operational_settings` anahtar/değer tablosuna ve bugünkü `/config` ekranının yeni bölümlerine taşınır; `.env`'de yalnızca açılış kablolaması kalır (portlar, TLS, `POSTGRES_*`, iki anahtar, `PUBLIC_URL`, `METRICS_TOKEN`, `AD_CA_PATH`). Env'den okuma yolu kalmaz, geriye dönük öncelik kuralı yazılmaz ([ADR-131](decisions/131-isletme-ayarlari-ekrandan-env-sadece-acilis.md) madde 2). Sol menüde ikinci bir girdi açılmaz: **Ayarlar** zaten var ve yalnızca `admin`e görünüyor.
+>
+> Diff'in küçük kalmasının nedeni: taşınan on sekiz ayarın tamamı bugün beş saf noktadan ve hepsi `impl Fn(&str) -> Option<String>` arama kapanışıyla okunuyor (`worker::ad::parse_scope`, `worker::username::Templates::from_lookup`, `common_settings::CommonSettings::from_lookup`, worker `main.rs`, backend `change_set.rs`). Değişen tek şey aramanın kaynağı; ayrıştırıcıların imzası, kuralları ve testleri değişmez ([ADR-131](decisions/131-isletme-ayarlari-ekrandan-env-sadece-acilis.md) madde 4). Anahtar adları bugünkü ortam değişkeni adlarının birebir aynısı kalır.
+>
+> Sıra bilinçli: ilk kutucuk mekanizmayı uçtan uca iki ayarla kanıtlar, sonrakiler aynı mekanizmaya ayar taşır. Her kutucuk kendi değişkenlerini `compose.yaml` ve `.env.example`'dan siler; son kutucuk bittiğinde `.env.example` on değişkene inmiş olur.
 
-- [ ] Gece taramasının saati `RECONCILE_SCAN_AT` ile verilir
-  - Kabul: değişken yoksa davranış bugünkünün birebir aynısı — kurulum saat diliminde 02:00'den sonra, günde bir, AD yapılandırılmışsa
-  - Kabul: `RECONCILE_SCAN_AT=04:30` → tarama 04:30'u geçen ilk tikte açılır, 02:00'de açılmaz
-  - Kabul: `RECONCILE_SCAN_AT=02:00,10:00,18:00` → aynı gün üç tarama; her dilim için en çok bir kez ve o dilimden sonra operatör "Yeniden tara" dediyse zamanlayıcı ikincisini açmaz (bugünkü tekilleştirme kuralı korunur)
-  - Kabul: bozuk değer açılışta reddedilir ve worker başlamaz, neden tek satırda yazar ([ADR-060](decisions/060-lastlogontimestamp-on-kosulu-acilista-dogrulanir.md) deseni): `9`, `25:00`, `02:0`, boş eleman, yinelenen saat, 24'ten fazla değer. Bozuk değer SQL'e hiç gitmez
+- [ ] Ayar tablosu doğar, backend'in iki ayarı ekrana gelir
+  - Kabul: migration `operational_settings(key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TIMESTAMPTZ, updated_by TEXT)` tablosunu açar ve [ADR-131](decisions/131-isletme-ayarlari-ekrandan-env-sadece-acilis.md) madde 10'daki on sekiz satırı bugünkü varsayılanlarla seed eder (kapsam dörtlüsü boş)
+  - Kabul: tek satırlık okuma yolu — tabloyu `impl Fn(&str) -> Option<String>` aramasına çeviren fonksiyon; `common_settings.rs` ikizine girer, iki crate'te birebir aynı olur ([ADR-070](decisions/070-bagimsiz-crate-per-crate-komut.md)) ve backend `main.rs`'in ikiz karşılaştırma testi geçmeye devam eder
+  - Kabul: `CHANGE_SET_THRESHOLD` ve `APPROVAL_TIMELOCK_HOURS` tablodan okunur; `change_set::threshold_from_env`/`timelock_from_env` yerine arama alan hâli gelir, `env_number`'ın ayrıştırma ve hata metni kuralı aynı kalır (`0` geçerli, bozuk değer hata)
+  - Kabul: `/config`'a **Sınırlar ve onay** bölümü ve bölüm menüsüne satırı girer; her alanın yanında anahtar adı ipucu olarak yazar ([ADR-131](decisions/131-isletme-ayarlari-ekrandan-env-sadece-acilis.md) Gerekçe: eski notlardaki değişken adı aranabilir kalsın)
+  - Kabul: bozuk değer tabloya girmez — form kaydederken aynı ayrıştırıcıyı çağırır, hatayı alanın yanında gösterir ve hiçbir satırı yazmaz ([ADR-131](decisions/131-isletme-ayarlari-ekrandan-env-sadece-acilis.md) madde 5)
+  - Kabul: değişiklik denetim kaydına girer — kim, hangi anahtar, eski → yeni değer ([ADR-131](decisions/131-isletme-ayarlari-ekrandan-env-sadece-acilis.md) madde 8)
+  - Kabul: işletme bölümü yerel bootstrap hesabına görünmez; `admin`/`admin` ile girildiğinde yalnızca AD/Zimbra/OIDC bölümleri açık ([ADR-068](decisions/068-yapilandirma-sayfasi-ve-bootstrap-hesabi.md) madde 3 sınırı korunur, [ADR-131](decisions/131-isletme-ayarlari-ekrandan-env-sadece-acilis.md) madde 7)
+  - Kabul: `CHANGE_SET_THRESHOLD` ve `APPROVAL_TIMELOCK_HOURS` satırları `compose.yaml` ve `.env.example`'dan silinir; env'de kalan değer artık hiçbir şeyi değiştirmez
+  - Kabul: yeni bağımlılık yok; `operational_settings`'e sır girmez ([ADR-006](decisions/006-sirlar-env.md)/[ADR-068](decisions/068-yapilandirma-sayfasi-ve-bootstrap-hesabi.md) kapsamı değişmez)
+  - Kabul: backend testi — seed edilmiş değer okunuyor, kaydedilen değer bir sonraki istekte etkili, bozuk değer reddedilince tablo değişmemiş, bootstrap oturumu bölümü görmüyor, denetim satırı yazılmış
+  - Doğrulama: çalışan yığında tarayıcıdan eşik 10 → 3 yapılır, worker ve backend **yeniden başlatılmadan** dört hesaplık bir düzenleme sahnelenir (eşik aşıldı), eşik geri alınınca aynı düzenleme sahnelenmez
+
+- [ ] Worker'ın kendi ayarları ekrana gelir: kapsam, adlandırma, yürütme
+  - Kabul: `AD_MANAGED_USER_OUS`, `AD_MANAGED_GROUP_OUS`, `AD_PASSIVE_OU`, `ZIMBRA_MANAGED_DOMAINS`, `USERNAME_TEMPLATE`, `EMAIL_LOCAL_TEMPLATE`, `DRY_RUN`, `FIRST_LOGIN_CHANGE_REQUIRED` tablodan okunur; `worker/src/engine.rs:1414`'ün doğrudan `AD_PASSIVE_OU` okuması ve `parse_scope(|n| std::env::var(n).ok())` çağrıları kalkar
+  - Kabul: `/config`'a **Yönetilen kapsam** (dört DN alanı, noktalı virgülle ayrılmış liste) ve **Yürütme** (kuru çalıştırma, ilk girişte parola değiştirme) bölümleri; **Adlandırma** bölümüne iki şablon alanı ve yer tutucu listesi ipucu ([ADR-011](decisions/011-kullanici-adi-ve-eposta.md))
+  - Kabul: `parse_scope`'un bugünkü iki kuralı kayıt anında da işler — kapsam boş olamaz, `CN=Users`/`CN=Builtin`/`OU=Domain Controllers` kapsam olamaz (docs/05); hata alanın yanında çıkar
+  - Kabul: boş kapsamın mesajı "ortam değişkeni boş" yerine "yönetilen kapsam Ayarlar ekranında tanımlı değil" olur ([ADR-131](decisions/131-isletme-ayarlari-ekrandan-env-sadece-acilis.md) madde 10); connector yine başlamaz, iş sessizce geçmez
+  - Kabul: `DRY_RUN` ekrandan kapatılabilir ama **yanlışlıkla kapanmaz** — anahtarın yanında ne olacağını söyleyen tek cümle durur ([ADR-054](decisions/054-kuru-calistirma-ve-yedekten-donus.md)) ve değişiklik denetim kaydına girer
+  - Kabul: değer iş başına okunur; `DRY_RUN` kapatıldıktan sonra **worker yeniden başlatılmadan** bekleyen iş uygulanır
+  - Kabul: sekiz değişken `compose.yaml` ve `.env.example`'dan silinir
+  - Kabul: worker testleri — ayar tablosundan okunan kapsam/şablon/anahtar değerleriyle bugünkü testlerin aynısı geçiyor (`ad.rs`, `username.rs`, `engine.rs` testlerinin env kurulumu tablo kurulumuna döner, iddialar değişmez)
+  - Doğrulama: çalışan yığında kapsam OU'ları ekrandan girilir (Hogwarts'ın gerçek OU'ları), worker yeniden başlatılmadan gece taraması/`Yeniden tara` yürür ve katalog aynı sayıları verir; `DRY_RUN` ekrandan kapatılıp bir hesap gerçekten yazılır
+
+- [ ] Ortak yedi ayar ekrana gelir, `.env` açılış kablolamasına iner
+  - Kabul: `OWNERSHIP_MODE_ENABLED`, `HOURLY_DESTRUCTIVE_LIMIT`, `HOURLY_GRANT_LIMIT`, `HOURLY_FIRST_PASSWORD_LIMIT`, `EMERGENCY_QUOTA`, `SENSITIVE_MAPPING_ENABLED`, `TZ` tablodan okunur; `CommonSettings::from_env` kalkar, `from_lookup` ve bugünkü doğrulama kuralları (bool, sınır ≥ 1, acil kota ≥ 0, IANA adı) aynen kalır
+  - Kabul: iki crate aynı satırı okur — drift artık kurulum notuna değil tabloya bağlı ([ADR-131](decisions/131-isletme-ayarlari-ekrandan-env-sadece-acilis.md) Bağlam); açılış log satırı (`worker: ortak ayarlar: …`) kalır, kaynağı tablo olur
+  - Kabul: `TZ` kurumun saat dilimidir, container'ın saati değil — `compose.yaml` artık `TZ` geçirmez, container saatleri UTC kalır ([ADR-131](decisions/131-isletme-ayarlari-ekrandan-env-sadece-acilis.md) madde 11; kodda `chrono::Local`/`Local::now` kullanımı yok, saat dilimi her zaman açık parametre)
+  - Kabul: yedi değişken `compose.yaml`'ın ortak bloğundan ve `.env.example`'dan silinir; `.env.example` on değişkene iner ve başına "burada yalnızca açılış kablolaması var, iş ayarları Ayarlar ekranında" notu girer
+  - Kabul: `common_settings.rs` iki crate'te birebir aynı kalır, backend `main.rs`'in karşılaştırma testi geçer
+  - Kabul: testler — `ENV_EXAMPLE_DEFAULTS` sabiti tablonun seed'ine döner ve bugünkü üç ayrıştırma testi (varsayılanlar, sayısal bool + sıfır kota, beş bozuk değer) iddiaları değişmeden geçer
+  - Doğrulama: çalışan yığında saatlik yıkıcı sayaç 50 → 1 yapılır, ikinci yıkıcı iş yeniden başlatma olmadan bekler; geri alınınca yürür. Sahiplenme modu ekrandan açılıp CSV doğrulamasının davranışının değiştiği görülür
+
+- [ ] Gece taramasının saatleri ekrandan verilir ([ADR-124](decisions/124-mutabakat-tarama-saati-ayarlanabilir.md)'ün kalanı, yeri [ADR-131](decisions/131-isletme-ayarlari-ekrandan-env-sadece-acilis.md))
+  - Kabul: `worker/src/scheduler.rs`'teki `NIGHTLY_SCAN_AFTER` sabiti yerine `RECONCILE_SCAN_AT` anahtarı; `open_nightly_scans` tek saat yerine saat listesi alır, SQL'de `$2::time[]`, sorgu **geçmiş en son dilime** bakar
+  - Kabul: varsayılan `02:00` → davranış bugünkünün birebir aynısı (kurulum saat diliminde 02:00'den sonra, günde bir, AD yapılandırılmışsa)
+  - Kabul: `04:30` → tarama 04:30'u geçen ilk tikte açılır, 02:00'de açılmaz
+  - Kabul: `02:00,10:00,18:00` → aynı gün üç tarama; her dilim için en çok bir kez ve o dilimden sonra operatör "Yeniden tara" dediyse zamanlayıcı ikincisini açmaz (bugünkü tekilleştirme kuralı korunur)
+  - Kabul: bozuk değer kayıtta reddedilir ve tabloya girmez ([ADR-131](decisions/131-isletme-ayarlari-ekrandan-env-sadece-acilis.md) madde 5, [ADR-124](decisions/124-mutabakat-tarama-saati-ayarlanabilir.md) madde 3'ün kurallarıyla): `9`, `25:00`, `02:0`, boş eleman, yinelenen saat, 24'ten fazla değer. Bozuk değer SQL'e hiç gitmez
   - Kabul: worker gece kapalıysa açıldığı ilk tikte kaçırdığı **son** dilim için tek tarama açılır, kaç dilim kaçtıysa bir tane (sorguya dayalı zamanlayıcı, [ADR-028](decisions/028-worker-zamanlamasi.md))
-  - Kabul: yeni bağımlılık yok (`HH:MM` elle ayrıştırılır), yeni migration yok, backend'in `common_settings.rs` ikizi değişmez (ayar worker'a özel, [ADR-124](decisions/124-mutabakat-tarama-saati-ayarlanabilir.md) madde 5)
-  - Kabul: `.env.example`, `docs/09-kurulum.md`, `docs/04-yasam-dongusu.md`'nin "Her gece 02:00" satırı ve `docs/MAP.md`'nin scheduler satırı güncellenir
-  - Not: ekranda saat gösterilmez — `/reconcile` "Son tarama"yı yazmaya devam eder; "sonraki tarama" göstergesi istenirse ayrı kutucuk
-  - Doğrulama: worker testleri (saf ayrıştırma ve dilim seçimi + gerçek Postgres'te iki saatli liste), fmt + clippy iki crate'te temiz; çalışan yığında `.env` değiştirilip worker yeniden başlatılarak bir dilimin koştuğu görülür
-
+  - Kabul: cron ifadesi ve aralık ayarı yok ([ADR-124](decisions/124-mutabakat-tarama-saati-ayarlanabilir.md) madde 4 ve Alternatifler); alan virgüllü `HH:MM` listesi, yanında ne anlama geldiğini söyleyen tek cümle durur
+  - Kabul: yeni bağımlılık yok (`HH:MM` elle ayrıştırılır), yeni migration yok (anahtar ilk kutucukta seed edildi)
+  - Kabul: `docs/04-yasam-dongusu.md`'nin "Her gece 02:00 ve istendiğinde" satırı "Ayarlanan saatlerde (varsayılan 02:00) ve istendiğinde" olur; `docs/MAP.md`'nin scheduler satırı güncellenir
+  - Not: `/reconcile` yalnızca "Son tarama"yı yazmaya devam eder; "sonraki tarama" göstergesi istenirse ayrı kutucuk
+  - Doğrulama: worker testleri (saf ayrıştırma ve dilim seçimi + gerçek Postgres'te iki saatli liste); çalışan yığında saat ekrandan değiştirilip **worker yeniden başlatılmadan** o dilimin koştuğu görülür
 ---
 
 ## Yer tutucu rol yönetilen bağlantıda olamaz: değişmez kural teste bağlanır
