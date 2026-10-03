@@ -915,6 +915,9 @@ pub(crate) fn glyph_for(event_type: &str) -> (&'static str, &'static str) {
         | audit::IDENTITY_DEPARTURE_REVERTED
         | audit::IDENTITY_CANCELLED => ("ico-logout", "danger"),
         audit::ACCOUNT_DELETION_APPROVED => ("ico-trash", "danger"),
+        // ADR-122: olu baglantinin kaldirilmasi istendi / worker kaldirdi
+        audit::ACCOUNT_UNLINK_REQUESTED => ("ico-link", "account"),
+        "ad.account.unlinked" => ("ico-link", "account"),
         // --- worker'in hedef islemleri: yalnizca kisi sayfasinda gorunur ---
         "ad.account.create" => ("ico-user-plus", "account"),
         "ad.account.adopted" => ("ico-link", "account"),

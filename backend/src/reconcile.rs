@@ -21,6 +21,8 @@ use crate::web::{render, AppState};
 const SCAN_AUTHORITIES: [&str; 2] = ["admin", "role_admin"];
 /// "Yeniden uygula" (F-13): kimlik isi acar — kayit yetkisi olanlar + rol yoneticisi.
 const REAPPLY_AUTHORITIES: [&str; 3] = ["admin", "role_admin", "hr"];
+/// ADR-122: kayip baglantiyi kaldirmak sahiplenmeyle ayni yetki
+const UNLINK_AUTHORITIES: &[&str] = &["hr", "admin"];
 
 pub struct Row {
     /// managed | observed | unmanaged | missing — ekran karsiligi i18n'de
@@ -153,6 +155,9 @@ pub fn routes() -> Router<AppState> {
             "/targets/{id}/reconcile/reapply/{identity_id}",
             post(reapply),
         )
+        // --- START FEATURE: missing-link-removal ---
+        .route("/targets/{id}/reconcile/unlink/{identity_id}", post(unlink))
+        // --- END FEATURE: missing-link-removal ---
         // --- START FEATURE: bulk-adoption ---
         .route("/targets/{id}/reconcile/adopt", post(adopt))
         // --- END FEATURE: bulk-adoption ---
@@ -172,6 +177,8 @@ struct ReconcileTemplate {
     can_scan: bool,
     /// F-13: bulgu satirinda "yeniden uygula" dugmesi
     can_reapply: bool,
+    /// ADR-122: kayip satirinda "baglantiyi kaldir" dugmesi
+    can_unlink: bool,
     /// ADR-102 toplu sahiplenme: yetki + formun doldurulacak secenekleri
     can_adopt: bool,
     candidates: Vec<crate::bulk_adopt::Candidate>,
@@ -208,6 +215,7 @@ async fn render_page(
             notice,
             can_scan: allowed(op, &SCAN_AUTHORITIES),
             can_reapply: allowed(op, &REAPPLY_AUTHORITIES),
+            can_unlink: allowed(op, UNLINK_AUTHORITIES),
             can_adopt: allowed(op, crate::bulk_adopt::AUTHORITIES),
             candidates,
             departments: options.departments,
@@ -301,6 +309,65 @@ async fn reapply(
     render_page(&state, &op, target, notice).await
 }
 // --- END FEATURE: reconcile ---
+
+// --- START FEATURE: missing-link-removal ---
+// ADR-122: dizinde bulunamayan hesabin baglantisi operatorun onayiyla kaldirilir.
+// Backend yalnizca ISTEGI yazar — `account_links`i yalnizca worker yazar (ADR-015);
+// kaldirmayi is sirasinda worker yapar ve ONCE DIZINE BAKAR: hesap gercekten yoksa
+// baglanti silinir ve ayni iste `existing_ad_account_hint` ile yeniden sahiplenilir,
+// hesap duruyorsa istek dusurulur ve baglanti korunur (bayat tarama koparmasin).
+// Kapi uc yerde: dugme yalnizca `missing` satirinda cikar, sunucu son taramada
+// bulgunun `missing` ve ayni `external_id` oldugunu dogrular, worker dizine sorar.
+const UNLINK_SQL: &str = "UPDATE account_links l SET unlink_requested_at = now() \
+    FROM reconcile_findings f \
+    WHERE l.identity_id = $2 AND l.target_system_id = $1 \
+      AND f.identity_id = l.identity_id AND f.target_system_id = l.target_system_id \
+      AND f.kind = 'missing' AND f.external_id = l.external_id \
+    RETURNING l.external_id";
+
+async fn unlink(
+    OperatorSession(op): OperatorSession,
+    State(state): State<AppState>,
+    Path((target, identity_id)): Path<(i64, i64)>,
+) -> Response {
+    if !allowed(&op, UNLINK_AUTHORITIES) {
+        return forbidden(op.lang);
+    }
+    let requested: Option<String> = match sqlx::query_scalar(UNLINK_SQL)
+        .bind(target)
+        .bind(identity_id)
+        .fetch_optional(&state.pool)
+        .await
+    {
+        Ok(requested) => requested,
+        Err(e) => return internal("bağlantı kaldırılamadı", e),
+    };
+    let Some(external_id) = requested else {
+        return axum::http::StatusCode::NOT_FOUND.into_response();
+    };
+    let detail = serde_json::json!({ "target_system_id": target, "external_id": external_id });
+    audit_operator(
+        &state,
+        &op,
+        crate::audit::ACCOUNT_UNLINK_REQUESTED,
+        Some(identity_id),
+        detail,
+    )
+    .await;
+    if let Err(e) = crate::jobs::enqueue(
+        &state.pool,
+        identity_id,
+        target,
+        crate::jobs::Priority::Single,
+    )
+    .await
+    {
+        return internal("bağlantı kaldırma işi açılamadı", e);
+    }
+    let notice = Notice::info(op.lang.t("reconcile.unlinked").into());
+    render_page(&state, &op, target, notice).await
+}
+// --- END FEATURE: missing-link-removal ---
 
 // --- START FEATURE: bulk-adoption ---
 /// Sahiplenmeyi bekleyen hesaplar: hedef basina "yonetilmeyen" bulgu sayisi.
@@ -1122,6 +1189,192 @@ mod tests {
         )
         .await;
         assert_eq!(r.status(), StatusCode::NOT_FOUND);
+
+        drop(app);
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
+    /// ADR-122: kayip bulguda kaldirma ISTEGI yazilir (backend baglanti silmez,
+    /// ADR-015) ve is acilir; CANLI baglanti bu yoldan istenemez; `auditor`
+    /// dugmeyi gormez ve eylemi calistiramaz.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn only_a_missing_link_can_be_requested_for_removal_and_it_opens_a_job() {
+        use axum::body::Body;
+        use axum::http::{header, Request, StatusCode};
+        use tower::ServiceExt;
+
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        let ids = crate::test_support::seed_two_identities(&pool).await;
+        let app = crate::web::routes()
+            .with_state(crate::web::test_state(pool.clone(), "https://localhost"));
+        let target: i64 = sqlx::query_scalar("SELECT id FROM target_systems WHERE kind = 'ad'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let read_job: i64 = sqlx::query_scalar(
+            "INSERT INTO read_jobs (kind, target_system_id, requested_by) \
+             VALUES ('reconcile', $1, 'test') RETURNING id",
+        )
+        .bind(target)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        // ids[0] kayip (hesap dizinde yok), ids[1] yonetiliyor (hesap yerinde)
+        for (kind, guid, sam, identity) in [
+            ("missing", "g-olu", "ali.kaya", ids[0]),
+            ("managed", "g-canli", "veli.demir", ids[1]),
+        ] {
+            sqlx::query(
+                "INSERT INTO reconcile_findings (target_system_id, read_job_id, kind, \
+                 external_id, account_name, identity_id) VALUES ($1, $2, $3, $4, $5, $6)",
+            )
+            .bind(target)
+            .bind(read_job)
+            .bind(kind)
+            .bind(guid)
+            .bind(sam)
+            .bind(identity)
+            .execute(&pool)
+            .await
+            .unwrap();
+            sqlx::query(
+                "INSERT INTO account_links (identity_id, target_system_id, external_id, \
+                 origin, mode) VALUES ($1, $2, $3, 'adopted', 'managed')",
+            )
+            .bind(identity)
+            .bind(target)
+            .bind(guid)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        let session = |authority: &'static str| {
+            let pool = pool.clone();
+            async move {
+                let operator = crate::operator_session::Operator {
+                    subject: "sub-x".to_string(),
+                    username: "ik.operatoru".to_string(),
+                    email: "ik@example.org".to_string(),
+                    authorities: vec![authority.to_string()],
+                    auth_source: crate::operator_session::AuthSource::Oidc,
+                    lang: crate::i18n::DEFAULT,
+                };
+                let token = crate::operator_session::create_session(&pool, &operator)
+                    .await
+                    .unwrap();
+                format!("{}={token}", crate::cookie::OPERATOR_SESSION_COOKIE_NAME)
+            }
+        };
+        let send = |method: &'static str, uri: String, cookie: String| {
+            let app = app.clone();
+            async move {
+                app.oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(uri)
+                        .header(header::COOKIE, cookie)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap()
+            }
+        };
+        let body = |r: axum::response::Response| async move {
+            let bytes = axum::body::to_bytes(r.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            String::from_utf8(bytes.to_vec()).unwrap()
+        };
+        // (baglanti sayisi, kaldirma istegi yazilmis mi)
+        let link_state = |identity: i64| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_as::<_, (i64, i64)>(
+                    "SELECT count(*), count(unlink_requested_at) \
+                     FROM account_links WHERE identity_id = $1",
+                )
+                .bind(identity)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+            }
+        };
+        let page = format!("/targets/{target}/reconcile");
+        let unlink = format!("/targets/{target}/reconcile/unlink/{}", ids[0]);
+
+        // Dugme yalnizca kayip satirda; yonetilen satirda hala "yeniden uygula"
+        let hr = session("hr").await;
+        let html = body(send("GET", page.clone(), hr.clone()).await).await;
+        assert_eq!(html.matches("/reconcile/unlink/").count(), 1, "{html}");
+        assert_eq!(html.matches("/reconcile/reapply/").count(), 1, "{html}");
+        let auditor = session("auditor").await;
+        let html = body(send("GET", page.clone(), auditor.clone()).await).await;
+        assert!(!html.contains("/reconcile/unlink/"), "auditor düğmesiz");
+
+        // Yetkisiz 403; baglanti yerinde kalir
+        let r = send("POST", unlink.clone(), auditor).await;
+        assert_eq!(r.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            link_state(ids[0]).await,
+            (1, 0),
+            "yetkisiz istek kaldırma isteği yazdı"
+        );
+
+        // Canli baglanti koparilamaz: bulgu `managed`, sunucu 404 der
+        let r = send(
+            "POST",
+            format!("/targets/{target}/reconcile/unlink/{}", ids[1]),
+            hr.clone(),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            link_state(ids[1]).await,
+            (1, 0),
+            "canlı bağlantıya kaldırma isteği yazıldı"
+        );
+
+        // hr: baglanti silinir, denetim satiri yazilir, yeniden sahiplenme isi acilir
+        let r = send("POST", unlink.clone(), hr.clone()).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        let html = body(r).await;
+        assert!(
+            html.contains(crate::i18n::DEFAULT.t("reconcile.unlinked")),
+            "{html}"
+        );
+        // Backend silmez (ADR-015): satir yerinde, uzerinde istek damgasi var
+        assert_eq!(
+            link_state(ids[0]).await,
+            (1, 1),
+            "kaldırma isteği yazılmadı"
+        );
+        let audited: (i64, Option<String>) = sqlx::query_as(
+            "SELECT count(*), min(detail->>'external_id') FROM audit_log \
+             WHERE event_type = $1 AND identity_id = $2",
+        )
+        .bind(crate::audit::ACCOUNT_UNLINK_REQUESTED)
+        .bind(ids[0])
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(audited, (1, Some("g-olu".to_string())));
+        let job: (i64, i16) = sqlx::query_as(
+            "SELECT count(*), min(priority) FROM jobs WHERE identity_id = $1 AND target_system_id = $2",
+        )
+        .bind(ids[0])
+        .bind(target)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(job, (1, crate::jobs::Priority::Single as i16));
+
+        // Istek tekrarlanabilir: damga yenilenir, yeni bir sey bozulmaz
+        let r = send("POST", unlink, hr).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        assert_eq!(link_state(ids[0]).await, (1, 1));
 
         drop(app);
         drop(pool);

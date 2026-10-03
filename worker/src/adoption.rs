@@ -12,6 +12,60 @@ use crate::writes::WriteError;
 
 pub const ADOPTED_EVENT: &str = "ad.account.adopted";
 pub const MANAGED_EVENT: &str = "ad.account.managed";
+/// ADR-122: dizinde bulunamayan hesabin baglantisi kaldirildi
+pub const UNLINKED_EVENT: &str = "ad.account.unlinked";
+
+/// ADR-122: operatorun istedigi kaldirma. Cagiran, hesabin dizinde GERCEKTEN
+/// olmadigini dogrulamis olmali — burada yalnizca satir silinir ve denetime
+/// olu `external_id` yazilir. Baglantinin tasidigi bayraklar (ilk parola,
+/// ayrilis parolasi, iptal dogrulamasi) o hesaba aitti, onunla birlikte gider.
+pub async fn remove_link(
+    pool: &sqlx::PgPool,
+    identity_id: i64,
+    target: i64,
+    external_id: &str,
+) -> Result<(), String> {
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    sqlx::query("DELETE FROM account_links WHERE identity_id = $1 AND target_system_id = $2")
+        .bind(identity_id)
+        .bind(target)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("bağlantı kaldırılamadı: {e}"))?;
+    sqlx::query(
+        "INSERT INTO audit_log (event_type, identity_id, target_system_id, detail) \
+         VALUES ($1, $2, $3, $4::jsonb)",
+    )
+    .bind(UNLINKED_EVENT)
+    .bind(identity_id)
+    .bind(target)
+    .bind(format!(
+        "{{\"external_id\":\"{}\"}}",
+        crate::writes::json_quote(external_id)
+    ))
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| format!("denetim satırı yazılamadı: {e}"))?;
+    tx.commit().await.map_err(|e| e.to_string())
+}
+
+/// ADR-122: hesap dizinde duruyormus — istek dusurulur, baglanti korunur.
+pub async fn clear_unlink_request(
+    pool: &sqlx::PgPool,
+    identity_id: i64,
+    target: i64,
+) -> Result<(), String> {
+    sqlx::query(
+        "UPDATE account_links SET unlink_requested_at = NULL \
+         WHERE identity_id = $1 AND target_system_id = $2",
+    )
+    .bind(identity_id)
+    .bind(target)
+    .execute(pool)
+    .await
+    .map(|_| ())
+    .map_err(|e| format!("kaldırma isteği düşürülemedi: {e}"))
+}
 
 #[derive(Debug)]
 pub struct Candidate {

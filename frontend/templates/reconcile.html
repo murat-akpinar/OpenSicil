@@ -225,10 +225,17 @@
           {% endmatch %}
         </td>
         <td><span class="badge badge-{% if r.kind == "missing" %}warn{% else if r.kind == "unmanaged" %}info{% else %}ok{% endif %}">{{ lang.key("reconcilekind", r.kind.as_str()) }}</span></td>
-        {# F-13: kimligi olan bulguda "yeniden uygula"; yonetilmeyen hesabin yolu sahiplenme #}
+        {# F-13: kimligi olan bulguda "yeniden uygula"; yonetilmeyen hesabin yolu sahiplenme.
+           ADR-122: hesap dizinde yoksa "yeniden uygula" olu GUID'e gider — o satirda
+           yerine "baglantiyi kaldir" cikar, kimlik yeniden sahiplenilebilsin #}
         <td>
           {% match r.identity_id %}
-            {% when Some with (id) %}{% if can_reapply %}
+            {% when Some with (id) %}
+            {% if r.kind == "missing" %}{% if can_unlink %}
+            <form method="post" action="/targets/{{ target_id }}/reconcile/unlink/{{ id }}">
+              <button class="btn btn-sm" type="submit" title="{{ lang.t("reconcile.unlink_title") }}">{{ lang.t("reconcile.unlink") }}</button>
+            </form>
+            {% endif %}{% else if can_reapply %}
             <form method="post" action="/targets/{{ target_id }}/reconcile/reapply/{{ id }}">
               <button class="btn btn-sm" type="submit" title="{{ lang.t("reconcile.reapply_title") }}">{{ lang.t("reconcile.reapply") }}</button>
             </form>

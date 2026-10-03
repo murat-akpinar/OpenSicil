@@ -167,7 +167,16 @@ async fn reconcile_ad(c: &AdJob<'_>, ldap: &mut Ldap) -> Result<String, JobError
     ) {
         return verify_cancellation(c, ldap, link).await;
     }
-    let link_row = resolve_link(c).await?;
+    // ADR-122: operator kayip hesabin baglantisini kaldirmak istedi. Silmeden
+    // once DIZINE bakilir — bayat tarama ya da gecici kapsam hatasi (ADR-121)
+    // canli bir baglantiyi koparmasin.
+    let link_row = match unlink_if_requested(c, ldap).await? {
+        Unlink::Kept(outcome) => return Ok(outcome),
+        // Baglanti silindi: is ayni kosuda "baglantisi olmayan kimlik" yolundan
+        // surer, ipucu doluysa var olan hesap gozlem modunda sahiplenilir.
+        Unlink::Removed => None,
+        Unlink::NotRequested => resolve_link(c).await?,
+    };
     match (&link_row, c.desired.account) {
         // ADR-018: ipucu doluysa hesap acilmaz, sahiplenilir
         (None, AccountPresence::Present { enabled }) => {
@@ -198,6 +207,52 @@ async fn reconcile_ad(c: &AdJob<'_>, ldap: &mut Ldap) -> Result<String, JobError
             Ok("'hesap açılsın = hayır' yalnızca hesap yokken okunur (ADR-040)".to_string())
         }
     }
+}
+
+enum Unlink {
+    NotRequested,
+    /// Baglanti silindi; is bagsiz kimlik gibi surer
+    Removed,
+    /// Baglanti korundu; isin sonucu bu metin
+    Kept(String),
+}
+
+// ADR-122: kaldirma istegini worker uygular. Hesap dizinde duruyorsa istek
+// dusurulur ve baglanti yerinde kalir; yoksa satir silinir ve denetime girer.
+async fn unlink_if_requested(c: &AdJob<'_>, ldap: &mut Ldap) -> Result<Unlink, JobError> {
+    let Some(link) = &c.input.link_row else {
+        return Ok(Unlink::NotRequested);
+    };
+    if !link.unlink_requested {
+        return Ok(Unlink::NotRequested);
+    }
+    if c.env.mode.dry_run {
+        return Ok(Unlink::Kept(
+            "kuru çalıştırma: bağlantı kaldırma isteği bekliyor, DRY_RUN kapanınca uygulanır (ADR-054)"
+                .to_string(),
+        ));
+    }
+    if ad_account::find_by_guid(ldap, &link.external_id)
+        .await?
+        .is_some()
+    {
+        adoption::clear_unlink_request(c.pool, c.job.identity_id, c.job.target_system_id)
+            .await
+            .map_err(JobError::Failed)?;
+        return Ok(Unlink::Kept(format!(
+            "hesap dizinde duruyor (GUID {}): bağlantı korundu, kaldırma isteği düşürüldü",
+            link.external_id
+        )));
+    }
+    adoption::remove_link(
+        c.pool,
+        c.job.identity_id,
+        c.job.target_system_id,
+        &link.external_id,
+    )
+    .await
+    .map_err(JobError::Failed)?;
+    Ok(Unlink::Removed)
 }
 
 // ADR-087: yonetime alma istendiyse gozlem bayragi bu isin basinda duser ve fark
@@ -608,6 +663,7 @@ async fn adopted_result(
         first_password_pwd_last_set: None,
         observed: true,
         manage_requested: false,
+        unlink_requested: false,
     };
     let diff = observe(c, ldap, &link).await?;
     Ok(format!(
@@ -769,6 +825,7 @@ async fn insert_link(c: &AdJob<'_>, guid: &str) -> Result<LinkRow, JobError> {
         first_password_pwd_last_set: None,
         observed: false,
         manage_requested: false,
+        unlink_requested: false,
     })
 }
 
@@ -1734,6 +1791,73 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(intents, 0, "gözlemde hedefe yazma niyeti yok");
+
+        // --- ADR-122: kayip baglantinin kaldirilmasi ---
+        let request_unlink = |guid: Option<&'static str>| {
+            let pool = pool.clone();
+            let identity = seed.identity;
+            async move {
+                let sql = match guid {
+                    Some(_) => {
+                        "UPDATE account_links SET unlink_requested_at = now(), \
+                                external_id = $2 WHERE identity_id = $1"
+                    }
+                    None => {
+                        "UPDATE account_links SET unlink_requested_at = now() \
+                             WHERE identity_id = $1"
+                    }
+                };
+                let q = sqlx::query(sql).bind(identity);
+                match guid {
+                    Some(g) => q.bind(g).execute(&pool).await,
+                    None => q.execute(&pool).await,
+                }
+                .unwrap();
+            }
+        };
+        let link_now = |pool: PgPool| async move {
+            sqlx::query_as::<_, (String, i64)>(
+                "SELECT external_id, count(unlink_requested_at) OVER () FROM account_links \
+                 WHERE identity_id = $1",
+            )
+            .bind(seed.identity)
+            .fetch_optional(&pool)
+            .await
+            .unwrap()
+        };
+
+        // Hesap dizinde duruyor: istek dusurulur, baglanti KORUNUR
+        request_unlink(None).await;
+        let kept = run_job(&pool, &job, &env(true, false)).await.unwrap();
+        assert!(kept.contains("bağlantı korundu"), "{kept}");
+        assert_eq!(
+            link_now(pool.clone()).await,
+            Some((existing.guid.clone(), 0)),
+            "canlı hesabın bağlantısı koparıldı ya da istek düşürülmedi"
+        );
+
+        // Hesap dizinde yok (olu GUID): baglanti silinir ve ayni iste ipucuyla
+        // yeniden sahiplenilir — kurtarma yolu tek koside tamamlanir
+        request_unlink(Some("00000000-0000-0000-0000-000000000099")).await;
+        let recovered = run_job(&pool, &job, &env(true, false)).await.unwrap();
+        assert!(
+            recovered.starts_with("sahiplenildi (gözlem modu)"),
+            "{recovered}"
+        );
+        assert_eq!(
+            link_now(pool.clone()).await,
+            Some((existing.guid.clone(), 0)),
+            "bağlantı canlı hesaba yeniden kurulmadı"
+        );
+        let unlinked: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM audit_log WHERE identity_id = $1 AND event_type = $2",
+        )
+        .bind(seed.identity)
+        .bind(adoption::UNLINKED_EVENT)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(unlinked, 1, "kaldırma denetime girmedi");
 
         // ayni hesap ikinci kimlige baglanamaz
         set_hint("mevcut.personel", seed.other_identity).await;

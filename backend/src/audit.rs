@@ -35,6 +35,9 @@ pub const RECONCILE_REAPPLY: &str = "reconcile.reapply";
 pub const IDENTITY_FIELD_TAKEN: &str = "identity.field_taken";
 /// ADR-024: saklamasi dolan hesabin silinmesi operator tarafindan onaylandi
 pub const ACCOUNT_DELETION_APPROVED: &str = "account.deletion_approved";
+/// ADR-122: operator kayip hesabin baglantisinin kaldirilmasini istedi; kaldirmayi
+/// worker yapar (once dizine bakar), sonucu `ad.account.unlinked` satirina yazar
+pub const ACCOUNT_UNLINK_REQUESTED: &str = "account.unlink_requested";
 // F-17 CSV ice aktarma (ADR-018): parti olaylari kimliksiz (kim, ne zaman, kac satir),
 // kimlik basina olay kisinin olay listesinde
 pub const IMPORT_APPLIED: &str = "import.applied";

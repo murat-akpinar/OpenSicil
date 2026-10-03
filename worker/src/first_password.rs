@@ -84,6 +84,7 @@ mod tests {
             first_password_pwd_last_set: stored.map(str::to_string),
             observed: false,
             manage_requested: false,
+            unlink_requested: false,
         }
     }
 

@@ -63,6 +63,9 @@ pub struct LinkRow {
     pub observed: bool,
     /// ADR-087: operator yonetime almayi onayladi; worker modu cevirir
     pub manage_requested: bool,
+    /// ADR-122: operator kayip hesabin baglantisinin kaldirilmasini istedi;
+    /// silmeden once dizine worker bakar
+    pub unlink_requested: bool,
 }
 
 const MAX_DEPARTMENT_DEPTH: i32 = 8;
@@ -440,12 +443,13 @@ type LinkQueryRow = (
     Option<String>,
     String,
     bool,
+    bool,
 );
 
 const LINK_SQL: &str =
     "SELECT origin, verified_unused, deletion_approved, external_id, applied_state, \
      password_reset_at_departure, first_password_pwd_last_set, mode, \
-     manage_requested_at IS NOT NULL \
+     manage_requested_at IS NOT NULL, unlink_requested_at IS NOT NULL \
      FROM account_links WHERE identity_id = $1 AND target_system_id = $2";
 
 // Saf fonksiyonun gordugu kisim (ADR-038) ile motorun ihtiyac duydugu ham kisim.
@@ -460,6 +464,7 @@ fn link_from(row: LinkQueryRow) -> (AccountLink, LinkRow) {
         pwd,
         mode,
         manage_requested,
+        unlink_requested,
     ) = row;
     (
         AccountLink {
@@ -478,6 +483,7 @@ fn link_from(row: LinkQueryRow) -> (AccountLink, LinkRow) {
             first_password_pwd_last_set: pwd,
             observed: mode == "observed",
             manage_requested,
+            unlink_requested,
         },
     )
 }
