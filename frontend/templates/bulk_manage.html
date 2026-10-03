@@ -20,7 +20,9 @@
 
 {% if !notice.info.is_empty() %}<div class="alert alert-info mb-4">{{ notice.info }}</div>{% endif %}
 {% if !notice.error.is_empty() %}<div class="alert alert-warn mb-4">{{ notice.error }}</div>{% endif %}
-{% if diff_running %}<p class="alert alert-info mb-4">{{ lang.t("manage.diff_running") }}</p>{% endif %}
+{# ADR-126 madde 4: fark hesabı okuma şeridinde sürerken sayfa kendini tazeler;
+   iş bitince öznitelik gelmez ve tazeleme kendiliğinden durur. #}
+{% if diff_running %}<p class="alert alert-info mb-4" data-reload="5"><i class="ico ico-refresh ico-spin" aria-hidden="true"></i> {{ lang.t("manage.diff_running") }}</p>{% endif %}
 
 {% if !pending.is_empty() %}
 <div class="card mb-4">

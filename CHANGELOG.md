@@ -52,6 +52,7 @@
 - Giriş sonrası yönlendirme, boş filtre değeri, favicon ve panelde taşma
 - Iş sonucundaki NUL baytı yazılamayınca iş sonsuza dek çalışır kalıyordu
 - Yönetici kayıtlı değilken AD'deki manager silinmiyor
+- Fark hesabı sürerken ekran kendini tazeler, POST resend sormuyor
 
 ### Geri alınanlar
 

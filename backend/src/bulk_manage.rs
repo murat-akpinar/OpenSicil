@@ -331,6 +331,11 @@ struct ManageBatchTemplate {
     approver_is_initiator: bool,
 }
 
+/// Eylemin yapildigi GET sayfasi: POST'lar buraya yonlendirir (ADR-126 madde 1).
+fn page_path(target: i64) -> String {
+    format!("/targets/{target}/manage")
+}
+
 async fn target_name(pool: &PgPool, target: i64) -> Result<Option<String>, sqlx::Error> {
     sqlx::query_scalar("SELECT name FROM target_systems WHERE id = $1")
         .bind(target)
@@ -378,7 +383,8 @@ async fn page(
     State(state): State<AppState>,
     Path(target): Path<i64>,
 ) -> Response {
-    render_page(&state, &op, target, Notice::default()).await
+    let notice = Notice::take(&state.pool, &op.username).await;
+    render_page(&state, &op, target, notice).await
 }
 
 /// "Farkı hesapla": okuma seridine `manage_diff` isi; acik is varken ikincisi acilmaz.
@@ -403,13 +409,9 @@ async fn request_diff(
         Ok(_) => "manage.diff_already_open",
         Err(e) => return internal("fark hesabı isteği yazılamadı", e),
     };
-    render_page(
-        &state,
-        &op,
-        target,
-        Notice::info(op.lang.t(key).to_string()),
-    )
-    .await
+    Notice::info(op.lang.t(key).to_string())
+        .redirect(&state.pool, &op, &page_path(target))
+        .await
 }
 
 /// Secim: esigi asmayan secim hemen istek yazar, asan sahnelenir.
@@ -424,8 +426,9 @@ async fn submit(
     }
     let ids = selected_ids(&form);
     if ids.is_empty() {
-        let notice = Notice::err(op.lang.t("manage.none_selected").to_string());
-        return render_page(&state, &op, target, notice).await;
+        return Notice::err(op.lang.t("manage.none_selected").to_string())
+            .redirect(&state.pool, &op, &page_path(target))
+            .await;
     }
     let rows = match load(&state.pool, target).await {
         Ok(rows) => rows,
@@ -444,7 +447,11 @@ async fn submit(
         return Redirect::to(&format!("/targets/{target}/manage/{id}")).into_response();
     }
     match request_and_audit(&state, &op, target, &ids).await {
-        Ok(text) => render_page(&state, &op, target, Notice::info(text)).await,
+        Ok(text) => {
+            Notice::info(text)
+                .redirect(&state.pool, &op, &page_path(target))
+                .await
+        }
         Err(e) => internal("yönetime alma isteği yazılamadı", e),
     }
 }
@@ -551,7 +558,10 @@ async fn batch_page(
     Path((target, id)): Path<(i64, i64)>,
 ) -> Response {
     match load_batch(&state, &op, target, id).await {
-        Ok((batch, rows)) => render_batch(&state, &op, batch, rows, Notice::default()).await,
+        Ok((batch, rows)) => {
+            let notice = Notice::take(&state.pool, &op.username).await;
+            render_batch(&state, &op, batch, rows, notice).await
+        }
         Err(response) => *response,
     }
 }
@@ -564,13 +574,15 @@ async fn approve(
     if !allowed(&op, APPROVE_AUTHORITIES) {
         return forbidden(op.lang);
     }
-    let (batch, rows) = match load_batch(&state, &op, target, id).await {
+    let (batch, _rows) = match load_batch(&state, &op, target, id).await {
         Ok(loaded) => loaded,
         Err(response) => return *response,
     };
     if !batch.approvable_by(&op.subject, state.approval_timelock_hours) {
-        let notice = Notice::err(op.lang.t("err.approver_is_initiator").to_string());
-        return render_batch(&state, &op, batch, rows, notice).await;
+        let to = format!("{}/{id}", page_path(target));
+        return Notice::err(op.lang.t("err.approver_is_initiator").to_string())
+            .redirect(&state.pool, &op, &to)
+            .await;
     }
     let text = match request_and_audit(&state, &op, target, &batch.ids).await {
         Ok(text) => text,
@@ -582,7 +594,9 @@ async fn approve(
     let detail =
         serde_json::json!({ "batch_id": id, "target_system_id": target, "by": batch.by_username });
     audit_operator(&state, &op, crate::audit::MANAGE_APPROVED, None, detail).await;
-    render_page(&state, &op, target, Notice::info(text)).await
+    Notice::info(text)
+        .redirect(&state.pool, &op, &page_path(target))
+        .await
 }
 
 async fn reject(
@@ -593,8 +607,9 @@ async fn reject(
     let batch = match pending(&state.pool, target, id).await {
         Ok(Some(batch)) => batch,
         Ok(None) => {
-            let notice = Notice::err(op.lang.t("err.manage_batch_not_found").to_string());
-            return render_page(&state, &op, target, notice).await;
+            return Notice::err(op.lang.t("err.manage_batch_not_found").to_string())
+                .redirect(&state.pool, &op, &page_path(target))
+                .await;
         }
         Err(e) => return internal("toplu yönetime alma partisi okunamadı", e),
     };
@@ -607,8 +622,9 @@ async fn reject(
     let detail =
         serde_json::json!({ "batch_id": id, "target_system_id": target, "by": batch.by_username });
     audit_operator(&state, &op, crate::audit::MANAGE_REJECTED, None, detail).await;
-    let notice = Notice::info(op.lang.t("manage.rejected").to_string());
-    render_page(&state, &op, target, notice).await
+    Notice::info(op.lang.t("manage.rejected").to_string())
+        .redirect(&state.pool, &op, &page_path(target))
+        .await
 }
 // --- END FEATURE: bulk-manage ---
 
@@ -756,10 +772,25 @@ mod tests {
         assert_eq!(r.status(), StatusCode::FORBIDDEN);
 
         let hr = session("hr-sub", "hr").await;
-        // fark hesabi istegi: ilki acilir, ikincisi "zaten acik"
-        let page =
-            text(send("POST", format!("{base}/diff"), String::new(), hr.clone()).await).await;
-        assert!(page.contains("name=\"link\""), "{page}");
+        // fark hesabi istegi: ilki acilir, ikincisi "zaten acik". ADR-126: POST
+        // yonlendirir, mesaj sonraki GET'te cikar ve is surerken sayfa kendini tazeler.
+        let r = send("POST", format!("{base}/diff"), String::new(), hr.clone()).await;
+        assert_eq!(r.status(), StatusCode::SEE_OTHER);
+        assert_eq!(r.headers()[header::LOCATION].to_str().unwrap(), base);
+        let page = text(send("GET", base.clone(), String::new(), hr.clone()).await).await;
+        assert!(
+            page.contains("name=\"link\"")
+                && page.contains(crate::i18n::DEFAULT.t("manage.diff_requested"))
+                && page.contains("data-reload"),
+            "{page}"
+        );
+        // flash bir kez gorunur: ikinci GET'te mesaj yok, tazeleme surdugu icin oznitelik var
+        let page = text(send("GET", base.clone(), String::new(), hr.clone()).await).await;
+        assert!(
+            !page.contains(crate::i18n::DEFAULT.t("manage.diff_requested"))
+                && page.contains("data-reload"),
+            "{page}"
+        );
         let open: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM read_jobs WHERE kind = 'manage_diff' AND target_system_id = $1",
         )
@@ -820,18 +851,20 @@ mod tests {
         let location = r.headers()[header::LOCATION].to_str().unwrap().to_string();
         assert!(location.starts_with(&format!("{base}/")), "{location}");
         let same_admin = session("hr-sub", "admin").await;
-        let page = text(
-            send(
-                "POST",
-                format!("{location}/approve"),
-                String::new(),
-                same_admin,
-            )
-            .await,
+        let r = send(
+            "POST",
+            format!("{location}/approve"),
+            String::new(),
+            same_admin.clone(),
         )
         .await;
+        assert_eq!(r.status(), StatusCode::SEE_OTHER);
+        assert_eq!(r.headers()[header::LOCATION].to_str().unwrap(), location);
+        let page = text(send("GET", location.clone(), String::new(), same_admin).await).await;
         assert!(
-            page.contains("Ayşe Yılmaz") && page.contains("Üçüncü Kişi"),
+            page.contains("Ayşe Yılmaz")
+                && page.contains("Üçüncü Kişi")
+                && page.contains(crate::i18n::DEFAULT.t("err.approver_is_initiator")),
             "{page}"
         );
         let still: i64 = sqlx::query_scalar(
@@ -852,20 +885,17 @@ mod tests {
         .await
         .unwrap();
         let other_admin = session("admin-sub", "admin").await;
-        let page = text(
-            send(
-                "POST",
-                format!("{location}/approve"),
-                String::new(),
-                other_admin,
-            )
-            .await,
+        let r = send(
+            "POST",
+            format!("{location}/approve"),
+            String::new(),
+            other_admin.clone(),
         )
         .await;
-        assert!(
-            page.contains("1") && page.contains("yönetime alma istendi") || page.contains("1"),
-            "{page}"
-        );
+        assert_eq!(r.status(), StatusCode::SEE_OTHER);
+        assert_eq!(r.headers()[header::LOCATION].to_str().unwrap(), base);
+        let page = text(send("GET", base.clone(), String::new(), other_admin).await).await;
+        assert!(page.contains("1"), "{page}");
         let requested: Vec<i64> = sqlx::query_scalar(
             "SELECT identity_id FROM account_links WHERE manage_requested_at IS NOT NULL ORDER BY identity_id",
         )
