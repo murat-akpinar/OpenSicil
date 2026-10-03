@@ -35,6 +35,7 @@
 - README v1 sonrasına göre güncellendi (ADR sayısı, faz sırası, geri dolum)
 - Mutabakat tarama saati ayarı ve iki yeni kutucuk todo'ya girdi
 - Todo.md sıraya girdi, açık kutucuklar yapılış sırasında
+- Iki kutucuğun doğrulaması çalışan yığında gerçek sahiplenmeyle tamamlandı
 
 ### Düzeltmeler
 
