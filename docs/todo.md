@@ -828,6 +828,52 @@ Kurallar:
 
 ---
 
+## Mutabakat tarama saati ayarlanabilir ([ADR-124](decisions/124-mutabakat-tarama-saati-ayarlanabilir.md))
+
+> Kullanıcı isteği (2026-10-03): "bu her gece 2'de çalışan şey ayarlardan yapılabilsin; kişi her saat başı isteyecek ya da günde 3 defa isteyecek, bu tür ayarları kullanıcıya bırakmak daha iyi değil mi." Karar: saat `.env`'den gelir ve aynı değişkenin virgüllü listesi günde birden çok koşuyu karşılar; cron ifadesi, aralık ayarı ve ekrandan ayar yok ([ADR-124](decisions/124-mutabakat-tarama-saati-ayarlanabilir.md)).
+
+- [ ] Gece taramasının saati `RECONCILE_SCAN_AT` ile verilir
+  - Kabul: değişken yoksa davranış bugünkünün birebir aynısı — kurulum saat diliminde 02:00'den sonra, günde bir, AD yapılandırılmışsa
+  - Kabul: `RECONCILE_SCAN_AT=04:30` → tarama 04:30'u geçen ilk tikte açılır, 02:00'de açılmaz
+  - Kabul: `RECONCILE_SCAN_AT=02:00,10:00,18:00` → aynı gün üç tarama; her dilim için en çok bir kez ve o dilimden sonra operatör "Yeniden tara" dediyse zamanlayıcı ikincisini açmaz (bugünkü tekilleştirme kuralı korunur)
+  - Kabul: bozuk değer açılışta reddedilir ve worker başlamaz, neden tek satırda yazar ([ADR-060](decisions/060-lastlogontimestamp-on-kosulu-acilista-dogrulanir.md) deseni): `9`, `25:00`, `02:0`, boş eleman, yinelenen saat, 24'ten fazla değer. Bozuk değer SQL'e hiç gitmez
+  - Kabul: worker gece kapalıysa açıldığı ilk tikte kaçırdığı **son** dilim için tek tarama açılır, kaç dilim kaçtıysa bir tane (sorguya dayalı zamanlayıcı, [ADR-028](decisions/028-worker-zamanlamasi.md))
+  - Kabul: yeni bağımlılık yok (`HH:MM` elle ayrıştırılır), yeni migration yok, backend'in `common_settings.rs` ikizi değişmez (ayar worker'a özel, [ADR-124](decisions/124-mutabakat-tarama-saati-ayarlanabilir.md) madde 5)
+  - Kabul: `.env.example`, `docs/09-kurulum.md`, `docs/04-yasam-dongusu.md`'nin "Her gece 02:00" satırı ve `docs/MAP.md`'nin scheduler satırı güncellenir
+  - Not: ekranda saat gösterilmez — `/reconcile` "Son tarama"yı yazmaya devam eder; "sonraki tarama" göstergesi istenirse ayrı kutucuk
+  - Doğrulama: worker testleri (saf ayrıştırma ve dilim seçimi + gerçek Postgres'te iki saatli liste), fmt + clippy iki crate'te temiz; çalışan yığında `.env` değiştirilip worker yeniden başlatılarak bir dilimin koştuğu görülür
+
+---
+
+## Okuma şeridinde yarıda kalan iş geri alınır ([ADR-062](decisions/062-is-kirasi-ve-yarida-kalan-is.md)'nin okuma şeridi karşılığı)
+
+> Tarama sırasında bulundu (2026-10-03): `read_jobs`'ta kira yok. `read_lane::claim` satırı `running` yapıyor, `finish` bitiriyor; arada worker ölürse satır **sonsuza dek** `running` kalıyor ve `read_jobs_open_idx` (kısmi tekil indeks) o tür + hedef için ikinci iş açtırmıyor. Sonuç: gece mutabakatı her gece sessizce düşüyor (`open_nightly_scans` `ON CONFLICT DO NOTHING`), ekrandaki "Yeniden tara" da aynı çatışmaya düşüp `rows_affected`'a bakmadığı için (`backend/src/reconcile.rs:140`) çalışmış görünüyor. Tetikleyici egzotik değil: tarama sürerken worker'ı yeniden kurmak (grace sonunda SIGKILL), host yeniden başlaması, OOM. Varyantı 2026-10-03'te yaşandı (NUL baytı yüzünden sonuç satırı yazılamıyor, iş sonsuza dek `running` kalıyordu — `db::pg_text` o tetikleyiciyi kapattı, yapısal delik durdu). Yazma şeridinde aynı sorun [ADR-062](decisions/062-is-kirasi-ve-yarida-kalan-is.md) ile çözülmüş; yeni karar gerekmiyor, aynı desen okuma şeridine uygulanır.
+
+- [ ] Yarıda kalmış okuma işi geri alınır, tıkanma sessiz kalmaz
+  - Kabul: kira süresi geçmiş `running` okuma işi geri alınır (`failed`, sonuç metni "yarıda kaldı"); aynı tür + hedef için yeni iş açılabilir ve sonraki gece koşusu yürür
+  - Kabul: süresi geçmemiş iş dokunulmaz — başka bir worker kopyasının süren taraması çalınmaz ([ADR-061](decisions/061-dagitim-sozlesmesi-compose-ve-kubernetes.md)); "tek worker" varsayımı koda gömülmez
+  - Kabul: kira süresi ve geri alma deseni [ADR-062](decisions/062-is-kirasi-ve-yarida-kalan-is.md)'nin yazma şeridinde kullandığının aynısı — yeni zaman sabiti uydurulmaz
+  - Kabul: "Yeniden tara" açık iş varken sessizce başarı demez; `rows_affected == 0` ise ekran "tarama zaten sürüyor" der (yeni i18n anahtarı gerekirse iki dosyaya girer)
+  - Kabul: yeni tablo ve yeni bağımlılık yok; metrik ucu değişmez (`opensicil_target_last_reconcile_timestamp_seconds` bayatlığı göstermeye devam eder)
+  - Kabul: worker testi — `running` bırakılmış satır kira süresi geçince geri alınıyor ve yeni iş açılabiliyor, geçmemişken satır olduğu gibi kalıyor; backend testi — açık iş varken düğme uyarı veriyor
+  - Doğrulama: çalışan yığında tarama sürerken worker öldürülür (`docker compose kill worker`), yeniden ayağa kaldırılır; kira dolduktan sonra tarama kendiliğinden yürür ve `/reconcile` "Son tarama"yı günceller
+
+---
+
+## Yer tutucu rol yönetilen bağlantıda olamaz: değişmez kural teste bağlanır
+
+> Önerilen madde 2'nin **küçültülmüş** hâli (2026-10-03). Asıl soru: gece dolumu (`reconcile::fill_placeholder_roles`) okuma şeridinde kaldığı için rol dolan kimliğe iş açılmıyor, yani yönetilen bir hesap yeni rolün OU'suna taşınmazdı. Kodu okuyunca bugün **ulaşılamaz** bir durum olduğu görüldü: yer tutucu rol yalnızca toplu sahiplenme formunun varsayılanından geliyor (`backend/src/reconcile.rs:289`), o bağlantılar gözlem modunda; "Yönetime al" tek ve toplu yolda yer tutucu rolde reddediliyor (`identity::ManageOutcome::RoleUndefined`, `bulk_manage.rs:75`), CSV ve kayıt formu yer tutucuyu seçtirmiyor (`csv_import.rs:442`). Dolum rolü yazdıktan **sonra** yönetime alma kendi işini açıyor. Bu yüzden iş açan kod bugün savunma kodu olurdu ([ADR-120](decisions/120-ad-fark-listesine-departman-girer.md)'nin "gece tam geçişi şimdi yazılmıyor" gerekçesi duruyor); yazılan şey kuralın **testi** olur, kapının kalkması sessizce fark edilmesin diye.
+
+- [ ] Değişmez kural test edilir: `mode = 'managed'` bağlantının kimliğinde yer tutucu rol bulunmaz
+  - Kabul: backend testi kuralı ihlal etmeyi dener — yer tutucu rolü olan kimliğe tek ve toplu "Yönetime al" reddediliyor (bugünkü davranış), kayıt ve CSV yolunda yer tutucu rol seçilemiyor
+  - Kabul: test kuralın **neden** var olduğunu tek satırda yazar: kapı kalkarsa gece dolumu yönetilen hesabın rolünü değiştirir ve iş açılmadığı için hesap eski OU'da kalır
+  - Kabul: kapı ileride bilerek kaldırılırsa test kırmızı olur ve o zaman iş açma kararı yazılır — bugün ne iş açılır ne kod eklenir
+  - Not: fark listesinden **alım** (`ad_diff::take`) zaten iş açıyor (rol ve departmanda, [ADR-120](decisions/120-ad-fark-listesine-departman-girer.md) madde 3); bu kutucuk onu değiştirmez
+  - Not: sicil/cep/e-posta/kullanıcı adı dolumunda iş açılmaması doğru — değer AD'den geldiği için hedefte fark kalmıyor
+  - Doğrulama: backend testleri + fmt + clippy; kod değişmediği için çalışan yığında ölçüm gerekmez
+
+---
+
 ## Ek Hedef Sistem: Zimbra
 
 > **Beklemede (kullanıcı kararı, 2026-10-02):** "Zimbra dursun, onu proje bitince bakacağım bir şey." Lab Zimbra'sı bir altyapı kararı ister (ADR-069: üçüncü taraf 10.1 derlemesi ya da ayrı VM) ve bu bölümün ilk kutucuğu ona bağlı; kullanıcı açıkça erteledi, kendi başına seçilmez.
