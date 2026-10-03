@@ -833,6 +833,38 @@ Kurallar:
   - Not: worker'ın `fill_placeholder_roles`'u (ADR-120 madde 5) aynı kuralı gece taramasında zaten uyguluyordu; bu kutucuk aynı eşleştirmeyi sahiplenme anına taşıyor, kuralın kendisini değiştirmiyor
   - Not: ayrı bir `resolve_role_by_title` fonksiyonu yerine `bulk_adopt::candidates()`'ın departmanı çözdüğü aynı toplu sorguya skaler bir alt sorgu eklendi (`ad_diff.rs::PAIRS_SQL`'deki rol eşleştirmesiyle aynı kalıp, backend içi ikizi) — parti başına ekstra sorgu açılmaz, ADR-125 gerekçesi
   - Doğrulama (2026-10-03): backend **235 test** (gerçek Postgres `--include-ignored`; lab Keycloak + lab Samba olmadan 233/235, iki atlanan test yalnızca lab bağlantısı ister — ortamdan kaynaklı, bu kutucukla ilgisiz), fmt + clippy `-D warnings` temiz, `cargo audit` yalnızca [ADR-073](decisions/073-cargo-audit-rsa-bulgusu-kabul-edilen-risk.md) `rsa`, yeni migration ve yeni bağımlılık yok, worker dokunulmadı
+- [x] POST sayfa basmaz, yönlendirir: mutabakat ve hedefler ekranı ([ADR-126](decisions/126-post-yonlendirir-mesaj-oturumda-bekler.md) madde 1–3)
+  - Kabul: "Yeniden tara", "Seçilenleri sahiplen", "Yeniden uygula", "Bağlantıyı kaldır", "AD'dekini al" ve "Katalogu yenile" 303 ile kendi GET sayfasına döner; F5 artık "yeniden gönder" sormaz
+  - Kabul: mesaj kaybolmaz — `operator_sessions.flash_info`/`flash_error`'da bekler, ilk GET'te basılır ve aynı ifadede silinir (sayfa ikinci kez tazelenince tekrar çıkmaz)
+  - Kabul: sahiplenmenin dinamik mesajı aynen kalır: açılan kimlik sayısı + atlananların adı ve nedeni
+  - Kabul: 403 (yetkisiz) ve 404 (listede olmayan kayıt) cevapları değişmez; doğrulama hatası da flash'a yazılıp yönlendirir — form bugün de yeniden basılırken sıfırlanıyor, kayıp yok
+  - Kabul: testler 303 + `Location`'ı doğrular ve mesajı ardından gelen GET'te arar (flash gidiş-dönüşü de sınanmış olur)
+  - Not: tetiklediği asıl risk mükerrer kayıt — "yeniden gönder" sahiplenmeyi ikinci kez çalıştırıyor; kapının kendisi üçüncü kutucukta
+  - Not (2026-10-03): `Notice::redirect` mesajı `operator_sessions.flash_info`/`flash_error`'a yazıp 303 döner, `Notice::take` ilk GET'te `UPDATE … RETURNING` ile okuyup aynı ifadede siler (`0031_session_flash.sql`); yeni tablo yok, dil tercihinin durduğu satır taşıyor. Mutabakatta altı POST (`scan`, `adopt`, `reapply`, `unlink`, `take_ad`) ve hedefler ekranında katalog yenileme bu yoldan geçer
+  - Doğrulama (2026-10-03): backend **235 test** (gerçek Postgres `--include-ignored` + lab Samba + lab Keycloak), worker **104 test** (dokunulmadı, geriye dönük kontrol), fmt + clippy `-D warnings` iki crate'te temiz, `cargo audit` yalnızca [ADR-073](decisions/073-cargo-audit-rsa-bulgusu-kabul-edilen-risk.md) `rsa` (worker 0)
+  - Doğrulama (**çalışan yığın**, geçici admin oturumuyla; oturum sonunda silindi): `POST /targets/1/reconcile/scan` → `HTTP/2 303` + `location: /targets/1/reconcile`, sonraki GET'te "Mutabakat taraması okuma şeridine yazıldı" **bir kez**, ikinci GET'te yok (flash tek kullanımlık). `POST /targets/1/reconcile/adopt` yan etkisiz yoldan (hiç aday seçmeden, kimlik açılmadı) → `303` + sonraki GET'te `alert alert-warn → "Hiç hesap seçilmedi"`. F5 artık "yeniden gönder" sormuyor
+- [ ] Çalışan iş ekranda döner, bitince kendiliğinden "bitti" der ([ADR-126](decisions/126-post-yonlendirir-mesaj-oturumda-bekler.md) madde 4–5)
+  - Kabul: `read_jobs.status` `queued` ya da `running` iken rozetin ikonu döner ve sayfa kendini tazeler; iş bitince rozet "bitti" ve `result` metni ("29 hesap tarandı: …") görünür, tazeleme durur
+  - Kabul: tazeleme operatörün elini kesmez — form alanında odak varken ya da seçili onay kutusu varken tur atlanır
+  - Kabul: düğmeye basıldığı an düğme dönen ikona geçer ve ikinci gönderim engellenir; `name`/`value` taşıyan düğmeler `disabled` edilmez (devre dışı düğme form gövdesine girmez)
+  - Kabul: JS kapalıyken sayfa çalışmaya devam eder: rozet durur, tazeleme olmaz, düğme sıradan düğmedir
+  - Kabul: yeni uç nokta, yeni sorgu ve yeni i18n anahtarı yok — durum zaten şablonda
+  - Not (2026-10-03): bu kutucuğun kodu önceki kutucukla aynı ağaçta yazıldı ve onunla birlikte commit'lendi (`View::running`/`refreshing`, şablonlardaki `data-reload`, `app.js`'teki `autoReload` + `submitBusy`). Sunucu tarafı çalışan yığında ölçüldü: iş sürerken `badge badge-info" data-reload="5"` + `ico-spin`, iş bitince `data-reload` yok ve sonuç metni basılıyor. Kalan doğrulama tarayıcıda: dönen düğme ikonu, odak/alan koruması ve JS kapalı davranış
+- [ ] Sahiplenme sonrası durum kendiliğinden güncellenir (yazma şeridi de izlenir)
+  - Kullanıcı bildirimi (2026-10-03): "sahiplenme mevzuu F5 atmadan yazı değişmiyor, yapınca otomatik durum kısmı güncellense"
+  - Ölçüm (çalışan yığın, aynı gün): sahiplenme POST'u 303 dönüyor ve mesaj basılıyor, ama dönen sayfada `data-reload` **yok**; öznitelik yalnızca okuma işine konuyor (`reconcile.html:33`, `targets.html:44`). Sahiplenmenin işleri yazma şeridinde (`jobs` 49/50, POST'tan ~5 sn sonra "sahiplenildi (gözlem modu)") ve sayfa o şeride hiç bakmıyor
+  - Kabul: hedefin açık (`queued`/`running`) yazma şeridi işi varken mutabakat sayfası da kendini tazeler; iş bitince tazeleme durur ve sonucu operatör F5'e basmadan görür
+  - Kabul: tazeleme kuralı kutucuk "Çalışan iş ekranda döner"dakinin aynısı — aynı `data-reload` özniteliği, aynı alan koruması; ikinci bir mekanizma yazılmaz
+  - Kabul: tek yeni sorgu hedefin açık işini soran skaler; yeni uç nokta, yeni tablo, yeni i18n anahtarı yok
+  - Not: sayaçların ve aday listesinin kendini güncellemesi bu kutucuğun işi değil — onlar son taramanın anlık görüntüsü, adayın listeden düşmesi sıradaki kutucukta
+- [ ] Sahiplenilen aday listeden düşer; aynı hesap iki kez sahiplenilemez
+  - Kabul: sahiplenmeden sonra o hesap aday listesinde görünmez — sonraki taramayı beklemez
+  - Kabul: aynı bulgu ikinci kez gönderilse ikinci kimlik açılmaz, hesap "zaten sahiplenildi" nedeniyle atlananlara girer
+  - Kabul: kapı sunucuda — aday sorgusu bağlı hesabı (`account_links`) ve `existing_ad_account_hint` ile işaretlenmiş kimliği dışarıda bırakır
+  - Not: bugün `bulk_adopt::adopt` aynı bulgu için ikinci kimliği açıyor; tek koruma operatörün listeyi iki kez göndermemesi
+- [ ] Kalan POST'lar da yönlendirir: roller, departmanlar, toplu yönetime alma, silmeler, içe aktarma ([ADR-126](decisions/126-post-yonlendirir-mesaj-oturumda-bekler.md) madde 1)
+  - Kabul: başarı yolunda sayfa basan handler kalmaz; istisna yalnızca doğrulama hatası ve `POST /imports/preview` (yan etkisi yok, "uygularsam ne olur" ekranı)
+  - Kabul: her ekranda mesaj flash'tan basılır; eşik aşımında zaten var olan yönlendirmeler değişmez
 - [ ] TC kimlik no: öznitelik ayarı + toplu dolum ([ADR-112](decisions/112-alan-bazli-yetki-ve-geri-dolum.md) madde 5, [ADR-106](decisions/106-sahiplenmede-ad-kisi-alanlari.md))
   - Kabul: `ad_national_id_attribute` Yapılandırma'da girilince tarama değeri okur; boşken hiç okunmaz (bugünkü davranış korunur)
   - Kabul: dolum backend toplu eylemidir — AEAD + blind index backend'de üretilir ([ADR-010](decisions/010-kisisel-veri-kimlik-no-telefon.md)); worker düz değeri kimliğe yazmaz
@@ -847,6 +879,21 @@ Kurallar:
   - Kabul: hangi alan kendiliğinden dolar, hangisi karar bekler, denetimde ne görünür — iki ekran da anlatılır
 - [ ] Kapanış: güvenlik ve test
   - (1a'daki kapanış şablonunun aynısı)
+
+---
+
+## Kayıp katalog öğesinin çıkışı ([ADR-127](decisions/127-kayip-katalog-ogesi-devredilir-ya-da-kaldirilir.md))
+
+> Kullanıcı isteği (2026-10-03): "bir çok grup sildik ve artık ihtiyaç yok, sonsuza kadar kayıp mı kalacak orada öyle", "aynı şeyden 2 tane var, tuhaf duruyor". Ölçüm (çalışan yığın, aynı gün): Hogwarts AD'si yeniden kurulduğu için katalogda **36 kayıp öğe** var ve onlara bakan **17 rol hakkı + 7 departman hakkı** duruyor (konteyner ayarlarında kayıp bağ yok). Öğelerin çoğunun aynı ad + aynı DN'de canlı ikizi var — operatör ikisini birlikte işaretlemiş durumda, rol formunda "GG-Teachers" iki kez görünüyor, biri "(kayıp)". Katalog tazelemesi hiçbir şey silmediği (`worker/src/catalog.rs:56`) ve kaldırma yolu da olmadığı için satırlar sonsuza kadar duruyor. Karar [ADR-122](decisions/122-kayip-hesabin-baglantisi-kaldirilabilir.md)'nin desenini izler: eylem kayıp satırda, karar operatörde, otomatik devir yok ([ADR-127](decisions/127-kayip-katalog-ogesi-devredilir-ya-da-kaldirilir.md)).
+
+- [ ] Kayıp katalog satırı canlı ikizine devredilir ya da katalogdan kaldırılır
+  - Kabul: kayıp satırda **"canlı ikizine devret"** yalnızca aynı hedef + aynı tür + aynı DN'de **tek** canlı öğe varsa çıkar; basılınca rol hakları, departman hakları ve konteyner ayarları (`role_entitlements`, `department_entitlements`, `role_target_settings`, `department_target_settings`, `target_systems.default_container_item_id`) canlı öğeye taşınır, bağ zaten varsa mükerrer eklenmez, kayıp satır silinir
+  - Kabul: kayıp satırda **"katalogdan kaldır"** her zaman çıkar; ekran önce o öğeye bakan rol ve departmanları yazar, onaydan sonra o bağlar ve satır silinir
+  - Kabul: canlı satırda iki eylem de yok; tazeleme hâlâ hiçbir şey silmez (kuralın tek istisnası operatörün bu iki eylemi)
+  - Kabul: yetki `admin` + `role_admin`, `auditor` eylemleri görmez; her eylem denetime bir satır yazar (hangi öğe → hangi öğe, ya da hangi tanımlardan düşürüldü)
+  - Kabul: rol ve departman formunun grup ızgarasında kayıp öğe yalnızca o tanımda zaten işaretliyse basılır; işaretli değilse yeni seçenek olarak sunulmaz
+  - Kabul: yeni tablo, yeni bağımlılık ve yeni migration yok — kolonlar `catalog_items`'ta duruyor; backend testi iki eylemi ve 403/404 yollarını sınar
+  - Doğrulama: çalışan yığında Hogwarts kataloğundaki 36 kayıp satır devir ve kaldırma ile temizlenir; ikizi olmayan Samba kalıntıları kayıp kalır, rol formunda artık tek "GG-Teachers" görünür
 
 ---
 

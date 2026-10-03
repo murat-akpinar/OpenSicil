@@ -21,7 +21,7 @@
       {% if v.refresh_status.is_empty() %}
       <span class="badge badge-muted">{{ lang.t("catalog.never") }}</span>
       {% else %}
-      <span class="badge badge-{{ lang.key("readjobkind", v.refresh_status) }}">{{ lang.key("readjob", v.refresh_status) }}</span>
+      <span class="badge badge-{{ lang.key("readjobkind", v.refresh_status) }}">{% if v.refreshing() %}<i class="ico ico-refresh ico-spin" aria-hidden="true"></i>{% endif %}{{ lang.key("readjob", v.refresh_status) }}</span>
       {% endif %}
     </div>
     <span class="flex flex-wrap items-center justify-end gap-x-3 gap-y-1">
@@ -40,7 +40,8 @@
       <span class="badge badge-muted">{{ lang.t("catalog.never") }}</span>
       <span class="muted">{{ lang.t("common.none") }}</span>
       {% else %}
-      <span class="badge badge-{{ lang.key("readjobkind", v.refresh_status) }}">{{ lang.key("readjob", v.refresh_status) }}</span>
+      {# ADR-126: iş sürerken ikon döner ve `data-reload` sayfayı tazeletir #}
+      <span class="badge badge-{{ lang.key("readjobkind", v.refresh_status) }}"{% if v.refreshing() %} data-reload="5"{% endif %}>{% if v.refreshing() %}<i class="ico ico-refresh ico-spin" aria-hidden="true"></i>{% endif %}{{ lang.key("readjob", v.refresh_status) }}</span>
       <span class="tabular-nums">{{ v.refresh_at }}</span>
       {# Ozet kirpilmaz, kendi satirina iner; yine de tamami `title`da #}
       <span class="min-w-0 basis-full muted sm:basis-auto sm:flex-1" title="{{ v.refresh_result }}">{{ v.refresh_result }}</span>

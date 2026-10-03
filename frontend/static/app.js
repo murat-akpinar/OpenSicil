@@ -680,6 +680,103 @@
     });
   }
 
+  // Çalışan okuma işini (tarama, katalog yenileme) worker yapıyor; durumu
+  // sunucu biliyor. Sayfada `data-reload` varken sayfa kendini tazeler, iş
+  // bitince o öznitelik gelmediği için tazeleme kendiliğinden durur ve rozet
+  // "bitti" + sonuç metnini gösterir (ADR-126). Operatörün elini kesmez: bir
+  // alanda odak varken ya da yüklendiğinden beri değişmiş bir alan varken tur
+  // atlanır — yarım dolu sahiplenme formu silinmesin.
+  var FIELD_TAGS = /^(INPUT|SELECT|TEXTAREA)$/;
+
+  function autoReload() {
+    var mark = document.querySelector("[data-reload]");
+    if (!mark) {
+      return;
+    }
+    var seconds = parseInt(mark.getAttribute("data-reload"), 10);
+    if (!seconds || seconds < 1) {
+      return;
+    }
+    var touched = fieldWatcher();
+    setInterval(function () {
+      if (!touched()) {
+        window.location.reload();
+      }
+    }, seconds * 1000);
+  }
+
+  function fieldWatcher() {
+    var fields = document.querySelectorAll("input, select, textarea");
+    var initial = [];
+    for (var i = 0; i < fields.length; i++) {
+      initial[i] = fieldValue(fields[i]);
+    }
+    return function () {
+      var focused = document.activeElement;
+      if (focused && FIELD_TAGS.test(focused.tagName)) {
+        return true;
+      }
+      for (var i = 0; i < fields.length; i++) {
+        if (fieldValue(fields[i]) !== initial[i]) {
+          return true;
+        }
+      }
+      return false;
+    };
+  }
+
+  function fieldValue(field) {
+    if (field.type === "checkbox" || field.type === "radio") {
+      return field.checked ? "1" : "0";
+    }
+    return field.value;
+  }
+
+  // Düğmeye basıldığı an cevap verir: ikon döner ve ikinci gönderim engellenir
+  // (çift tık bugün ikinci POST'u gönderiyor). Düğme `disabled` EDİLMEZ —
+  // `name` taşıyan düğme devre dışı kalırsa form gövdesine girmez. Geri tuşuyla
+  // dönülen sayfa canlı DOM'la gelebiliyor, işaret `pageshow`da silinir.
+  function submitBusy() {
+    var forms = document.querySelectorAll("form[method=post]");
+    for (var i = 0; i < forms.length; i++) {
+      forms[i].addEventListener("submit", onSubmit);
+    }
+    window.addEventListener("pageshow", function () {
+      for (var i = 0; i < forms.length; i++) {
+        forms[i].removeAttribute("data-sent");
+        clearBusy(forms[i]);
+      }
+    });
+  }
+
+  function onSubmit(event) {
+    if (this.hasAttribute("data-sent")) {
+      event.preventDefault();
+      return;
+    }
+    this.setAttribute("data-sent", "");
+    var button = event.submitter || this.querySelector("button:not([type=button])");
+    if (!button) {
+      return;
+    }
+    button.setAttribute("aria-busy", "true");
+    var icon = button.querySelector(".ico");
+    if (icon) {
+      icon.classList.add("ico-spin");
+    }
+  }
+
+  function clearBusy(form) {
+    var busy = form.querySelectorAll("[aria-busy]");
+    for (var i = 0; i < busy.length; i++) {
+      busy[i].removeAttribute("aria-busy");
+      var icon = busy[i].querySelector(".ico");
+      if (icon) {
+        icon.classList.remove("ico-spin");
+      }
+    }
+  }
+
   apply(stored());
   navApply(navStored() || navDefault());
 
@@ -698,5 +795,7 @@
     tree();
     selectAll();
     csvFileInputs();
+    submitBusy();
+    autoReload();
   });
 })();

@@ -31,6 +31,9 @@ pub struct Notice {
     pub info: String,
 }
 
+/// Oturum satirinda bekleyen bildirim: bilgi, hata (ikisi de bos olabilir)
+type FlashRow = (Option<String>, Option<String>);
+
 impl Notice {
     pub fn err(text: String) -> Notice {
         Notice {
@@ -43,6 +46,59 @@ impl Notice {
         Notice {
             info: text,
             ..Notice::default()
+        }
+    }
+
+    /// ADR-126: POST cevabinda sayfa basmak F5'te "yeniden gonder" uyarisi
+    /// cikariyordu. Cevap 303 olur, mesaj operatorun oturum satirinda bir
+    /// sonraki GET'e kadar bekler. Yazilamazsa eylem yine de olmustur: hata
+    /// log'a duser, sayfa mesajsiz acilir.
+    pub async fn redirect(self, pool: &sqlx::PgPool, op: &Operator, to: &str) -> Response {
+        if let Err(e) = self.save(pool, &op.username).await {
+            eprintln!("web: bildirim oturuma yazılamadı ({}): {e}", op.username);
+        }
+        Redirect::to(to).into_response()
+    }
+
+    async fn save(self, pool: &sqlx::PgPool, username: &str) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "UPDATE operator_sessions SET flash_info = $2, flash_error = $3 WHERE username = $1",
+        )
+        .bind(username)
+        .bind(Some(self.info).filter(|t| !t.is_empty()))
+        .bind(Some(self.error).filter(|t| !t.is_empty()))
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Bekleyen mesaji okur ve ayni ifadede siler — mesaj bir kez gorunur,
+    /// kendini tazeleyen sayfada (ADR-126 madde 4) tekrar cikmaz. Eski deger
+    /// `RETURNING` ile dondurulur: `UPDATE … RETURNING flash_info` yeni degeri
+    /// (NULL) verirdi, bu yuzden satir once CTE'de okunur.
+    pub async fn take(pool: &sqlx::PgPool, username: &str) -> Notice {
+        let taken: Result<Option<FlashRow>, sqlx::Error> = sqlx::query_as(
+            "WITH waiting AS ( \
+                 SELECT token_hash, flash_info, flash_error FROM operator_sessions \
+                 WHERE username = $1 AND (flash_info IS NOT NULL OR flash_error IS NOT NULL) \
+             ) \
+             UPDATE operator_sessions s SET flash_info = NULL, flash_error = NULL \
+             FROM waiting w WHERE s.token_hash = w.token_hash \
+             RETURNING w.flash_info, w.flash_error",
+        )
+        .bind(username)
+        .fetch_optional(pool)
+        .await;
+        match taken {
+            Ok(Some((info, error))) => Notice {
+                info: info.unwrap_or_default(),
+                error: error.unwrap_or_default(),
+            },
+            Ok(None) => Notice::default(),
+            Err(e) => {
+                eprintln!("web: bekleyen bildirim okunamadı ({username}): {e}");
+                Notice::default()
+            }
         }
     }
 }
@@ -639,6 +695,14 @@ struct TargetFormView {
     refresh_status: String,
     refresh_at: String,
     refresh_result: String,
+}
+
+impl TargetFormView {
+    /// ADR-126: yenileme kuyrukta ya da çalışıyor — rozet döner, sayfa kendini
+    /// tazeler, iş bitince sonuç metni kendiliğinden görünür
+    fn refreshing(&self) -> bool {
+        org::read_job_open(&self.refresh_status)
+    }
 }
 
 #[derive(Template)]
@@ -1331,14 +1395,17 @@ async fn refresh_catalog(
         let detail = serde_json::json!({ "action": "catalog_refresh", "target_id": id });
         audit_operator(&state, &op, crate::audit::TARGET_CHANGED, None, detail).await;
     }
-    render_targets(&state, &op, Notice::info(op.lang.t(key).into())).await
+    Notice::info(op.lang.t(key).into())
+        .redirect(&state.pool, &op, "/targets")
+        .await
 }
 
 async fn targets_page(
     OperatorSession(op): OperatorSession,
     State(state): State<AppState>,
 ) -> Response {
-    render_targets(&state, &op, Notice::default()).await
+    let notice = Notice::take(&state.pool, &op.username).await;
+    render_targets(&state, &op, notice).await
 }
 
 async fn save_target(
@@ -1729,7 +1796,10 @@ mod tests {
             admin.clone(),
         )
         .await;
-        let page = body_string(r).await;
+        // ADR-126: cevap sayfa degil 303; mesaj bir sonraki GET'te basilir
+        assert_eq!(location(&r), "/targets");
+        let page =
+            body_string(send("GET", "/targets".into(), String::new(), admin.clone()).await).await;
         assert!(page.contains("okuma şeridine yazıldı"), "{page}");
         let (kind, requested): (String, Option<String>) =
             sqlx::query_as("SELECT kind, requested_by FROM read_jobs WHERE target_system_id = $1")
@@ -1741,16 +1811,16 @@ mod tests {
             (kind.as_str(), requested.as_deref()),
             ("catalog_refresh", Some("rol.yoneticisi"))
         );
-        let page = body_string(
-            send(
-                "POST",
-                format!("/targets/{}/catalog-refresh", catalog.ad),
-                String::new(),
-                admin.clone(),
-            )
-            .await,
+        let r = send(
+            "POST",
+            format!("/targets/{}/catalog-refresh", catalog.ad),
+            String::new(),
+            admin.clone(),
         )
         .await;
+        assert_eq!(location(&r), "/targets");
+        let page =
+            body_string(send("GET", "/targets".into(), String::new(), admin.clone()).await).await;
         assert!(page.contains("zaten açık"), "{page}");
         let r = send(
             "POST",

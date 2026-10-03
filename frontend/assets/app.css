@@ -354,6 +354,22 @@
   .ico::before {
     display: inline-block;
   }
+  /* ADR-126: "bekliyorum" göstergesi — çalışan okuma işinin rozetinde ve
+     gönderilen formun düğmesinde aynı dönen ikon. Hareketi azalt diyen
+     operatörde dönmez; durumu metin zaten söylüyor ("çalışıyor"). */
+  @keyframes spin {
+    to {
+      transform: rotate(1turn);
+    }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .ico-spin::before {
+      animation: spin 1.1s linear infinite;
+    }
+  }
+  .btn[aria-busy="true"] {
+    @apply pointer-events-none opacity-70;
+  }
   .ico-shield::before {
     content: "\f132";
   }

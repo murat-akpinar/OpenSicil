@@ -996,6 +996,13 @@ pub async fn last_read_job(
     .await
 }
 
+/// ADR-126: okuma isi henuz bitmedi (`read_jobs.status`, 0016'daki CHECK
+/// listesi). Ekran bunu bilince rozet doner ve sayfa kendini tazeler; isi
+/// worker yapiyor, sonuc sunucuda.
+pub fn read_job_open(status: &str) -> bool {
+    status == "queued" || status == "running"
+}
+
 // ADR-024: saklama ve silme onayi hedef basina; konteyner ayni hedefin OU/COS'u (FK).
 pub async fn save_target(pool: &PgPool, t: &TargetRow) -> Result<(), SaveError> {
     if t.retention_days < 0 || t.password_reset_delay_days < 0 {

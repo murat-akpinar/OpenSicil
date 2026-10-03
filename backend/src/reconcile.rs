@@ -55,6 +55,12 @@ pub struct Box {
 }
 
 impl View {
+    /// ADR-126: tarama kuyrukta ya da calisiyor — rozet doner, sayfa kendini
+    /// tazeler ve is bitince "bitti" + sonuc metni kendiliginden gorunur.
+    pub fn running(&self) -> bool {
+        crate::org::read_job_open(&self.status)
+    }
+
     /// Sayac kutulari; ilgi sirasi: once dikkat isteyenler.
     pub fn boxes(&self) -> Vec<Box> {
         vec![
@@ -300,7 +306,14 @@ async fn page(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Response {
-    render_page(&state, &op, id, Notice::default()).await
+    // ADR-126: POST'lar buraya yonlendirir, mesaji oturumdan alir
+    let notice = Notice::take(&state.pool, &op.username).await;
+    render_page(&state, &op, id, notice).await
+}
+
+/// POST'larin dondugu adres (ADR-126): eylem hangi ekranda yapildiysa orasi
+fn page_path(target: i64) -> String {
+    format!("/targets/{target}/reconcile")
 }
 
 async fn scan(
@@ -323,7 +336,9 @@ async fn scan(
         true => "reconcile.requested",
         false => "reconcile.already_open",
     };
-    render_page(&state, &op, id, Notice::info(op.lang.t(key).into())).await
+    Notice::info(op.lang.t(key).into())
+        .redirect(&state.pool, &op, &page_path(id))
+        .await
 }
 
 // F-13 "yeniden uygula": bulgudaki kimlik icin tek kimlik oncelikli is. Motor
@@ -371,8 +386,9 @@ async fn reapply(
         detail,
     )
     .await;
-    let notice = Notice::info(op.lang.t("reconcile.reapplied").into());
-    render_page(&state, &op, target, notice).await
+    Notice::info(op.lang.t("reconcile.reapplied").into())
+        .redirect(&state.pool, &op, &page_path(target))
+        .await
 }
 // --- END FEATURE: reconcile ---
 
@@ -430,8 +446,9 @@ async fn unlink(
     {
         return internal("bağlantı kaldırma işi açılamadı", e);
     }
-    let notice = Notice::info(op.lang.t("reconcile.unlinked").into());
-    render_page(&state, &op, target, notice).await
+    Notice::info(op.lang.t("reconcile.unlinked").into())
+        .redirect(&state.pool, &op, &page_path(target))
+        .await
 }
 // --- END FEATURE: missing-link-removal ---
 
@@ -478,7 +495,11 @@ async fn adopt(
     let f = crate::org_web::Fields(form);
     let batch = match batch_from(&f) {
         Ok(batch) => batch,
-        Err(key) => return render_page(&state, &op, id, Notice::err(op.lang.t(key).into())).await,
+        Err(key) => {
+            return Notice::err(op.lang.t(key).into())
+                .redirect(&state.pool, &op, &page_path(id))
+                .await
+        }
     };
     let keys = crate::national_id::Keys {
         aead: &state.aead_key,
@@ -490,10 +511,14 @@ async fn adopt(
     match outcome {
         Ok(outcome) => {
             audit_adoption(&state, &op, id, &outcome).await;
-            render_page(&state, &op, id, adoption_notice(op.lang, &outcome)).await
+            adoption_notice(op.lang, &outcome)
+                .redirect(&state.pool, &op, &page_path(id))
+                .await
         }
         Err(crate::bulk_adopt::AdoptError::Invalid(key)) => {
-            render_page(&state, &op, id, Notice::err(op.lang.t(key).into())).await
+            Notice::err(op.lang.t(key).into())
+                .redirect(&state.pool, &op, &page_path(id))
+                .await
         }
         Err(crate::bulk_adopt::AdoptError::Db(e)) => internal("toplu sahiplenme", e),
     }
@@ -590,7 +615,9 @@ async fn take_ad(
         )
         .await;
     }
-    render_page(&state, &op, id, take_notice(op.lang, &outcome)).await
+    take_notice(op.lang, &outcome)
+        .redirect(&state.pool, &op, &page_path(id))
+        .await
 }
 
 fn take_notice(lang: Lang, outcome: &crate::ad_diff::Outcome) -> Notice {
@@ -692,6 +719,26 @@ mod tests {
                 .unwrap()
             }
         };
+        // ADR-126: POST artik sayfa basmiyor, mesaj bir sonraki GET'te cikiyor
+        let read = |cookie: String| {
+            let app = app.clone();
+            async move {
+                let r = app
+                    .oneshot(
+                        Request::builder()
+                            .uri(format!("/targets/{target}/reconcile"))
+                            .header(header::COOKIE, cookie)
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                let bytes = axum::body::to_bytes(r.into_body(), usize::MAX)
+                    .await
+                    .unwrap();
+                String::from_utf8(bytes.to_vec()).unwrap()
+            }
+        };
         let body = format!(
             "finding={finding}&primary_role_id={role}&department_id={department}\
              &employment_type=permanent&start_date=2026-10-01"
@@ -709,8 +756,19 @@ mod tests {
         assert_eq!(count, 0, "yetkisiz istek kimlik açmadı");
 
         // hr sahiplenir: kimlik acilir, ipucu yazilir, denetim satiri duser
-        let r = post(cookie(&["hr"]).await, body).await;
-        assert_eq!(r.status(), StatusCode::OK);
+        let hr = cookie(&["hr"]).await;
+        let r = post(hr.clone(), body).await;
+        // ADR-126: cevap 303, adres tarama ekrani; mesaj sonraki GET'te ve bir kez
+        assert_eq!(r.status(), StatusCode::SEE_OTHER);
+        assert_eq!(
+            r.headers()[header::LOCATION].to_str().unwrap(),
+            format!("/targets/{target}/reconcile")
+        );
+        let adopted = crate::i18n::DEFAULT.t1("reconcile.adopted", 1);
+        let html = read(hr.clone()).await;
+        assert!(html.contains(&adopted), "mesaj basılmadı: {html}");
+        let again = read(hr).await;
+        assert!(!again.contains(&adopted), "mesaj ikinci kez çıktı");
         let row: (String, String, String) = sqlx::query_as(
             "SELECT given_name, surname, existing_ad_account_hint FROM identities \
              WHERE existing_ad_account_hint IS NOT NULL",
@@ -999,9 +1057,10 @@ mod tests {
         assert_eq!(status, StatusCode::FORBIDDEN);
         assert_eq!(phone_of(ayse).await.as_deref(), Some("+905000000000"));
 
-        // hr yalnizca secili satiri alir; secilmeyen sicil degismez
+        // hr yalnizca secili satiri alir; secilmeyen sicil degismez. ADR-126:
+        // cevap sayfa degil 303, mesaj bir sonraki GET'te basilir
         let (status, _) = send("POST", cookie("hr").await, body).await;
-        assert_eq!(status, StatusCode::OK);
+        assert_eq!(status, StatusCode::SEE_OTHER);
         assert_eq!(phone_of(ayse).await.as_deref(), Some("+447700900009"));
         let employee: Option<String> =
             sqlx::query_scalar("SELECT employee_number FROM identities WHERE id = $1")
@@ -1028,13 +1087,14 @@ mod tests {
         );
 
         // Sicil tekil: AD'deki deger Ali'de duruyor, yazilmaz ve atlandi denir
-        let (status, page) = send(
+        let (status, _) = send(
             "POST",
             cookie("hr").await,
             format!("diff={ayse}.employee_number"),
         )
         .await;
-        assert_eq!(status, StatusCode::OK);
+        assert_eq!(status, StatusCode::SEE_OTHER);
+        let (_, page) = send("GET", cookie("hr").await, String::new()).await;
         let employee: Option<String> =
             sqlx::query_scalar("SELECT employee_number FROM identities WHERE id = $1")
                 .bind(ayse)
@@ -1048,13 +1108,14 @@ mod tests {
         // degeri agacta yok — satir atlanir, yeni departman acilmaz. Departman
         // alindiginda hedefe is acilir (OU ve gruplar duzelsin); sicil ve cep
         // alimlarindan once hic is acilmamisti, tek is bu alimin isi.
-        let (status, page) = send(
+        let (status, _) = send(
             "POST",
             cookie("hr").await,
             format!("diff={ayse}.department&diff={ali}.department"),
         )
         .await;
-        assert_eq!(status, StatusCode::OK);
+        assert_eq!(status, StatusCode::SEE_OTHER);
+        let (_, page) = send("GET", cookie("hr").await, String::new()).await;
         let department_of = |id: i64| {
             let pool = pool.clone();
             async move {
@@ -1096,13 +1157,14 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        let (status, page) = send(
+        let (status, _) = send(
             "POST",
             cookie("hr").await,
             format!("diff={ayse}.role&diff={ali}.role"),
         )
         .await;
-        assert_eq!(status, StatusCode::OK);
+        assert_eq!(status, StatusCode::SEE_OTHER);
+        let (_, page) = send("GET", cookie("hr").await, String::new()).await;
         let role_of = |id: i64| {
             let pool = pool.clone();
             async move {
@@ -1345,6 +1407,8 @@ mod tests {
         let hr = session("hr").await;
         let html = body(send("GET", page.clone(), hr.clone()).await).await;
         assert_eq!(html.matches("/reconcile/reapply/").count(), 1, "{html}");
+        // ADR-126: tarama isi kuyrukta duruyor, sayfa kendini tazelesin
+        assert!(html.contains(r#"data-reload="5""#), "{html}");
         let auditor = session("auditor").await;
         let html = body(send("GET", page.clone(), auditor.clone()).await).await;
         assert!(!html.contains("/reconcile/reapply/"), "auditor düğmesiz");
@@ -1359,10 +1423,12 @@ mod tests {
             .unwrap();
         assert_eq!(jobs, 0);
 
-        // hr: tek kimlik oncelikli is + denetim satiri + ekranda bildirim
+        // hr: tek kimlik oncelikli is + denetim satiri + ekranda bildirim.
+        // ADR-126: cevap 303, bildirim bir sonraki GET'te
         let r = send("POST", reapply.clone(), hr.clone()).await;
-        assert_eq!(r.status(), StatusCode::OK);
-        let html = body(r).await;
+        assert_eq!(r.status(), StatusCode::SEE_OTHER);
+        assert_eq!(r.headers()[header::LOCATION].to_str().unwrap(), page);
+        let html = body(send("GET", page.clone(), hr.clone()).await).await;
         assert!(
             html.contains(crate::i18n::DEFAULT.t("reconcile.reapplied")),
             "{html}"
@@ -1542,10 +1608,11 @@ mod tests {
             "canlı bağlantıya kaldırma isteği yazıldı"
         );
 
-        // hr: baglanti silinir, denetim satiri yazilir, yeniden sahiplenme isi acilir
+        // hr: baglanti silinir, denetim satiri yazilir, yeniden sahiplenme isi
+        // acilir. ADR-126: cevap 303, bildirim bir sonraki GET'te
         let r = send("POST", unlink.clone(), hr.clone()).await;
-        assert_eq!(r.status(), StatusCode::OK);
-        let html = body(r).await;
+        assert_eq!(r.status(), StatusCode::SEE_OTHER);
+        let html = body(send("GET", page.clone(), hr.clone()).await).await;
         assert!(
             html.contains(crate::i18n::DEFAULT.t("reconcile.unlinked")),
             "{html}"
@@ -1578,7 +1645,7 @@ mod tests {
 
         // Istek tekrarlanabilir: damga yenilenir, yeni bir sey bozulmaz
         let r = send("POST", unlink, hr).await;
-        assert_eq!(r.status(), StatusCode::OK);
+        assert_eq!(r.status(), StatusCode::SEE_OTHER);
         assert_eq!(link_state(ids[0]).await, (1, 1));
 
         drop(app);
@@ -1699,6 +1766,11 @@ mod tests {
         assert!(request_scan(&pool, target, "test-admin").await.unwrap());
         assert!(!request_scan(&pool, target, "test-admin").await.unwrap());
 
+        // ADR-126: is kuyrukta — ekran "calisiyor" der ve kendini tazeler
+        let queued = load(&pool, target, "Europe/Istanbul").await.unwrap();
+        assert_eq!(queued.status, "queued");
+        assert!(queued.running(), "kuyruktaki iş çalışıyor sayılmalı");
+
         let job: i64 = sqlx::query_scalar(
             "SELECT id FROM read_jobs WHERE kind = 'reconcile' ORDER BY id DESC LIMIT 1",
         )
@@ -1742,6 +1814,7 @@ mod tests {
         assert_eq!(v.status, "succeeded");
         assert_eq!(v.result, "3 hesap tarandı");
         assert_ne!(v.scanned_at, "");
+        assert!(!v.running(), "bitmiş iş tazeleme istemez");
 
         // ADR-103 madde 3: yonlendirme yalnizca "yonetilmeyen" bulguyu sayar;
         // `missing` serit yazdirmaz

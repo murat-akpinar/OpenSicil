@@ -28,7 +28,9 @@
   {% if v.scanned_at.is_empty() %}
     <p class="meta">{{ lang.t("reconcile.never_scanned") }}</p>
   {% else %}
-    <p class="meta"><span class="badge badge-{{ lang.key("readjobkind", v.status.as_str()) }}">{{ lang.key("readjob", v.status.as_str()) }}</span> {{ v.scanned_at }}</p>
+    {# ADR-126: iş sürerken rozetin ikonu döner ve `data-reload` sayfayı
+       tazeletir; iş bitince öznitelik gelmez, tazeleme kendiliğinden durur #}
+    <p class="meta"><span class="badge badge-{{ lang.key("readjobkind", v.status.as_str()) }}"{% if v.running() %} data-reload="5"{% endif %}>{% if v.running() %}<i class="ico ico-refresh ico-spin" aria-hidden="true"></i>{% endif %}{{ lang.key("readjob", v.status.as_str()) }}</span> {{ v.scanned_at }}</p>
     {% if !v.result.is_empty() %}<p class="meta">{{ v.result }}</p>{% endif %}
   {% endif %}
   {# ADR-051/099 (F-13): gece koşusu zamanlayıcıda, buradan yalnızca duyurulur #}
