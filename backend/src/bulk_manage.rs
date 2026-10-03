@@ -196,17 +196,6 @@ pub struct Batch {
     pub age_seconds: i64,
 }
 
-impl Batch {
-    pub fn approvable_by(&self, approver_subject: &str, timelock_hours: u32) -> bool {
-        crate::change_set::approvable(
-            &self.by_subject,
-            self.age_seconds,
-            approver_subject,
-            timelock_hours,
-        )
-    }
-}
-
 pub struct BatchSummary {
     pub id: i64,
     pub by_username: String,
@@ -328,7 +317,6 @@ struct ManageBatchTemplate {
     changed_text: String,
     can_approve: bool,
     can_reject: bool,
-    approver_is_initiator: bool,
 }
 
 /// Eylemin yapildigi GET sayfasi: POST'lar buraya yonlendirir (ADR-126 madde 1).
@@ -527,7 +515,6 @@ async fn render_batch(
         .collect();
     let affected = affected(&rows, &batch.ids);
     let staged = usize::try_from(batch.affected_at_stage).unwrap_or_default();
-    let approver_is_initiator = !batch.approvable_by(&op.subject, state.approval_timelock_hours);
     render(&ManageBatchTemplate {
         lang: op.lang,
         shell: Shell::of(op),
@@ -545,9 +532,8 @@ async fn render_batch(
             "import.changed_since",
             &[&staged.to_string(), &affected.to_string()],
         ),
-        can_approve: allowed(op, APPROVE_AUTHORITIES) && !approver_is_initiator && !rows.is_empty(),
+        can_approve: allowed(op, APPROVE_AUTHORITIES) && !rows.is_empty(),
         can_reject: allowed(op, APPROVE_AUTHORITIES) || batch.by_subject == op.subject,
-        approver_is_initiator,
         rows,
     })
 }
@@ -578,12 +564,6 @@ async fn approve(
         Ok(loaded) => loaded,
         Err(response) => return *response,
     };
-    if !batch.approvable_by(&op.subject, state.approval_timelock_hours) {
-        let to = format!("{}/{id}", page_path(target));
-        return Notice::err(op.lang.t("err.approver_is_initiator").to_string())
-            .redirect(&state.pool, &op, &to)
-            .await;
-    }
     let text = match request_and_audit(&state, &op, target, &batch.ids).await {
         Ok(text) => text,
         Err(e) => return internal("toplu yönetime alma uygulanamadı", e),
@@ -850,23 +830,15 @@ mod tests {
         assert_eq!(r.status(), StatusCode::SEE_OTHER);
         let location = r.headers()[header::LOCATION].to_str().unwrap().to_string();
         assert!(location.starts_with(&format!("{base}/")), "{location}");
-        let same_admin = session("hr-sub", "admin").await;
+        // Onay kapisi yalnizca yetki sorar (ADR-132): `hr` reddedilir, parti durur
         let r = send(
             "POST",
             format!("{location}/approve"),
             String::new(),
-            same_admin.clone(),
+            hr.clone(),
         )
         .await;
-        assert_eq!(r.status(), StatusCode::SEE_OTHER);
-        assert_eq!(r.headers()[header::LOCATION].to_str().unwrap(), location);
-        let page = text(send("GET", location.clone(), String::new(), same_admin).await).await;
-        assert!(
-            page.contains("Ayşe Yılmaz")
-                && page.contains("Üçüncü Kişi")
-                && page.contains(crate::i18n::DEFAULT.t("err.approver_is_initiator")),
-            "{page}"
-        );
+        assert_eq!(r.status(), StatusCode::FORBIDDEN);
         let still: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM account_links WHERE identity_id = ANY($1) AND manage_requested_at IS NULL",
         )
@@ -874,7 +846,12 @@ mod tests {
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(still, 2, "başlatan onaylayamaz");
+        assert_eq!(still, 2, "yetkisiz onay hiçbir şey yazmaz");
+        let page = text(send("GET", location.clone(), String::new(), hr.clone()).await).await;
+        assert!(
+            page.contains("Ayşe Yılmaz") && page.contains("Üçüncü Kişi"),
+            "{page}"
+        );
 
         // ucuncu kisinin rolu yer tutucu olursa onayda atlanir (ADR-103 madde 5)
         sqlx::query(
@@ -884,17 +861,18 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
-        let other_admin = session("admin-sub", "admin").await;
+        // ADR-132: partiyi baslatan ayni ozne kendi onayini verir, ikinci yonetici sarti yok
+        let same_admin = session("hr-sub", "admin").await;
         let r = send(
             "POST",
             format!("{location}/approve"),
             String::new(),
-            other_admin.clone(),
+            same_admin.clone(),
         )
         .await;
         assert_eq!(r.status(), StatusCode::SEE_OTHER);
         assert_eq!(r.headers()[header::LOCATION].to_str().unwrap(), base);
-        let page = text(send("GET", base.clone(), String::new(), other_admin).await).await;
+        let page = text(send("GET", base.clone(), String::new(), same_admin).await).await;
         assert!(page.contains("1"), "{page}");
         let requested: Vec<i64> = sqlx::query_scalar(
             "SELECT identity_id FROM account_links WHERE manage_requested_at IS NOT NULL ORDER BY identity_id",

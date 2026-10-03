@@ -28,8 +28,6 @@ pub struct AppState {
     pub time_zone: String,
     // degisiklik seti esigi (ADR-031): backend'in kendi ortam degiskeni
     pub change_set_threshold: usize,
-    // onay zaman kilidi, saat; 0 = kapali (ADR-026)
-    pub approval_timelock_hours: u32,
     // metrik ucunun Bearer token'i (ADR-061 madde 8); bos = uc kapali
     pub metrics_token: String,
 }
@@ -703,7 +701,6 @@ pub(crate) fn test_state(pool: PgPool, public_url: &str) -> AppState {
         public_url: public_url.to_string(),
         time_zone: "Europe/Istanbul".to_string(),
         change_set_threshold: crate::change_set::DEFAULT_THRESHOLD,
-        approval_timelock_hours: 0,
         metrics_token: "metrics-test-token".to_string(),
     }
 }

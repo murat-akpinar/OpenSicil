@@ -38,7 +38,6 @@ services:
       EMERGENCY_QUOTA: ${EMERGENCY_QUOTA:-5}
       SENSITIVE_MAPPING_ENABLED: ${SENSITIVE_MAPPING_ENABLED:-false}
       CHANGE_SET_THRESHOLD: ${CHANGE_SET_THRESHOLD:-10}
-      APPROVAL_TIMELOCK_HOURS: ${APPROVAL_TIMELOCK_HOURS:-0}
       # AD bind giris kapisi (ADR-095): backend de DC'nin CA'sini dogrular
       AD_CA_FILE: /etc/opensicil/ad-ca.pem
       TZ: ${TZ:-Europe/Istanbul}

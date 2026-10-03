@@ -604,12 +604,11 @@ async fn pending_view(state: &AppState, owner: Owner, id: i64, op: &Operator) ->
             return PendingView::default();
         }
     };
-    let approvable = allowed(op, APPROVE_AUTHORITIES)
-        && pending.approvable_by(&op.subject, state.approval_timelock_hours);
+    let approvable = allowed(op, APPROVE_AUTHORITIES);
     let now = recompute(state, owner, id, &pending.definition).await;
     PendingView {
         summary: summary_text(lang, &pending, &now),
-        note: pending_note(lang, &pending, state.approval_timelock_hours, approvable),
+        note: pending_note(lang, &pending, approvable),
         approvable,
     }
 }
@@ -652,8 +651,8 @@ fn summary_text(lang: Lang, pending: &Pending, now: &Option<Impact>) -> String {
     format!("{text}; {changed}")
 }
 
-// Kim baslatti, ne zaman; onaylanamiyorsa nedeni ve kalan sure (F-12).
-fn pending_note(lang: Lang, pending: &Pending, timelock_hours: u32, approvable: bool) -> String {
+// Kim baslatti, ne zaman; yetkisi olmayan operatore onayi kimin verdigi (F-12).
+fn pending_note(lang: Lang, pending: &Pending, approvable: bool) -> String {
     let who = lang.tn(
         "changeset.pending_by",
         &[
@@ -664,16 +663,13 @@ fn pending_note(lang: Lang, pending: &Pending, timelock_hours: u32, approvable: 
     if approvable {
         return who;
     }
-    match pending.timelock_remaining(timelock_hours) {
-        Some(left) => format!("{who}; {}", lang.t1("changeset.timelock", left / 3600 + 1)),
-        None => format!(
-            "{who}; {}",
-            lang.t1(
-                "changeset.approver_group",
-                crate::oidc::group_for(APPROVE_AUTHORITIES[0])
-            )
-        ),
-    }
+    format!(
+        "{who}; {}",
+        lang.t1(
+            "changeset.approver_group",
+            crate::oidc::group_for(APPROVE_AUTHORITIES[0])
+        )
+    )
 }
 
 // Ust departman secenekleri: kendisi haric (dongu dogrulamasi yine de sunucuda).
@@ -1232,10 +1228,6 @@ async fn decide(state: &AppState, op: &Operator, owner: Owner, id: i64, approve:
         }
         Err(e) => return internal("bekleyen taslak okunamadı", e),
     };
-    if approve && !pending.approvable_by(&op.subject, state.approval_timelock_hours) {
-        let notice = Notice::err(op.lang.t("err.approver_is_initiator").to_string());
-        return render_definition(state, op, owner, id, notice).await;
-    }
     if !approve {
         return reject(state, op, owner, id).await;
     }
@@ -1860,7 +1852,7 @@ mod tests {
     // onaylayamaz, kilit kapaliyken baska Sistem yoneticisi onaylar; red modeli degistirmez.
     #[tokio::test]
     #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
-    async fn over_threshold_edit_waits_as_draft_until_a_second_admin_approves() {
+    async fn over_threshold_edit_waits_as_draft_until_an_admin_approves() {
         let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
         let ids = crate::test_support::seed_two_identities(&pool).await;
         let catalog = crate::test_support::seed_example_catalog(&pool).await;
@@ -1872,6 +1864,8 @@ mod tests {
         let app = crate::web::routes().with_state(state);
         let author = cookie_as(&pool, "ayse.yonetici", &["admin"]).await;
         let second = cookie_as(&pool, "ali.yonetici", &["admin"]).await;
+        // Duzenleyebilen ama onaylayamayan operator (WRITE_AUTHORITIES'te, APPROVE'da degil)
+        let role_admin = cookie_as(&pool, "veli.rol", &["role_admin"]).await;
         let send = |uri: String, body: String, c: String| {
             let app = app.clone();
             async move { app.oneshot(request("POST", &uri, &body, &c)).await.unwrap() }
@@ -1914,19 +1908,27 @@ mod tests {
         assert_eq!(published, 0, "ADR-031: taslak modele yazılmaz");
         assert!(page.contains("Onay bekleyen taslak"), "{page}");
 
-        // F-12: panel kimin onaylayacagini soyler (grup adi, ADR-005).
+        // F-12: onay yetkisi olmayan operatore panel kimin onaylayacagini soyler
+        // (grup adi, ADR-005); ADR-132 sonrasi not yalnizca ona basilir.
+        let page = body_string(
+            app.clone()
+                .oneshot(request("GET", &url, "", &role_admin))
+                .await
+                .unwrap(),
+        )
+        .await;
         assert!(page.contains("OpenSicil-Admins"), "{page}");
 
-        // Baslatan kendi setini onaylayamaz (kilit kapali).
-        let page = body_string(send(format!("{url}/approve"), String::new(), author).await).await;
-        assert!(page.contains("başlatan onaylayamaz"), "{page}");
+        // ADR-132: onay kapisi yalnizca yetki sorar; `role_admin` reddedilir
+        let r = send(format!("{url}/approve"), String::new(), role_admin).await;
+        assert_eq!(r.status(), StatusCode::FORBIDDEN);
         let published: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM role_entitlements WHERE role_id = $1")
                 .bind(role)
                 .fetch_one(&pool)
                 .await
                 .unwrap();
-        assert_eq!(published, 0);
+        assert_eq!(published, 0, "yetkisiz onay modele yazmaz");
 
         // ADR-055 madde 1: taslak beklerken role atanan kimlik onay anindaki sayiya girer.
         sqlx::query("UPDATE identities SET primary_role_id = $1 WHERE id = $2")
@@ -1937,7 +1939,7 @@ mod tests {
             .unwrap();
         let page = body_string(
             app.clone()
-                .oneshot(request("GET", &url, "", &second))
+                .oneshot(request("GET", &url, "", &author))
                 .await
                 .unwrap(),
         )
@@ -1945,9 +1947,10 @@ mod tests {
         assert!(page.contains("2 kimliği etkileyecek"), "{page}");
         assert!(page.contains("1 kimlikti, onay anında 2"), "{page}");
 
-        // Ikinci Sistem yoneticisi onaylar: model yazilir, taslak duser, isler acilir.
+        // ADR-132: taslagi baslatan Sistem yoneticisi kendi onayini verir; model
+        // yazilir, taslak duser, isler acilir.
         let page =
-            body_string(send(format!("{url}/approve"), String::new(), second.clone()).await).await;
+            body_string(send(format!("{url}/approve"), String::new(), author.clone()).await).await;
         assert!(page.contains("onaylandı ve yayımlandı"), "{page}");
         let (items, draft): (i64, i64) = sqlx::query_as(
             "SELECT (SELECT COUNT(*) FROM role_entitlements WHERE role_id = $1), \

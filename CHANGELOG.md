@@ -186,4 +186,5 @@
 - Sahiplenilen aday listeden düşer, aynı hesap iki kez sahiplenilemez
 - Yönetici AD'den geri dolar, elle girmek gerekmez
 - Raporlar hesap kapsamını gösterir ve toplu yönetime almaya bağlar
+- Eşiği aşan işi başlatan kendi onaylar, ikinci yönetici şartı kalkar
 

@@ -42,9 +42,6 @@
 </div>
 
 <div class="card stack">
-  {# Onay düğmesi başlatana hiç basılmıyor (ADR-026); sessiz bir ipucu "düğme çalışmıyor"
-     gibi okunuyordu, uyarı olarak basılır. #}
-  {% if approver_is_initiator %}<p class="alert alert-warn">{{ lang.t("err.approver_is_initiator") }}</p>{% endif %}
   <div class="flex flex-wrap gap-2">
     {% if can_approve %}
     <form method="post" action="/targets/{{ target_id }}/manage/{{ batch_id }}/approve">

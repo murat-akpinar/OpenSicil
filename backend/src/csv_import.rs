@@ -1258,17 +1258,6 @@ pub struct Batch {
     pub affected_at_stage: i32,
 }
 
-impl Batch {
-    pub fn approvable_by(&self, approver_subject: &str, timelock_hours: u32) -> bool {
-        crate::change_set::approvable(
-            &self.by_subject,
-            self.age_seconds,
-            approver_subject,
-            timelock_hours,
-        )
-    }
-}
-
 pub struct BatchSummary {
     pub id: i64,
     pub by_username: String,
@@ -1451,7 +1440,6 @@ struct BatchTemplate {
     renumbers: Vec<Renumber>,
     can_approve: bool,
     can_reject: bool,
-    approver_is_initiator: bool,
 }
 
 #[derive(Deserialize)]
@@ -1718,17 +1706,9 @@ async fn load_batch(
     }
 }
 
-fn render_batch(
-    state: &AppState,
-    op: &Operator,
-    batch: Batch,
-    plan: Plan,
-    notice: Notice,
-) -> Response {
-    let approver_is_initiator = !batch.approvable_by(&op.subject, state.approval_timelock_hours);
-    let can_approve = allowed(op, APPROVE_AUTHORITIES)
-        && !approver_is_initiator
-        && blocking_key(&plan, batch.confirmed).is_none();
+fn render_batch(op: &Operator, batch: Batch, plan: Plan, notice: Notice) -> Response {
+    let can_approve =
+        allowed(op, APPROVE_AUTHORITIES) && blocking_key(&plan, batch.confirmed).is_none();
     let staged = usize::try_from(batch.affected_at_stage).unwrap_or_default();
     let batch_sub = op.lang.tn(
         "import.batch_sub",
@@ -1754,7 +1734,6 @@ fn render_batch(
         renumbers: plan.renumbers,
         can_approve,
         can_reject: allowed(op, APPROVE_AUTHORITIES) || batch.by_subject == op.subject,
-        approver_is_initiator,
     })
 }
 
@@ -1764,7 +1743,7 @@ async fn batch_page(
     Path(id): Path<i64>,
 ) -> Response {
     match load_batch(&state, &op, id).await {
-        Ok((batch, plan)) => render_batch(&state, &op, batch, plan, Notice::default()),
+        Ok((batch, plan)) => render_batch(&op, batch, plan, Notice::default()),
         Err(response) => *response,
     }
 }
@@ -1781,13 +1760,9 @@ async fn approve(
         Ok(loaded) => loaded,
         Err(response) => return *response,
     };
-    if !batch.approvable_by(&op.subject, state.approval_timelock_hours) {
-        let notice = Notice::err(op.lang.t("err.approver_is_initiator").to_string());
-        return render_batch(&state, &op, batch, plan, notice);
-    }
     if let Some(key) = blocking_key(&plan, batch.confirmed) {
         let notice = Notice::err(op.lang.t(key).to_string());
-        return render_batch(&state, &op, batch, plan, notice);
+        return render_batch(&op, batch, plan, notice);
     }
     let rows = batch.table.rows.len();
     let applied = match apply_and_audit(&state, &op, &plan, rows, batch.confirmed).await {
@@ -2277,7 +2252,7 @@ mod tests {
     /// baska bir Sistem yoneticisi onaylar ve satirlar yazilir; auditor 403.
     #[tokio::test]
     #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
-    async fn uploads_apply_or_stage_by_threshold_and_approval_is_by_another_admin() {
+    async fn uploads_apply_or_stage_by_threshold_and_approval_needs_admin() {
         use axum::body::Body;
         use axum::http::{header, Request, StatusCode};
         use tower::ServiceExt;
@@ -2370,7 +2345,7 @@ mod tests {
                 .unwrap();
         assert_eq!(count, 1);
 
-        // iki kimlik esigi asar: sahnelenir, hr onaylayamaz (yetki), admin-ayni kisi onaylayamaz
+        // iki kimlik esigi asar: sahnelenir; hr yetkisizdir, baslatan `admin` kendi onaylar (ADR-132)
         let r = send("POST", "/imports".into(), encode(two), hr.clone()).await;
         assert_eq!(r.status(), StatusCode::SEE_OTHER);
         let location = r.headers()[header::LOCATION].to_str().unwrap().to_string();
@@ -2389,39 +2364,20 @@ mod tests {
         )
         .await;
         assert_eq!(r.status(), StatusCode::FORBIDDEN);
+        // ADR-132: partiyi yukleyen ayni ozne `admin` yetkisiyle kendi onayini verir
         let same_admin = session("hr-sub", "admin").await;
-        let page = text(
-            send(
-                "POST",
-                format!("{location}/approve"),
-                String::new(),
-                same_admin,
-            )
-            .await,
-        )
-        .await;
-        assert!(page.contains("İki Satır"), "{page}");
-        let not_yet: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM identities WHERE employee_number IN ('2', '3')",
-        )
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-        assert_eq!(not_yet, 0, "baslatan onaylayamaz (zaman kilidi kapali)");
-
-        let other_admin = session("admin-sub", "admin").await;
         let page =
-            text(send("GET", location.clone(), String::new(), other_admin.clone()).await).await;
+            text(send("GET", location.clone(), String::new(), same_admin.clone()).await).await;
         assert!(
             page.contains("/approve") && page.contains("Üç Satır"),
-            "{page}"
+            "başlatan kendi partisini onaylayabilir: {page}"
         );
         let page = text(
             send(
                 "POST",
                 format!("{location}/approve"),
                 String::new(),
-                other_admin.clone(),
+                same_admin.clone(),
             )
             .await,
         )
@@ -2458,7 +2414,7 @@ mod tests {
             "GET",
             format!("/imports/{batch_id}"),
             String::new(),
-            other_admin,
+            same_admin,
         )
         .await;
         assert_eq!(

@@ -66,12 +66,6 @@ pub fn threshold_from_env() -> Result<usize, String> {
     env_number("CHANGE_SET_THRESHOLD", DEFAULT_THRESHOLD)
 }
 
-/// ADR-026: onay zaman kilidi (saat). Varsayilan 0 = kapali; aciksa baslatan da
-/// N saat sonra onaylayabilir (tek Sistem yoneticisi olan kurum icin).
-pub fn timelock_from_env() -> Result<u32, String> {
-    env_number("APPROVAL_TIMELOCK_HOURS", 0)
-}
-
 fn env_number<T: std::str::FromStr>(name: &'static str, default: T) -> Result<T, String> {
     let Ok(raw) = std::env::var(name) else {
         return Ok(default);
@@ -601,7 +595,7 @@ impl Data {
     }
 }
 
-// ---- sahneleme ve onay (ADR-031, ADR-026) ----
+// ---- sahneleme ve onay (ADR-031; onay kurali ADR-132 ile yalnizca yetki) ----
 
 /// Taslagin icerigi: tanim + tur ozel alanlar + kaydedildigi andaki etki sayilari.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -633,32 +627,8 @@ impl StagedDefinition {
 
 pub struct Pending {
     pub definition: StagedDefinition,
-    /// Baslatanin OIDC `sub`'i; onay kuralinin tarafi (ADR-026).
-    pub by: String,
     pub by_username: String,
     pub age_seconds: i64,
-}
-
-const SECONDS_PER_HOUR: i64 = 3_600;
-
-/// ADR-026: onaylayan != baslatan, YA DA kilit acik ve set yasi >= N saat. Rol/departman
-/// taslagi, CSV partisi ve toplu yonetime alma secimi ayni kurali kullanir.
-pub fn approvable(by_subject: &str, age_seconds: i64, approver: &str, timelock_hours: u32) -> bool {
-    by_subject != approver
-        || (timelock_hours > 0 && age_seconds >= i64::from(timelock_hours) * SECONDS_PER_HOUR)
-}
-
-impl Pending {
-    pub fn approvable_by(&self, approver_subject: &str, timelock_hours: u32) -> bool {
-        approvable(&self.by, self.age_seconds, approver_subject, timelock_hours)
-    }
-
-    /// Baslatanin kendi setini onaylayabilmesine kalan saniye; kilit kapaliysa None.
-    pub fn timelock_remaining(&self, timelock_hours: u32) -> Option<i64> {
-        (timelock_hours > 0)
-            .then(|| i64::from(timelock_hours) * SECONDS_PER_HOUR - self.age_seconds)
-            .filter(|left| *left > 0)
-    }
 }
 
 fn stage_sql(owner: Owner) -> &'static str {
@@ -677,12 +647,12 @@ fn stage_sql(owner: Owner) -> &'static str {
 fn pending_sql(owner: Owner) -> &'static str {
     match owner {
         Owner::Role => {
-            "SELECT pending_definition::text, COALESCE(pending_by, ''), \
+            "SELECT pending_definition::text, \
              COALESCE(pending_by_username, ''), EXTRACT(EPOCH FROM now() - pending_at)::bigint \
              FROM roles WHERE id = $1 AND pending_definition IS NOT NULL"
         }
         Owner::Department => {
-            "SELECT pending_definition::text, COALESCE(pending_by, ''), \
+            "SELECT pending_definition::text, \
              COALESCE(pending_by_username, ''), EXTRACT(EPOCH FROM now() - pending_at)::bigint \
              FROM departments WHERE id = $1 AND pending_definition IS NOT NULL"
         }
@@ -724,17 +694,16 @@ pub async fn stage(
 }
 
 pub async fn pending(pool: &PgPool, owner: Owner, id: i64) -> Result<Option<Pending>, sqlx::Error> {
-    let row: Option<(String, String, String, i64)> = sqlx::query_as(pending_sql(owner))
+    let row: Option<(String, String, i64)> = sqlx::query_as(pending_sql(owner))
         .bind(id)
         .fetch_optional(pool)
         .await?;
-    let Some((json, by, by_username, age_seconds)) = row else {
+    let Some((json, by_username, age_seconds)) = row else {
         return Ok(None);
     };
     let definition = serde_json::from_str(&json).map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
     Ok(Some(Pending {
         definition,
-        by,
         by_username,
         age_seconds,
     }))
@@ -903,46 +872,19 @@ mod tests {
             .expect("taslak bekliyor");
         assert_eq!((p.definition.applies, p.definition.observed), (42, 3));
         assert_eq!(p.definition.title, "Uzman");
-        assert_eq!((p.by.as_str(), p.by_username.as_str()), ("sub-a", "ayse"));
+        assert_eq!(p.by_username, "ayse");
+        // Baslatanin oznesi artik onay kuralinin tarafi degil (ADR-132), ama kim
+        // sahneledi kaydi olarak yazilmaya devam eder.
+        let by: String = sqlx::query_scalar("SELECT pending_by FROM roles WHERE id = $1")
+            .bind(role)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(by, "sub-a");
         clear(&pool, Owner::Role, role).await.unwrap();
         assert!(pending(&pool, Owner::Role, role).await.unwrap().is_none());
 
         drop(pool);
         crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
-    }
-
-    // ADR-026: onaylayan != baslatan, YA DA kilit acik ve set yasi >= N saat.
-    #[test]
-    fn approval_rule_follows_adr_026() {
-        let waiting = |by: &str, age_hours: i64| Pending {
-            definition: StagedDefinition {
-                edit: edit(vec![], vec![]),
-                title: String::new(),
-                code: String::new(),
-                parent_id: None,
-                with_settings: true,
-                applies: 42,
-                observed: 0,
-            },
-            by: by.to_string(),
-            by_username: "ayse".to_string(),
-            age_seconds: age_hours * SECONDS_PER_HOUR,
-        };
-        assert!(
-            waiting("a", 0).approvable_by("b", 0),
-            "başka Sistem yöneticisi hemen onaylar"
-        );
-        assert!(
-            !waiting("a", 10).approvable_by("a", 0),
-            "kilit kapalı: başlatan hiç onaylayamaz"
-        );
-        assert!(!waiting("a", 3).approvable_by("a", 4), "süre dolmadı");
-        assert!(waiting("a", 4).approvable_by("a", 4), "süre doldu");
-        assert_eq!(
-            waiting("a", 3).timelock_remaining(4),
-            Some(SECONDS_PER_HOUR)
-        );
-        assert_eq!(waiting("a", 3).timelock_remaining(0), None, "kilit kapalı");
-        assert_eq!(waiting("a", 5).timelock_remaining(4), None, "süre doldu");
     }
 }

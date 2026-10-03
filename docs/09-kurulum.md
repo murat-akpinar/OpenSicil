@@ -125,7 +125,7 @@ Eşleme tek node'lu bir kind kümesinde bir kez sınandı (N-14, 2026-10-02): `k
 
 ## Boyutlandırma
 
-Eşikler ortam değişkenidir ve mutlak sayıdır: değişiklik seti eşiği ve onay zaman kilidi backend'de ([ADR-031](decisions/031-degisiklik-seti-sahneleme.md)), saatlik sayaçlar ve acil kota worker'da ([ADR-016](decisions/016-hedef-olcek-ve-olcekte-calisma.md), [ADR-050](decisions/050-verme-sayaci-ve-is-butunlugu.md)). Değişiklik seti eşiği, yetki veya hesap durumu farkı üreten kimlik sayısını sayar; ekleme de dahildir ([ADR-037](decisions/037-esik-ekleme-islemlerini-sayar.md)). Ölçüldükçe güncellenir.
+Eşikler ortam değişkenidir ve mutlak sayıdır: değişiklik seti eşiği backend'de ([ADR-031](decisions/031-degisiklik-seti-sahneleme.md)), saatlik sayaçlar ve acil kota worker'da ([ADR-016](decisions/016-hedef-olcek-ve-olcekte-calisma.md), [ADR-050](decisions/050-verme-sayaci-ve-is-butunlugu.md)). Değişiklik seti eşiği, yetki veya hesap durumu farkı üreten kimlik sayısını sayar; ekleme de dahildir ([ADR-037](decisions/037-esik-ekleme-islemlerini-sayar.md)). Ölçüldükçe güncellenir.
 
 | Aktif kimlik | Değişiklik seti eşiği | Saatlik yıkıcı | Saatlik verme | Saatlik ilk parola | Acil kota |
 |---|---|---|---|---|---|
@@ -137,7 +137,7 @@ Eşik, bağlantısı gözlem modunda olan ya da o hedefte hesabı olmayacak kiml
 
 **İlk alarm:** metrik ucundaki "ayrılmış ama kapatılamamış" değeri sıfırdan büyükse bir ayrılanın hesabı açık kalmıştır ([ADR-052](decisions/052-uygulanamayan-fark.md)). İkincisi "hedef sistem başına son başarılı bağlantı", üçüncüsü "silinmeyi bekleyen en eski hesabın yaşı"dır.
 
-**Tek Sistem yöneticisi olan kurum:** onay zaman kilidini açın (öneri 4 saat); aksi halde eşiği aşan değişiklik setini onaylayacak kimse olmaz ([ADR-026](decisions/026-degisiklik-seti-onayinda-zaman-kilidi.md)). İki yönetici varsa kapalı bırakın.
+**Tek Sistem yöneticisi olan kurum:** ek bir ayar gerekmez — eşiği aşan işi başlatan kendisi onaylar ([ADR-132](decisions/132-esigi-asan-isi-baslatan-kendi-onaylar.md)). Yine de en az iki `OpenSicil-Admins` üyesi önerilir: ikinci onaylayan varken görev ayrılığı gerçekten uygulanabilir.
 
 ## Ayarlar ve öneriler
 
@@ -155,7 +155,6 @@ Eşik, bağlantısı gözlem modunda olan ya da o hedefte hesabı olmayacak kiml
 | Denetim kaydı saklama | 24 ay | |
 | Saat dilimi | `Europe/Istanbul` | Tüm tarihler bu dilimde yorumlanır |
 | Sahiplenme | kapalı | Yalnızca geçiş döneminde açın, bitince kapatın; açıkken CSV'de ipucu zorunludur ([ADR-018](decisions/018-ice-aktarma-ve-sahiplenme.md), [ADR-023](decisions/023-ice-aktarma-ipucu-ve-kolon-kurallari.md)) |
-| Onay zaman kilidi | 0 (kapalı) | Yukarıdaki tek yönetici notu; backend ayarı ([ADR-031](decisions/031-degisiklik-seti-sahneleme.md)) |
 | Hassas kaynak eşlemesi | kapalı | Kimlik numarası ve telefonun hedefe eşlenmesi; worker ayarı ([ADR-029](decisions/029-esleme-hedef-oznitelikleri-izinli-liste.md)) |
 | Kuyruk yoklama | 5 sn | ([ADR-028](decisions/028-worker-zamanlamasi.md)) |
 | İş kirası | 5 dk (ayar değil) | Worker iş ortasında öldürülürse o iş en fazla bu kadar bekler, deneme hakkı azalmaz. Sürüm yükseltmede beklemez: worker SIGTERM'de elindeki işi bitirir ([ADR-062](decisions/062-is-kirasi-ve-yarida-kalan-is.md)) |
