@@ -178,4 +178,5 @@
 - Mutabakat kendi menü maddesi olur, Raporlar'dan çıkar
 - Toplu sahiplenmede rol de departman gibi kişi başına otomatik gelsin
 - POST'lar yönlendirir, mesaj operatörün oturumunda bekler
+- Sahiplenme sürerken mutabakat sayfası kendini tazeler
 

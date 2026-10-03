@@ -850,13 +850,16 @@ Kurallar:
   - Kabul: JS kapalıyken sayfa çalışmaya devam eder: rozet durur, tazeleme olmaz, düğme sıradan düğmedir
   - Kabul: yeni uç nokta, yeni sorgu ve yeni i18n anahtarı yok — durum zaten şablonda
   - Not (2026-10-03): bu kutucuğun kodu önceki kutucukla aynı ağaçta yazıldı ve onunla birlikte commit'lendi (`View::running`/`refreshing`, şablonlardaki `data-reload`, `app.js`'teki `autoReload` + `submitBusy`). Sunucu tarafı çalışan yığında ölçüldü: iş sürerken `badge badge-info" data-reload="5"` + `ico-spin`, iş bitince `data-reload` yok ve sonuç metni basılıyor. Kalan doğrulama tarayıcıda: dönen düğme ikonu, odak/alan koruması ve JS kapalı davranış
-- [ ] Sahiplenme sonrası durum kendiliğinden güncellenir (yazma şeridi de izlenir)
+- [x] Sahiplenme sonrası durum kendiliğinden güncellenir (yazma şeridi de izlenir)
   - Kullanıcı bildirimi (2026-10-03): "sahiplenme mevzuu F5 atmadan yazı değişmiyor, yapınca otomatik durum kısmı güncellense"
   - Ölçüm (çalışan yığın, aynı gün): sahiplenme POST'u 303 dönüyor ve mesaj basılıyor, ama dönen sayfada `data-reload` **yok**; öznitelik yalnızca okuma işine konuyor (`reconcile.html:33`, `targets.html:44`). Sahiplenmenin işleri yazma şeridinde (`jobs` 49/50, POST'tan ~5 sn sonra "sahiplenildi (gözlem modu)") ve sayfa o şeride hiç bakmıyor
   - Kabul: hedefin açık (`queued`/`running`) yazma şeridi işi varken mutabakat sayfası da kendini tazeler; iş bitince tazeleme durur ve sonucu operatör F5'e basmadan görür
   - Kabul: tazeleme kuralı kutucuk "Çalışan iş ekranda döner"dakinin aynısı — aynı `data-reload` özniteliği, aynı alan koruması; ikinci bir mekanizma yazılmaz
   - Kabul: tek yeni sorgu hedefin açık işini soran skaler; yeni uç nokta, yeni tablo, yeni i18n anahtarı yok
   - Not: sayaçların ve aday listesinin kendini güncellemesi bu kutucuğun işi değil — onlar son taramanın anlık görüntüsü, adayın listeden düşmesi sıradaki kutucukta
+  - Not (2026-10-03): tek yeni sorgu `WRITING_SQL` — hedefin `jobs` satırında `queued`/`running` var mı (skaler `EXISTS`); `View::writing` onu taşır, `View::busy()` okuma şeridiyle birleştirir. Şablondaki `data-reload` artık `running()` değil `busy()`ye bakıyor; rozet ve dönen ikon hâlâ **taramanın** durumu — yazma işi rozete karışmaz. `app.js`'e, uç noktalara, tablolara ve i18n'e dokunulmadı; tazeleme kuralı (alanda odak / değişmiş alan varken tur atlanır) olduğu gibi kaldı
+  - Doğrulama (2026-10-03): backend **235 test** (gerçek Postgres `--include-ignored` + lab Samba + lab Keycloak), worker **104 test** (dokunulmadı, geriye dönük kontrol), fmt + clippy `-D warnings` iki crate'te temiz, `cargo audit` yalnızca [ADR-073](decisions/073-cargo-audit-rsa-bulgusu-kabul-edilen-risk.md) `rsa`; yeni migration, yeni bağımlılık ve yeni i18n anahtarı yok
+  - Doğrulama (**çalışan yığın**, imaj yeniden derlendi, geçici admin oturumuyla — oturum sonunda silindi): tarama bitmiş, açık iş yok → sayfada `data-reload` **yok**. `POST /targets/1/reconcile/reapply/6` (gözlem modundaki bağlantı, hedefe yazma yok) → `303` + yazma şeridinde `jobs 51 queued`; sonraki GET'te rozet hâlâ "bitti" ama `data-reload="5"` **var**. Worker işi bitirince (`succeeded`) aynı sayfada öznitelik yine **yok** — tazeleme kendiliğinden durdu
 - [ ] Sahiplenilen aday listeden düşer; aynı hesap iki kez sahiplenilemez
   - Kabul: sahiplenmeden sonra o hesap aday listesinde görünmez — sonraki taramayı beklemez
   - Kabul: aynı bulgu ikinci kez gönderilse ikinci kimlik açılmaz, hesap "zaten sahiplenildi" nedeniyle atlananlara girer

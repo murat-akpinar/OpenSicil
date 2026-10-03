@@ -46,6 +46,9 @@ pub struct View {
     pub status: String,
     pub scanned_at: String,
     pub result: String,
+    /// Hedefin yazma seridinde (`jobs`) acik is var mi: sahiplenme ve "yeniden
+    /// uygula" oraya yazar, ekran sonucu ancak isten sonra gorur (ADR-126)
+    pub writing: bool,
 }
 
 pub struct Box {
@@ -59,6 +62,13 @@ impl View {
     /// tazeler ve is bitince "bitti" + sonuc metni kendiliginden gorunur.
     pub fn running(&self) -> bool {
         crate::org::read_job_open(&self.status)
+    }
+
+    /// ADR-126: sayfa kendini tazeler — tarama (okuma seridi) ya da sahiplenme
+    /// gibi bir yazma isi (`jobs`) surerken. Ikisi de bitince oznitelik gelmez,
+    /// tazeleme kendiliginden durur.
+    pub fn busy(&self) -> bool {
+        self.running() || self.writing
     }
 
     /// Sayac kutulari; ilgi sirasi: once dikkat isteyenler.
@@ -100,6 +110,11 @@ const LAST_SQL: &str = "SELECT status, \
     COALESCE(result, '') FROM read_jobs WHERE kind = 'reconcile' AND target_system_id = $1 \
     ORDER BY created_at DESC LIMIT 1";
 
+// Hedefin acik yazma isi (ADR-126): sahiplenmenin kimlikleri worker'da
+// baglanir, ekran o serit bitmeden yeni durumu gostermez.
+const WRITING_SQL: &str = "SELECT EXISTS (SELECT 1 FROM jobs \
+    WHERE target_system_id = $1 AND status IN ('queued', 'running'))";
+
 /// kind, account_name, display_name, container, enabled, identity_id
 type FindingRow = (String, String, String, String, Option<bool>, Option<i64>);
 
@@ -113,6 +128,10 @@ pub async fn load(pool: &PgPool, target: i64, time_zone: &str) -> Result<View, s
         .bind(time_zone)
         .fetch_optional(pool)
         .await?;
+    let writing: bool = sqlx::query_scalar(WRITING_SQL)
+        .bind(target)
+        .fetch_one(pool)
+        .await?;
 
     let count = |want: &str| rows.iter().filter(|r| r.0 == want).count() as i64;
     let view = View {
@@ -123,6 +142,7 @@ pub async fn load(pool: &PgPool, target: i64, time_zone: &str) -> Result<View, s
         status: last.as_ref().map(|l| l.0.clone()).unwrap_or_default(),
         scanned_at: last.as_ref().map(|l| l.1.clone()).unwrap_or_default(),
         result: last.map(|l| l.2).unwrap_or_default(),
+        writing,
         rows: rows
             .into_iter()
             .map(
@@ -1815,6 +1835,26 @@ mod tests {
         assert_eq!(v.result, "3 hesap tarandı");
         assert_ne!(v.scanned_at, "");
         assert!(!v.running(), "bitmiş iş tazeleme istemez");
+        assert!(!v.busy(), "iki şerit de boşken tazeleme yok");
+
+        // ADR-126: sahiplenme ve "yeniden uygula" hedefe yazma isi acar. Rozet
+        // "bitti" derken bile sayfa o is bitene kadar kendini tazeler, yoksa
+        // operator sonucu gormek icin elle F5'e basiyor.
+        let identity = crate::test_support::seed_two_identities(&pool).await[0];
+        crate::jobs::enqueue(&pool, identity, target, crate::jobs::Priority::Single)
+            .await
+            .unwrap();
+        let writing = load(&pool, target, "Europe/Istanbul").await.unwrap();
+        assert!(!writing.running(), "tarama bitmis durumda");
+        assert!(writing.writing, "hedefin acik yazma isi var");
+        assert!(writing.busy(), "açık yazma işi sayfayı tazeletir");
+        sqlx::query("UPDATE jobs SET status = 'succeeded' WHERE identity_id = $1")
+            .bind(identity)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let done = load(&pool, target, "Europe/Istanbul").await.unwrap();
+        assert!(!done.busy(), "iş bitince tazeleme durur");
 
         // ADR-103 madde 3: yonlendirme yalnizca "yonetilmeyen" bulguyu sayar;
         // `missing` serit yazdirmaz
