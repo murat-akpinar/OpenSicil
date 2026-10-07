@@ -38,6 +38,7 @@
 - Iki kutucuğun doğrulaması çalışan yığında gerçek sahiplenmeyle tamamlandı
 - Işletme ayarları yapılandırma ekranına taşınır kararı ve kutucukları
 - ADR bağlantıları düz metne iner, depoda olmayan dosyaya link kalmaz
+- Proje taraması — ADR-055 parola yeniden üretimi, güvenlik listesi kanıtı, tek sinyalli doğrulama ve ölçek kutucukları
 
 ### Düzeltmeler
 

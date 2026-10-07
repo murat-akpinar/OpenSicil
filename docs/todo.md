@@ -731,7 +731,8 @@ Kurallar:
 > Aşağısı yapılacak iştir ve **sırası bağlayıcıdır**: ilk işaretlenmemiş kutucuktan devam edilir.
 > Sıra: önce sessiz bozulan şey (okuma şeridi kirası), sonra bugünün isteği (işletme ayarları ekrana
 > taşınır, tarama saati onun son kutucuğu), sonra küçük değişmez kuralı, sonra AD geri dolumunun
-> kalanı, sonra loglar. Bana bağlı olmayan kutucuklar
+> kalanı, sonra loglar, sonra proje taramasının açtığı iki bölüm (tasarım-kod açıkları, ölçekte yavaşlayan yollar).
+> Bana bağlı olmayan kutucuklar
 > **"Bende değil"** bölümünde, Zimbra ise en sonda durur (ADR-090).
 
 ---
@@ -1026,6 +1027,50 @@ Kurallar:
   - Kabul: `docs/09`'da "Merkezi log / SIEM" bölümü: alan listesi + compose log driver örneği + OTel Collector `filelog` örneği; "OTLP istiyorsanız collector çevirir" notu
 - [ ] Kapanış: güvenlik ve test
   - (1a'daki kapanış şablonunun aynısı)
+
+---
+
+## Tasarımla kod arasındaki açıklar (proje taraması, 2026-10-08)
+
+> Proje taraması (2026-10-08): `docs/todo.md`'deki "önerilen" notları, `docs/07` güvenlik kontrol listesi ve `docs/08` lab soruları koda karşı okundu. Bulgu: ADR-055 madde 5 hiç yazılmamış, ama `docs/05` "Hesap açma" madde 3 onu yapılıyormuş gibi anlatıyor. `docs/07`'nin kontrol listesinde 20 madde hiç işaretlenmemiş; README "her faz güvenlik ve test kapanışıyla bitti" diyor. Çoğunun testi var, en az birinin kodu yok. Bir de CLAUDE.md'deki doğrulama komutu iki crate'te her koşuda kırmızı bitiyor; her kutuda "bunlar ilgisiz" diye elle ayıklanıyor. Bu yüzden gerçek bir kırmızı gözden kaçabilir.
+
+- [ ] AD'nin reddettiği parola yeniden üretilir (ADR-055 madde 5)
+  - Bağlam: `worker/src/ad_account.rs` `create_account` (tek `add`) ve `set_password` AD'nin karmaşıklık reddini doğrudan `ad::classify` ile hataya çeviriyor; yeniden deneme yok. AD parolada `sAMAccountName`'i ve görünen adın üç harften uzun parçalarını yasaklar. Rastgele parolanın "ali", "can", "nur" içermesi binlerce hesapta beklenen bir olaydır (ADR-055 Bağlam 5). Bugün iş müdahaleye düşüyor. 3a'dan beri açık, `docs/todo.md` Faz 5 notunda "önerilen" olarak duruyordu
+  - Kabul: AD parolayı kısıt ihlaliyle (LDAP sonuç kodu 19, parola politikası) reddederse worker yeni parola üretip **en çok 3 kez** yeniden dener; sonra ADR-009'un anlaşılır hatasıyla durur. Başka kısıt ihlallerinde (ör. tekil öznitelik) yeni parola üretilmez, hata aynen döner
+  - Kabul: hesap açmada reddedilen `add` hesap oluşturmadığı için (ADR-057) yeniden deneme aynı DN'e yeni bir `add`'dir; ilk parola tesliminde yalnızca AD'nin kabul ettiği değer şifreli saklanır ve operatöre gösterilir. Reddedilen değer hiçbir yerde kalmaz
+  - Kabul: yeni bağımlılık, tablo ve sabit dışında ayar yok; deneme sayısı ADR-055'teki 3
+  - Kabul: testler — saf: üreteç ve yazıcı enjekte edilir, iki ret + kabul → hesap açılır, üç ret → anlaşılır hata, başka kısıt → tek deneme. Lab: Samba'da `sAMAccountName`'i içeren parola gerçekten 19 ile reddediliyor ve yeniden üretim hesabı açıyor
+  - Kabul: `docs/07` "AD'nin reddettiği parola yeniden üretiliyor" maddesi test adıyla işaretlenir
+
+- [ ] Güvenlik kontrol listesi kanıta bağlanır (`docs/07` 20 açık madde, `docs/08` AD soruları)
+  - Kabul: `docs/07` kontrol listesindeki her açık madde üç sonuçtan birini alır: (a) testi varsa test adı (`crate::modül::test`) madde sonuna yazılır ve `[x]` olur, (b) yalnızca Zimbra'ya bağlıysa "Zimbra bölümünde" notuyla açık kalır, (c) kodda karşılığı yoksa bu bölüme yeni kutucuk açılır ve madde açık kalır
+  - Kabul: bu kutucukta kod yazılmaz; yalnızca okuma, test koşusu ve belge. Kısmen doğrulanmış madde (ör. ADR-030'un CSV yarısı) ikiye bölünmez, kalan yarı açıkça yazılır
+  - Kabul: `docs/08` AD lab soruları (bind hata kodları, OU taşıma delegasyonu, `LDAP_MATCHING_RULE_IN_CHAIN`, `ldap3` #156) aynı şekilde: cevabı `docs/11`'de ya da bir testte varsa işaretlenir ve kanıtı yazılır, yoksa açık kalır. Gerçek Hogwarts AD açıkken ölçülebilen sorular ölçülür
+  - Kabul: README'nin "her faz güvenlik ve test kapanışıyla bitti" cümlesi sonuçla çelişiyorsa düzeltilir
+
+- [ ] Doğrulama komutu tek sinyal verir: lab testleri ve bilinen audit bulgusu
+  - Bağlam: lab ortamı env'i verilmeden koşulan `cargo test -- --include-ignored` worker'da 8, backend'de 2 testi panikle düşürüyor (`AD_CA_FILE`, `OIDC_LAB_ISSUER` …). `cargo audit` ise ADR-073'te kabul edilen risk olarak yazılmış `rsa` RUSTSEC-2023-0071 (`openidconnect` üzerinden yalnızca backend) yüzünden hata koduyla bitiyor. ADR-073 karar olarak var ama `audit.toml`'a girmemiş
+  - Kabul: `backend/.cargo/audit.toml` `ignore = ["RUSTSEC-2023-0071"]` ve yanında ADR-073'e işaret eden gerekçe yorumu; worker'a dosya girmez (bağımlılık ağacında `rsa` yok)
+  - Kabul: lab testleri env yokken panik yerine stderr'e `lab yok, atlandı: <test>` yazıp döner; env verilince bugünkünün aynısı koşar. Kapanış kutucukları lab betikleriyle (`scripts/e2e-lab.sh`, `e2e-hogwarts.sh`) koştuğu için orada gerçek koşu sürer
+  - Kabul: atlamanın sessiz geçişe dönmemesi için kapanış şablonuna "lab env'li koşuda `atlandı` satırı sıfır" kontrolü yazılır
+  - Kabul: CLAUDE.md'deki test/format/lint/audit döngüsü iki crate'te çıkış kodu 0 ile biter
+
+## Ölçekte yavaşlayan yollar (orta/büyük kurum, ADR-016–018)
+
+> Faz 3f ve Faz 5 kapanışlarında "önerilen (kapsam dışı)" olarak yazılıp kutucuğa dönmemiş üç yol. Her biri **önce ölçülür**: `scripts/load-lab.sh` (N-03, 20.000 kimlik) ile süre alınır. Sınırın altındaysa kutucuk ölçümle kapanır, kod yazılmaz. Sınır: kullanıcıya dönen POST 5 sn, okuma şeridi işi 15 dk (bir kira uzatmasından fazlası normal ama gece penceresini aşmamalı).
+
+- [ ] Rol/departman onayı işleri tek sorguyla açar (`org::enqueue_affected`)
+  - Bağlam: `backend/src/org.rs:790` `ponytail:` yorumu — kimlik başına hedef sayısı kadar INSERT. Temel rol düzenlemesi 20.000 kimlikte ~100 sn yanıt tahmini (Faz 3f notu)
+  - Kabul: önce ölçüm; sınırı aşıyorsa tek `INSERT … SELECT` ile aynı iş kümesi açılır (test: eski ve yeni yol aynı `jobs` satırlarını üretir), `ponytail:` yorumu kalkar
+- [ ] CSV önizlemesinde olası mükerrer tek sorgu (`csv_import::possible_duplicates`)
+  - Bağlam: yeni satır başına bir `identity::similar_person` sorgusu (20.000 satır ≈ 20.000 sorgu, Faz 5 notu)
+  - Kabul: önce ölçüm; aşıyorsa yeni satırların ad-soyadları tek sorguyla (`unnest`) eşlenir, sonuç listesi ve sırası bugünküyle aynı (mevcut test iddiaları değişmez)
+- [ ] `manage_diff` toplu okur, mutabakat listesi sayfalanır
+  - Bağlam: `manage_diff` bağlantı başına `model::load` + GUID araması + üyelik okuması (3.000 gözlem bağlantısında dakikalar, Faz 5 notu); `/targets/{id}/reconcile` 20.000 bulguyu tek sayfada basıyor (sunucu 89 ms, tarayıcı uzun liste)
+  - Kabul: önce ölçüm; `manage_diff` sınırı aşıyorsa hesaplar tek sayfalı aramayla (ADR-016) okunur, farklar bugünküyle aynı. Liste sayfası personel listesinin sayfalama desenini kullanır (yeni bileşen yok), sayaçlar sayfadan bağımsız kalır
+
+- [ ] Kapanış: güvenlik ve test
+  - (1a'daki kapanış şablonunun aynısı; ek olarak lab env'li koşuda `atlandı` satırı sıfır)
 
 ---
 
