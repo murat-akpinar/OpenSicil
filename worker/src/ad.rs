@@ -930,6 +930,7 @@ mod tests {
             group_ous: vec!["OU=Gruplar,DC=opensicil,DC=lab".to_string()],
         };
         let mut ldap = connect(&cfg).await.expect("lab AD'ye bağlanılamadı");
+        crate::test_support::ensure_lab_specialist_ou(&mut ldap).await;
         let checks = startup_checks(&mut ldap, &scope)
             .await
             .expect("açılış kontrolleri geçmeli");
@@ -986,7 +987,7 @@ mod tests {
         for expected in [
             "ou=personel,dc=opensicil,dc=lab",
             "ou=pasif,ou=personel,dc=opensicil,dc=lab",
-            // seed.sh aciyor ama kapsamda HIC sayilmiyor: kesif bulmali
+            // test aciyor (seed.sh'de yok) ama kapsamda HIC sayilmiyor: kesif bulmali
             "ou=sistemuzmanlari,ou=personel,dc=opensicil,dc=lab",
             "ou=gruplar,dc=opensicil,dc=lab",
         ] {

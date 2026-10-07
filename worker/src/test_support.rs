@@ -262,6 +262,21 @@ pub async fn point_model_at_real_catalog(
         .unwrap();
 }
 
+// seed.sh SistemUzmanlari'ni acmiyor; ona dayanan her test kendisi acar, yoksa
+// sonuc test sirasina baglanir (taze lab'da katalog testi dusuyordu). Varsa
+// `add` entryAlreadyExists doner, yok sayilir.
+pub async fn ensure_lab_specialist_ou(ldap: &mut ldap3::Ldap) {
+    let _ = ldap
+        .add(
+            "OU=SistemUzmanlari,OU=Personel,DC=opensicil,DC=lab",
+            vec![(
+                "objectClass",
+                std::collections::HashSet::from(["organizationalUnit"]),
+            )],
+        )
+        .await;
+}
+
 // Lab kapsamini (SistemUzmanlari OU'su dahil; seed.sh'de yok, burada eklenir)
 // gercek GUID'leriyle kataloga yazar.
 async fn sync_real_catalog(pool: &PgPool, ad: i64, cfg: &crate::ad::AdConfig) {
@@ -274,15 +289,7 @@ async fn sync_real_catalog(pool: &PgPool, ad: i64, cfg: &crate::ad::AdConfig) {
         group_ous: vec!["OU=Gruplar,DC=opensicil,DC=lab".to_string()],
     };
     let mut ldap = crate::ad::connect(cfg).await.expect("lab AD");
-    let _ = ldap
-        .add(
-            "OU=SistemUzmanlari,OU=Personel,DC=opensicil,DC=lab",
-            vec![(
-                "objectClass",
-                std::collections::HashSet::from(["organizationalUnit"]),
-            )],
-        )
-        .await;
+    ensure_lab_specialist_ou(&mut ldap).await;
     let checks = crate::ad::startup_checks(&mut ldap, &scope).await.unwrap();
     let snapshot = crate::ad::read_catalog(&mut ldap, &scope, &checks)
         .await
