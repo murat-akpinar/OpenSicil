@@ -855,6 +855,7 @@ manage.batch_sub = "{} seçti, {} dk önce; etki şu anki farklara göre yeniden
 manage.approve = "Onayla ve yönetime al"
 manage.rejected = "Seçim reddedildi; hiçbir hesap yönetime alınmadı."
 err.manage_batch_not_found = "Böyle bir seçim yok ya da artık bekleme listesinde değil."
+err.role_undefined_managed = "Birincil rol \"Tanımsız\" olamaz: yeni kayıt yönetilen hesap açtırır, yönetilen hesabı olan kişi de Tanımsız'a çekilemez. Bir birincil rol seçin."
 event.manage.staged = "Toplu yönetime alma onaya gönderildi"
 event.manage.approved = "Toplu yönetime alma onaylandı"
 event.manage.rejected = "Toplu yönetime alma reddedildi"

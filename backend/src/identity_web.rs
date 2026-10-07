@@ -685,6 +685,14 @@ async fn edit_submit(
         Ok(n) => n,
         Err(key) => return form_error(&state, &op, form, key, FormMode::Edit(id)).await,
     };
+    match identity::placeholder_refused(&state.pool, new.primary_role_id, Some(id)).await {
+        Ok(false) => {}
+        Ok(true) => {
+            let key = "err.role_undefined_managed";
+            return form_error(&state, &op, form, key, FormMode::Edit(id)).await;
+        }
+        Err(e) => return internal("rol kontrolü", e),
+    }
     if let Err(e) = identity::update_mover(&state.pool, id, &new).await {
         let db = e.as_database_error();
         if db.is_some_and(|d| d.is_unique_violation()) {
@@ -937,22 +945,35 @@ async fn render_form(
         .iter()
         .map(|kind| (*kind, *kind == form.employment_type))
         .collect();
-    match identity::form_options(&state.pool).await {
-        Ok(options) => render(&IdentityFormTemplate {
-            lang: op.lang,
-            shell: Shell::of(op),
-            form,
-            options,
-            employment_types,
-            error,
-            duplicate_warning: matches!(mode, FormMode::Duplicate),
-            editing: matches!(mode, FormMode::Edit(_)),
-            action: match mode {
-                FormMode::Edit(id) => format!("/identities/{id}/edit"),
-                _ => "/identities".to_string(),
-            },
-            ownership_enabled: state.common().await.is_ok_and(|c| c.ownership_mode_enabled),
-        }),
+    let loaded = tokio::try_join!(
+        identity::form_options(&state.pool),
+        identity::placeholder_role_id(&state.pool)
+    );
+    match loaded {
+        Ok((mut options, placeholder)) => {
+            // Yeni kayit yer tutucuyu secemez; duzenlemede kalir (secili deger kaybolmasin)
+            if !matches!(mode, FormMode::Edit(_)) {
+                let placeholder = placeholder.map(|p| p.to_string());
+                options
+                    .roles
+                    .retain(|c| Some(&c.id) != placeholder.as_ref());
+            }
+            render(&IdentityFormTemplate {
+                lang: op.lang,
+                shell: Shell::of(op),
+                form,
+                options,
+                employment_types,
+                error,
+                duplicate_warning: matches!(mode, FormMode::Duplicate),
+                editing: matches!(mode, FormMode::Edit(_)),
+                action: match mode {
+                    FormMode::Edit(id) => format!("/identities/{id}/edit"),
+                    _ => "/identities".to_string(),
+                },
+                ownership_enabled: state.common().await.is_ok_and(|c| c.ownership_mode_enabled),
+            })
+        }
         Err(e) => internal("form seçenekleri okunamadı", e),
     }
 }
@@ -973,6 +994,14 @@ async fn create(
         Ok(n) => n,
         Err(key) => return form_error(&state, &op, form, key, FormMode::New).await,
     };
+    match identity::placeholder_refused(&state.pool, new.primary_role_id, None).await {
+        Ok(false) => {}
+        Ok(true) => {
+            let key = "err.role_undefined_managed";
+            return form_error(&state, &op, form, key, FormMode::New).await;
+        }
+        Err(e) => return internal("rol kontrolü", e),
+    }
     match duplicate_person(&state, &form, &new).await {
         Ok(true) => {
             return render_form(&state, &op, form, String::new(), FormMode::Duplicate).await
@@ -1324,6 +1353,124 @@ mod tests {
         crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
     }
 
+    /// Degismez kural: `mode = 'managed'` baglantinin kimliginde yer tutucu rol olmaz.
+    /// Neden: kapi kalkarsa gece dolumu yonetilen hesabin rolunu degistirir ve is
+    /// acilmadigi icin hesap eski OU'da kalir. Kapi bilerek kaldirilirsa bu test
+    /// kirmizi olur; o zaman is acma karari yazilir (todo: "Değişmez kural test edilir").
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn a_managed_link_never_carries_the_placeholder_role() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        let [ayse, ali] = crate::test_support::seed_two_identities(&pool).await;
+        let app = crate::web::routes()
+            .with_state(crate::web::test_state(pool.clone(), "https://localhost"));
+        let hr = operator_cookie(&pool, &["hr"]).await;
+        let placeholder = identity::placeholder_role_id(&pool).await.unwrap().unwrap();
+        let dept: i64 = sqlx::query_scalar("SELECT department_id FROM identities WHERE id = $1")
+            .bind(ali)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let target: i64 = sqlx::query_scalar("SELECT id FROM target_systems WHERE kind = 'ad'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let role_of = |id: i64| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_scalar::<_, i64>("SELECT primary_role_id FROM identities WHERE id = $1")
+                    .bind(id)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap()
+            }
+        };
+        let body = |surname: &str| {
+            format!(
+                "given_name=Veli&surname={surname}&department_id={dept}&primary_role_id={placeholder}\
+                 &employment_type=permanent&start_date=2026-10-01&national_id_country=TR"
+            )
+        };
+        let post = |uri: String, body: String| {
+            let (app, hr) = (app.clone(), hr.clone());
+            async move {
+                app.oneshot(request("POST", &uri, &body, &hr))
+                    .await
+                    .unwrap()
+            }
+        };
+
+        // Kayit: yer tutucu formda yok, elle gonderilse de kimlik acilmaz
+        let form = body_string(
+            app.clone()
+                .oneshot(request("GET", "/identities/new", "", &hr))
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert!(!form.contains(">Tanımsız</option>"), "{form}");
+        let before: i64 = sqlx::query_scalar("SELECT count(*) FROM identities")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let r = post("/identities".into(), body("Can")).await;
+        assert!(body_string(r).await.contains("Tanımsız"));
+        let after: i64 = sqlx::query_scalar("SELECT count(*) FROM identities")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(before, after, "yer tutucu rolle kayıt açılmaz");
+
+        // Duzenleme: yonetilen hesabi olan kisi Tanimsiz'a cekilemez
+        sqlx::query(
+            "INSERT INTO account_links (identity_id, target_system_id, external_id, origin, mode) \
+             VALUES ($1, $2, 'guid-ali', 'provisioned', 'managed'), ($3, $2, 'guid-ayse', 'adopted', 'observed')",
+        )
+        .bind(ali)
+        .bind(target)
+        .bind(ayse)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let ali_role = role_of(ali).await;
+        let r = post(format!("/identities/{ali}/edit"), body("Kaya")).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        assert_eq!(
+            role_of(ali).await,
+            ali_role,
+            "yönetilen kişinin rolü değişmedi"
+        );
+        // Gozlemdeki kisi Tanimsiz'da kalabilir (toplu sahiplenme varsayilani, ADR-103)
+        let r = post(format!("/identities/{ayse}/edit"), body("Y%C4%B1lmaz")).await;
+        assert_eq!(r.status(), StatusCode::SEE_OTHER);
+        assert_eq!(role_of(ayse).await, placeholder);
+
+        // Tek ve toplu "Yonetime al": yer tutucu rollu gozlem baglantisi yonetime gecmez
+        assert!(matches!(
+            identity::request_management(&pool, ayse, target)
+                .await
+                .unwrap(),
+            identity::ManageOutcome::RoleUndefined
+        ));
+        let bulk = crate::bulk_manage::request(&pool, target, &[ayse])
+            .await
+            .unwrap();
+        assert!(bulk.requested.is_empty());
+        let managed: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM account_links l JOIN identities i ON i.id = l.identity_id \
+             JOIN roles r ON r.id = i.primary_role_id \
+             WHERE (l.mode = 'managed' OR l.manage_requested_at IS NOT NULL) AND r.placeholder",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(managed, 0, "değişmez kural");
+
+        drop(app);
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
     #[tokio::test]
     #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
     async fn the_personnel_list_renders_searches_and_hides_the_register_button() {
@@ -1421,10 +1568,12 @@ mod tests {
             .fetch_one(&pool)
             .await
             .unwrap();
-        let role: i64 = sqlx::query_scalar("SELECT id FROM roles WHERE kind = 'primary' LIMIT 1")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let role: i64 = sqlx::query_scalar(
+            "SELECT id FROM roles WHERE kind = 'primary' AND NOT placeholder LIMIT 1",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
 
         // Oturumsuz → giris; yetkisiz operator → 403.
         let r = app

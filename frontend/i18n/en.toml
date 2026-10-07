@@ -855,6 +855,7 @@ manage.batch_sub = "selected by {}, {} min ago; the effect was recounted against
 manage.approve = "Approve and manage"
 manage.rejected = "Selection rejected; no account was taken under management."
 err.manage_batch_not_found = "No such selection, or it is no longer waiting."
+err.role_undefined_managed = "The primary role cannot be \"Undefined\": a new registration opens managed accounts, and a person with a managed account cannot be moved to Undefined. Pick a primary role."
 event.manage.staged = "Bulk management takeover sent for approval"
 event.manage.approved = "Bulk management takeover approved"
 event.manage.rejected = "Bulk management takeover rejected"

@@ -84,6 +84,7 @@
 - Faz 5 kapanışı — güvenlik ve test, v1 hazır (208/99 test, kapsam %94,22/%93,10, nginx imajına apk upgrade, e2e-lab, duman testi)
 - Arayüz bölümünün kapanışı — güvenlik ve test
 - Katalog lab testi kendi OU'sunu açar, test sırasına bağlı kalmaz
+- Yönetilen bağlantıda yer tutucu rol olamaz kuralı teste bağlanır, kayıt ve düzenleme kapısı eklenir
 
 ### Yeniden düzenleme
 

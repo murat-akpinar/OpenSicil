@@ -755,6 +755,28 @@ pub async fn unassigned_role_count(pool: &PgPool) -> Result<i64, sqlx::Error> {
 
 /// Yer tutucu rolun id'si: toplu sahiplenme formunun varsayilani. Migration
 /// seed'ler; tek satirdir (kismi tekil indeks).
+/// Degismez kural: `mode = 'managed'` baglantinin kimliginde yer tutucu rol olmaz.
+/// Kapi kalkarsa gece dolumu (`fill_placeholder_roles`) yonetilen hesabin rolunu is
+/// acmadan degistirir ve hesap eski OU'da kalir. Kayit her hedefte yonetilen hesap
+/// actirdigi icin yer tutucuyu hic almaz; duzenleme yalnizca yonetilen baglantisi
+/// olmayan kimlikte (gozlemdeki toplu sahiplenme, ADR-103) birakir.
+pub async fn placeholder_refused(
+    pool: &PgPool,
+    role_id: i64,
+    identity: Option<i64>,
+) -> Result<bool, sqlx::Error> {
+    let refused: Option<bool> = sqlx::query_scalar(
+        "SELECT r.placeholder AND ($2::bigint IS NULL OR EXISTS (SELECT 1 FROM account_links l \
+         WHERE l.identity_id = $2 AND l.mode = 'managed' AND l.deleted_by_us_at IS NULL)) \
+         FROM roles r WHERE r.id = $1",
+    )
+    .bind(role_id)
+    .bind(identity)
+    .fetch_optional(pool)
+    .await?;
+    Ok(refused == Some(true))
+}
+
 pub async fn placeholder_role_id(pool: &PgPool) -> Result<Option<i64>, sqlx::Error> {
     sqlx::query_scalar("SELECT id FROM roles WHERE placeholder")
         .fetch_optional(pool)

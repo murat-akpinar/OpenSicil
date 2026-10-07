@@ -1923,6 +1923,25 @@ mod tests {
         (department, primary, additional)
     }
 
+    // Degismez kural (identity::placeholder_refused): CSV yer tutucu rolu taniyamaz;
+    // kapi kalkarsa gece dolumu yonetilen hesabin rolunu is acmadan degistirir.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn the_placeholder_role_cannot_be_named_in_a_file() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        seed(&pool).await;
+        let text = "employee_number,given_name,surname,department_code,primary_role,\
+                    employment_type,start_date\n\
+                    3000,Veli,Can,BT,Tanımsız,permanent,2026-01-01\n";
+        let plan = plan(&pool, &TEST_KEYS, false, &table_of(text))
+            .await
+            .unwrap();
+        assert!(!plan.valid(), "yer tutucu rol dosyada seçilemez");
+        assert_eq!(plan.new, 0);
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
     const TEST_KEYS: Keys<'static> = Keys {
         aead: &[7; crate::crypto::KEY_LEN],
         blind_index: &[9; crate::crypto::KEY_LEN],
