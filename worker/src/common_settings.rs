@@ -39,8 +39,6 @@ impl CommonSettings {
 
 /// ADR-131: isletme ayarlari tablosu `from_lookup` aramasina verilecek esleme
 /// olarak okunur (`|name| map.get(name).cloned()`); onbellek yok, her is/istek okur.
-// Worker bu yolu ADR-131'in ikinci kutucugunda okumaya baslar.
-#[allow(dead_code)]
 pub async fn load_operational(pool: &sqlx::PgPool) -> Result<HashMap<String, String>, sqlx::Error> {
     let rows: Vec<(String, String)> = sqlx::query_as("SELECT key, value FROM operational_settings")
         .fetch_all(pool)

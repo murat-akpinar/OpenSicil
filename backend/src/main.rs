@@ -43,6 +43,9 @@ mod org;
 mod org_web;
 mod reconcile;
 mod reports;
+// Ikiz dosya (worker ile birebir ayni); backend yalnizca kayitta alan kuralini cagirir.
+#[allow(dead_code)]
+mod scope;
 mod search;
 mod server;
 mod settings;
@@ -114,6 +117,7 @@ mod tests {
             "crypto.rs",
             "mapping_rules.rs",
             "normalize.rs",
+            "scope.rs",
         ] {
             let mine =
                 std::fs::read_to_string(format!("src/{name}")).expect("kendi kopyası okunamadı");

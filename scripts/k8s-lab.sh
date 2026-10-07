@@ -77,10 +77,7 @@ k create configmap common --from-literal=OWNERSHIP_MODE_ENABLED=false --from-lit
   --from-literal=SENSITIVE_MAPPING_ENABLED=false --from-literal=TZ=Europe/Istanbul >/dev/null
 k create configmap backend-config --from-literal=PUBLIC_URL="$BASE" \
   --from-literal=APPROVAL_TIMELOCK_HOURS=0 --from-literal=AD_CA_FILE=/etc/opensicil/ad-ca.pem >/dev/null
-k create configmap worker-config --from-literal=DRY_RUN=false --from-literal=FIRST_LOGIN_CHANGE_REQUIRED=true \
-  --from-literal=AD_CA_FILE=/etc/opensicil/ad-ca.pem --from-literal=USERNAME_TEMPLATE= --from-literal=EMAIL_LOCAL_TEMPLATE= \
-  --from-literal=AD_MANAGED_USER_OUS="$USER_OU" --from-literal=AD_PASSIVE_OU="$PASSIVE_OU" \
-  --from-literal=AD_MANAGED_GROUP_OUS="$GROUP_OU" --from-literal=ZIMBRA_MANAGED_DOMAINS= >/dev/null
+k create configmap worker-config --from-literal=AD_CA_FILE=/etc/opensicil/ad-ca.pem >/dev/null
 k create configmap ad-ca --from-file=ad-ca.pem=samba-lab/tls/ca.pem >/dev/null
 # nginx.conf'taki resolver Docker'ın gömülü DNS'i; kümede kube-dns. nginx resolver'ı
 # arama alanı (search) uygulamaz: upstream adı FQDN olmalı (backend.<ns>.svc.cluster.local)
@@ -102,6 +99,8 @@ record "şema yokken 45 sn sonra: backend hazır 0/2 (yeniden başlatma: $RESTAR
 echo "4) migration Job'ı → servisler kendiliğinden hazır"
 k apply -f k8s-lab/migrate-job.yaml >/dev/null
 k wait --for=condition=complete job/migrate --timeout=300s >/dev/null
+# ADR-131: kapsam ve canli mod Ayarlar tablosunda; worker is basina okur
+dbq "UPDATE operational_settings s SET value = v.value FROM (VALUES ('DRY_RUN', 'false'), ('AD_MANAGED_USER_OUS', '$USER_OU'), ('AD_PASSIVE_OU', '$PASSIVE_OU'), ('AD_MANAGED_GROUP_OUS', '$GROUP_OU')) v(key, value) WHERE s.key = v.key" >/dev/null
 JOB_DONE=$(k get job migrate -o jsonpath='{.status.completionTime}')
 T0=$(date +%s)
 k rollout status deploy/backend --timeout=600s >/dev/null

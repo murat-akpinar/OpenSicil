@@ -4,6 +4,30 @@
    yetkiyle giriyor), kabuğun gezinmesi ve dil seçicisi olduğu gibi kalır.
    ADR-114 C: dar tek sütun ve fieldset çerçeveleri yerine diğer sayfalarla
    aynı `.card` dili; solda bölüm menüsü, alanlar geniş ekranda iki sütun. #}
+{% macro text_field(ops, key, label, placeholder, form) %}
+<div>
+  <label class="label" for="{{ key }}">{{ label }}</label>
+  <input class="input" type="text" id="{{ key }}" name="{{ key }}" form="{{ form }}" value="{{ ops.value(key) }}" placeholder="{{ placeholder }}"{% if !ops.error(key).is_empty() %} aria-invalid="true" aria-describedby="{{ key }}-err"{% endif %}>
+  {% if !ops.error(key).is_empty() %}<div class="alert alert-err mt-2" id="{{ key }}-err" role="alert">{{ ops.error(key) }}</div>{% endif %}
+  <span class="hint"><code>{{ key }}</code></span>
+</div>
+{% endmacro %}
+{% macro bool_field(ops, key, label, hint, form) %}
+<div>
+  <label class="label" for="{{ key }}">{{ label }}</label>
+  <select class="input" id="{{ key }}" name="{{ key }}" form="{{ form }}">
+    <option value="true"{% if ops.value(key) == "true" %} selected{% endif %}>{{ lang.t("common.on") }}</option>
+    <option value="false"{% if ops.value(key) == "false" %} selected{% endif %}>{{ lang.t("common.off") }}</option>
+  </select>
+  {% if !ops.error(key).is_empty() %}<div class="alert alert-err mt-2" role="alert">{{ ops.error(key) }}</div>{% endif %}
+  <span class="hint">{{ hint }} <code>{{ key }}</code></span>
+</div>
+{% endmacro %}
+{% macro save_button(form) %}
+<div class="mt-4 flex justify-end">
+  <button class="btn btn-primary" type="submit" form="{{ form }}">{{ lang.t("common.save") }}</button>
+</div>
+{% endmacro %}
 {% block content %}
 <div class="page-head">
   <div>
@@ -18,7 +42,12 @@
       <a href="#ad">Active Directory</a>
       <a href="#zimbra">Zimbra</a>
       <a href="#oidc">OIDC</a>
-      {% if let Some(ops) = ops %}<a href="#limits">{{ lang.t("config.limits") }}</a>{% endif %}
+      {% if ops.is_some() %}
+      <a href="#scope">{{ lang.t("config.scope") }}</a>
+      <a href="#naming">{{ lang.t("config.naming") }}</a>
+      <a href="#limits">{{ lang.t("config.limits") }}</a>
+      <a href="#execution">{{ lang.t("config.execution") }}</a>
+      {% endif %}
     </nav>
 
     <div class="stack">
@@ -96,26 +125,61 @@
         </div>
       </section>
 
-      {# ADR-131: işletme ayarları ayrı formla kaydedilir (alanlar `form=` ile ona
-         bağlı, bağlantı formuna karışmaz); yerel bootstrap hesabı bu bölümü görmez.
-         Anahtar adı ipucu: eski notlardaki değişken adı aranabilir kalsın. #}
+      {# ADR-131: işletme ayarları; her bölüm kendi formuyla kaydedilir (alanlar
+         `form=` ile ona bağlı, bağlantı formuna ve birbirine karışmaz). Yerel
+         bootstrap hesabı bu bölümleri görmez (madde 7). Anahtar adı ipucu: eski
+         notlardaki değişken adı aranabilir kalsın. #}
       {% if let Some(ops) = ops %}
+      <section class="card" id="scope">
+        <div class="card-head">
+          <span class="ico-tile"><i class="ico ico-sitemap" aria-hidden="true"></i></span>
+          <h2 class="h2">{{ lang.t("config.scope") }}</h2>
+        </div>
+        <p class="hint mb-3">{{ lang.t("config.scope_hint") }}</p>
+        <div class="field-grid">
+          {% call text_field(ops, "AD_MANAGED_USER_OUS", lang.t("config.user_ous"), "OU=Personel,DC=kurum,DC=local", "ops-scope") %}
+          {% call text_field(ops, "AD_MANAGED_GROUP_OUS", lang.t("config.group_ous"), "OU=Gruplar,DC=kurum,DC=local", "ops-scope") %}
+          {% call text_field(ops, "AD_PASSIVE_OU", lang.t("config.passive_ou"), "OU=Pasif,DC=kurum,DC=local", "ops-scope") %}
+          {% call text_field(ops, "ZIMBRA_MANAGED_DOMAINS", lang.t("config.zimbra_domains"), "kurum.k12.tr", "ops-scope") %}
+        </div>
+        {% call save_button("ops-scope") %}
+      </section>
+
+      <section class="card" id="naming">
+        <div class="card-head">
+          <span class="ico-tile"><i class="ico ico-tag" aria-hidden="true"></i></span>
+          <h2 class="h2">{{ lang.t("config.naming") }}</h2>
+        </div>
+        <p class="hint mb-3">{{ lang.t("config.naming_hint") }} <code>{given}</code> <code>{given_first}</code> <code>{given_initial}</code> <code>{surname}</code> <code>{employee_number}</code></p>
+        <div class="field-grid">
+          {% call text_field(ops, "USERNAME_TEMPLATE", lang.t("config.username_template"), "{given_first}.{surname}", "ops-naming") %}
+          {% call text_field(ops, "EMAIL_LOCAL_TEMPLATE", lang.t("config.email_template"), "{given_first}.{surname}", "ops-naming") %}
+        </div>
+        {% call save_button("ops-naming") %}
+      </section>
+
       <section class="card" id="limits">
         <div class="card-head">
           <span class="ico-tile"><i class="ico ico-shield" aria-hidden="true"></i></span>
           <h2 class="h2">{{ lang.t("config.limits") }}</h2>
         </div>
+        <p class="hint mb-3">{{ lang.t("config.change_set_threshold_hint") }}</p>
         <div class="field-grid">
-          <div>
-            <label class="label" for="CHANGE_SET_THRESHOLD">{{ lang.t("config.change_set_threshold") }}</label>
-            <input class="input" type="text" inputmode="numeric" id="CHANGE_SET_THRESHOLD" name="CHANGE_SET_THRESHOLD" form="ops-form" value="{{ ops.value("CHANGE_SET_THRESHOLD") }}"{% if !ops.error("CHANGE_SET_THRESHOLD").is_empty() %} aria-invalid="true" aria-describedby="CHANGE_SET_THRESHOLD-err"{% endif %}>
-            {% if !ops.error("CHANGE_SET_THRESHOLD").is_empty() %}<div class="alert alert-err mt-2" id="CHANGE_SET_THRESHOLD-err" role="alert">{{ ops.error("CHANGE_SET_THRESHOLD") }}</div>{% endif %}
-            <span class="hint">{{ lang.t("config.change_set_threshold_hint") }} <code>CHANGE_SET_THRESHOLD</code></span>
-          </div>
+          {% call text_field(ops, "CHANGE_SET_THRESHOLD", lang.t("config.change_set_threshold"), "10", "ops-limits") %}
         </div>
-        <div class="mt-4 flex justify-end">
-          <button class="btn btn-primary" type="submit" form="ops-form">{{ lang.t("common.save") }}</button>
+        {% call save_button("ops-limits") %}
+      </section>
+
+      <section class="card" id="execution">
+        <div class="card-head">
+          <span class="ico-tile"><i class="ico ico-bolt" aria-hidden="true"></i></span>
+          <h2 class="h2">{{ lang.t("config.execution") }}</h2>
         </div>
+        <div class="field-grid">
+          {% call bool_field(ops, "DRY_RUN", lang.t("config.dry_run"), lang.t("config.dry_run_hint"), "ops-execution") %}
+          {% call bool_field(ops, "FIRST_LOGIN_CHANGE_REQUIRED", lang.t("config.first_login"), lang.t("config.first_login_hint"), "ops-execution") %}
+        </div>
+        {% call save_button("ops-execution") %}
       </section>
       {% endif %}
     </div>
@@ -127,5 +191,9 @@
     <button class="btn btn-primary" type="submit">{{ lang.t("common.save") }}</button>
   </div>
 </form>
-{% if let Some(ops) = ops %}<form id="ops-form" method="post" action="/config/operational"></form>{% endif %}
+{% if ops.is_some() %}
+{% for section in ["scope", "naming", "limits", "execution"] %}
+<form id="ops-{{ section }}" method="post" action="/config/operational"><input type="hidden" name="section" value="{{ section }}"></form>
+{% endfor %}
+{% endif %}
 {% endblock %}

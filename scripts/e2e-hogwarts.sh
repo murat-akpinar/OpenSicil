@@ -47,6 +47,8 @@ psql -d postgres -c "CREATE DATABASE $DB" >/dev/null
   POSTGRES_BACKEND_USER=hw_backend POSTGRES_BACKEND_PASSWORD=hw-backend-pw \
   POSTGRES_WORKER_USER=hw_worker POSTGRES_WORKER_PASSWORD=hw-worker-pw \
   target/debug/backend migrate >"$WORK/migrate.log")
+# ADR-131: kapsam ve kuru calistirma Ayarlar tablosunda
+psql -d "$DB" -c "UPDATE operational_settings s SET value = v.value FROM (VALUES ('DRY_RUN', 'true'), ('AD_MANAGED_USER_OUS', '$SCOPE_USERS'), ('AD_MANAGED_GROUP_OUS', '$SCOPE_GROUPS')) v(key, value) WHERE s.key = v.key" >/dev/null
 
 echo "2) backend (servis rolüyle)"
 env "${COMMON[@]}" DATABASE_URL="postgres://hw_backend:hw-backend-pw@$PG_HOST/$DB" \
@@ -71,9 +73,7 @@ curl -s -o /dev/null -b "$BOOT" \
 
 echo "4) worker (kuru çalıştırma: hedefe yazma ihtimali bile yok)"
 env "${COMMON[@]}" DATABASE_URL="postgres://hw_worker:hw-worker-pw@$PG_HOST/$DB" \
-  DRY_RUN=true FIRST_LOGIN_CHANGE_REQUIRED=true AD_CA_FILE="$AD_CA" \
-  AD_MANAGED_USER_OUS="$SCOPE_USERS" AD_MANAGED_GROUP_OUS="$SCOPE_GROUPS" AD_PASSIVE_OU="" \
-  worker/target/debug/worker >"$WORK/worker.log" 2>&1 &
+  AD_CA_FILE="$AD_CA" worker/target/debug/worker >"$WORK/worker.log" 2>&1 &
 WORKER_PID=$!
 
 echo "5) katalog ve mutabakat taraması"

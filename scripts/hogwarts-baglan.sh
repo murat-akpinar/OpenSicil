@@ -4,13 +4,15 @@
 # /targets/<ad>/reconcile ekraninda gorunur.
 #
 # Ne yapar:
-#   1. .env'deki dort anahtari gunceller (once .env.yedek alir)
+#   1. .env'de CA yolunu gunceller (once .env.yedek alir); kapsam ve DRY_RUN
+#      Ayarlar tablosuna yazilir (ADR-131)
 #   2. worker'i yeniden baslatir
 #   3. Yapilandirma sayfasina AD baglantisini yazar (OIDC ayarlari korunur)
 #   4. Mutabakat taramasini kuyruga koyar ve sonucu basar
 #
 # AD'ye hicbir sey YAZILMAZ: mutabakat salt okumadir ve DRY_RUN=true yapilir.
-# Geri almak icin: .env.yedek dosyasini .env uzerine kopyala, worker'i yeniden baslat.
+# Geri almak icin: .env.yedek dosyasini .env uzerine kopyala, worker'i yeniden baslat;
+# kapsami Ayarlar ekranindan geri gir.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -37,10 +39,11 @@ set_key() { # anahtar varsa degistirir, yoksa ekler
   fi
 }
 set_key AD_CA_PATH "$CA"
-set_key AD_MANAGED_USER_OUS "$SCOPE_USERS"
-set_key AD_MANAGED_GROUP_OUS "$SCOPE_GROUPS"
-set_key AD_PASSIVE_OU ""
-set_key DRY_RUN true
+docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -q' <<SQL
+UPDATE operational_settings s SET value = v.value FROM (VALUES ('AD_MANAGED_USER_OUS', '$SCOPE_USERS'),
+  ('AD_MANAGED_GROUP_OUS', '$SCOPE_GROUPS'), ('AD_PASSIVE_OU', ''), ('DRY_RUN', 'true')) v(key, value)
+WHERE s.key = v.key;
+SQL
 
 echo "2) worker yeniden başlatılıyor"
 docker compose up -d worker >/dev/null

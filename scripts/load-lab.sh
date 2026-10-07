@@ -64,6 +64,8 @@ psql -d postgres -c "CREATE DATABASE $DB" >/dev/null
   POSTGRES_BACKEND_USER=load_backend POSTGRES_BACKEND_PASSWORD=load-backend-pw \
   POSTGRES_WORKER_USER=load_worker POSTGRES_WORKER_PASSWORD=load-worker-pw \
   "target/$PROFILE/backend" migrate >"$WORK/migrate.log")
+# ADR-131: worker'in kapsami (yuk agaci) ve canli mod Ayarlar tablosunda
+q "UPDATE operational_settings s SET value = v.value FROM (VALUES ('DRY_RUN', 'false'), ('AD_MANAGED_USER_OUS', '$USER_OU'), ('AD_PASSIVE_OU', '$PASSIVE_OU'), ('AD_MANAGED_GROUP_OUS', '$GROUP_OU')) v(key, value) WHERE s.key = v.key" >/dev/null
 
 # ---- 2. AD ağacı: hesaplar ve gruplar (LDIF + ldbadd, samba-tool'dan yüz kat hızlı) ----
 echo "2) lab AD'de yük ağacı: $N_IDENTITIES hesap, $N_GROUPS grup"
@@ -151,10 +153,8 @@ ROLE=$(q "SELECT id FROM roles WHERE slug = '$ROLE_KEY'")
 
 # ---- 5. worker ve kaynak örnekleyici ----
 echo "5) worker (servis rolüyle, canlı mod; kapsam = yük ağacı) → açılışta katalog"
-env "${COMMON[@]}" DATABASE_URL="postgres://load_worker:load-worker-pw@$PG_HOST/$DB" DRY_RUN=false \
-  AD_CA_FILE="$PWD/samba-lab/tls/ca.pem" USERNAME_TEMPLATE= EMAIL_LOCAL_TEMPLATE= \
-  AD_MANAGED_USER_OUS="$USER_OU" AD_PASSIVE_OU="$PASSIVE_OU" AD_MANAGED_GROUP_OUS="$GROUP_OU" \
-  ZIMBRA_MANAGED_DOMAINS= "worker/target/$PROFILE/worker" >"$WORK/worker.log" 2>&1 &
+env "${COMMON[@]}" DATABASE_URL="postgres://load_worker:load-worker-pw@$PG_HOST/$DB" \
+  AD_CA_FILE="$PWD/samba-lab/tls/ca.pem" "worker/target/$PROFILE/worker" >"$WORK/worker.log" 2>&1 &
 WORKER_PID=$!
 ( while true; do
     docker stats --no-stream --format '{{.Name}} {{.CPUPerc}} {{.MemUsage}}' "$SAMBA" opensicil-test-pg 2>/dev/null

@@ -192,4 +192,5 @@
 - Raporlar hesap kapsamını gösterir ve toplu yönetime almaya bağlar
 - Eşiği aşan işi başlatan kendi onaylar, ikinci yönetici şartı kalkar
 - Işletme ayarları tablosu doğar, değişiklik seti eşiği Ayarlar ekranından verilir
+- Worker'ın kapsam, adlandırma ve yürütme ayarları Ayarlar ekranından okunur
 

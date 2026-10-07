@@ -41,7 +41,6 @@ const MANAGEMENT_GROUPS: [&str; 6] = [
     "OpenSicil-Auditors",
     "OpenSicil-Helpdesk",
 ];
-const FORBIDDEN_CONTAINERS: [&str; 3] = ["cn=users,", "cn=builtin,", "ou=domain controllers,"];
 
 pub struct AdConfig {
     pub urls: Vec<String>,
@@ -50,47 +49,7 @@ pub struct AdConfig {
     pub ca_file: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ManagedScope {
-    pub user_ous: Vec<String>,
-    pub passive_ou: Option<String>,
-    pub group_ous: Vec<String>,
-}
-
-fn split_dns(value: &str) -> Vec<String> {
-    value
-        .split(';')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-        .collect()
-}
-
-// ADR-077 kapsam degiskenleri; CN=Users, CN=Builtin, OU=Domain Controllers kapsam
-// olamaz, verilirse connector baslamaz (docs/05).
-pub fn parse_scope(lookup: impl Fn(&str) -> Option<String>) -> Result<ManagedScope, String> {
-    let get = |name: &str| lookup(name).map(|v| split_dns(&v)).unwrap_or_default();
-    let scope = ManagedScope {
-        user_ous: get("AD_MANAGED_USER_OUS"),
-        passive_ou: get("AD_PASSIVE_OU").into_iter().next(),
-        group_ous: get("AD_MANAGED_GROUP_OUS"),
-    };
-    if scope.user_ous.is_empty() || scope.group_ous.is_empty() {
-        return Err("AD_MANAGED_USER_OUS ve AD_MANAGED_GROUP_OUS boş olamaz".to_string());
-    }
-    for dn in scope
-        .user_ous
-        .iter()
-        .chain(&scope.group_ous)
-        .chain(&scope.passive_ou)
-    {
-        let lower = dn.to_ascii_lowercase();
-        if FORBIDDEN_CONTAINERS.iter().any(|c| lower.starts_with(c)) {
-            return Err(format!("kapsam olamaz: {dn} (docs/05)"));
-        }
-    }
-    Ok(scope)
-}
+pub use crate::scope::{parse_scope, ManagedScope};
 
 // ADR-016: DC adresi sirali listedir; ilk adres tercihli. "dc1;dc2:636;ldaps://dc3".
 pub fn parse_urls(ad_host: &str) -> Vec<String> {
@@ -849,23 +808,6 @@ mod tests {
             parse_urls("dc1; dc2:6360,ldaps://dc3"),
             vec!["ldaps://dc1:636", "ldaps://dc2:6360", "ldaps://dc3"]
         );
-    }
-
-    #[test]
-    fn scope_rejects_builtin_containers_and_requires_both_lists() {
-        let env = |user: &'static str, group: &'static str| {
-            move |name: &str| match name {
-                "AD_MANAGED_USER_OUS" => Some(user.to_string()),
-                "AD_MANAGED_GROUP_OUS" => Some(group.to_string()),
-                "AD_PASSIVE_OU" => Some("OU=Pasif,OU=Personel,DC=x".to_string()),
-                _ => None,
-            }
-        };
-        let ok = parse_scope(env("OU=Personel,DC=x", "OU=Gruplar,DC=x;OU=Gruplar2,DC=x")).unwrap();
-        assert_eq!(ok.group_ous.len(), 2);
-        assert_eq!(ok.passive_ou.as_deref(), Some("OU=Pasif,OU=Personel,DC=x"));
-        assert!(parse_scope(env("OU=Personel,DC=x", "CN=Users,DC=x")).is_err());
-        assert!(parse_scope(env("", "OU=Gruplar,DC=x")).is_err());
     }
 
     #[test]

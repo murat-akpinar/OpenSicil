@@ -24,6 +24,7 @@ mod queue;
 mod read_lane;
 mod reconcile;
 mod scheduler;
+mod scope;
 #[cfg(test)]
 mod test_support;
 mod username;
@@ -66,59 +67,87 @@ async fn prepare_pool(database_url: &str) -> Result<PgPool, String> {
 struct Env {
     database_url: String,
     time_zone: String,
-    write_mode: writes::Mode,
     aead_key: [u8; crypto::KEY_LEN],
     ad_ca_file: Option<String>,
     // ADR-029: hassas kaynak (kimlik no, cep) eslemesi; kapaliyken satir reddedilir
     sensitive_mapping_enabled: bool,
-    // ADR-019: ilk paroladan sonra pwdLastSet 0; varsayilan acik
-    first_login_change_required: bool,
     // ADR-018: sahiplenme (ortak ayar, varsayilan kapali)
     ownership_mode_enabled: bool,
     // ADR-016/050: saatlik fren sayaclari ve acil kota
     limits: counters::Limits,
 }
 
-fn parse_bool_env(name: &str) -> Result<Option<bool>, String> {
-    match std::env::var(name).as_deref().map(str::trim) {
-        Ok("true") | Ok("1") => Ok(Some(true)),
-        Ok("false") | Ok("0") => Ok(Some(false)),
-        Ok(other) => Err(format!(
-            "worker: {name} true ya da false olmalı, '{other}' geldi"
-        )),
-        Err(_) => Ok(None),
+// ADR-131 madde 6: isletme ayarlari is/tik basina tablodan okunur; ekrandaki
+// degisiklik worker yeniden baslatilmadan etkili olur, bayat deger penceresi yok.
+struct Operational {
+    map: HashMap<String, String>,
+    write_mode: writes::Mode,
+    // ADR-019: ilk paroladan sonra pwdLastSet 0; varsayilan acik
+    first_login_change_required: bool,
+}
+
+fn parse_bool_setting(map: &HashMap<String, String>, name: &str) -> Result<Option<bool>, String> {
+    match map.get(name).map(|v| v.trim()) {
+        Some("true") | Some("1") => Ok(Some(true)),
+        Some("false") | Some("0") => Ok(Some(false)),
+        Some(other) => Err(format!("{name} true ya da false olmalı, '{other}' geldi")),
+        None => Ok(None),
+    }
+}
+
+// Bozuk deger isi `failed` yapar ve nedeni yazar; sessiz varsayilana dusulmez (ADR-131 madde 5).
+fn operational_of(map: HashMap<String, String>) -> Result<Operational, String> {
+    let dry_run = parse_bool_setting(&map, "DRY_RUN")?
+        .ok_or_else(|| "DRY_RUN Ayarlar ekranında tanımlı değil".to_string())?;
+    let first_login_change_required =
+        parse_bool_setting(&map, "FIRST_LOGIN_CHANGE_REQUIRED")?.unwrap_or(true);
+    Ok(Operational {
+        map,
+        write_mode: writes::Mode { dry_run },
+        first_login_change_required,
+    })
+}
+
+async fn load_operational(pool: &PgPool) -> Result<Operational, String> {
+    let map = common_settings::load_operational(pool)
+        .await
+        .map_err(|e| format!("işletme ayarları okunamadı: {e}"))?;
+    operational_of(map)
+}
+
+// DRY_RUN (ADR-054): acikken hedefe hicbir sey yazilmaz; unutulmasin diye her acilista loglanir.
+async fn log_operational_at_startup(pool: &PgPool) {
+    match load_operational(pool).await {
+        Ok(ops) => {
+            println!(
+                "worker: FIRST_LOGIN_CHANGE_REQUIRED={}",
+                ops.first_login_change_required
+            );
+            if ops.write_mode.dry_run {
+                println!("worker: KURU ÇALIŞTIRMA açık — hedefe hiçbir şey yazılmaz (ADR-054)");
+            }
+        }
+        Err(e) => eprintln!("worker: {e}"),
     }
 }
 
 // Ortak ayarlar acilista dogrulanir ve loglanir; backend'in satiriyla yan
-// yana konunca iki servisin sapmasi gorulur (ADR-039). DRY_RUN (ADR-054):
-// acikken hedefe hicbir sey yazilmaz; unutulmasin diye her acilista loglanir.
+// yana konunca iki servisin sapmasi gorulur (ADR-039).
 fn load_env() -> Result<Env, String> {
     let database_url = std::env::var("DATABASE_URL")
         .map_err(|_| "worker: ortam değişkeni eksik: DATABASE_URL".to_string())?;
     let common = common_settings::CommonSettings::from_env().map_err(|e| format!("worker: {e}"))?;
-    let dry_run = parse_bool_env("DRY_RUN")?
-        .ok_or_else(|| "worker: ortam değişkeni eksik: DRY_RUN".to_string())?;
-    let first_login_change_required =
-        parse_bool_env("FIRST_LOGIN_CHANGE_REQUIRED")?.unwrap_or(true);
     let aead_key = std::env::var("AEAD_MASTER_KEY")
         .map_err(|_| "worker: ortam değişkeni eksik: AEAD_MASTER_KEY".to_string())
         .and_then(|v| {
             crypto::parse_key("AEAD_MASTER_KEY", &v).map_err(|e| format!("worker: {e}"))
         })?;
-    println!(
-        "worker: ortak ayarlar: {common}; FIRST_LOGIN_CHANGE_REQUIRED={first_login_change_required}"
-    );
-    if dry_run {
-        println!("worker: KURU ÇALIŞTIRMA açık — hedefe hiçbir şey yazılmaz (ADR-054)");
-    }
+    println!("worker: ortak ayarlar: {common}");
     Ok(Env {
         database_url,
-        write_mode: writes::Mode { dry_run },
         aead_key,
         ad_ca_file: std::env::var("AD_CA_FILE").ok(),
         sensitive_mapping_enabled: common.sensitive_mapping_enabled,
-        first_login_change_required,
         ownership_mode_enabled: common.ownership_mode_enabled,
         limits: counters::Limits {
             destructive: common.hourly_destructive_limit,
@@ -193,21 +222,26 @@ async fn run_read_lane(pool: PgPool, env: Arc<Env>, stop: Arc<AtomicBool>) {
 // Okuma islerinin ortak acilisi: ayarlar → kapsam → baglanti → acilis kontrolleri
 // (kapsam DN → GUID, ADR-060). ADR-061: DC'ye ulasilamiyorsa surec cikmaz, is
 // basarisiz olur ve bir sonraki istekte yeniden denenir.
-async fn open_ad(
-    pool: &PgPool,
-    env: &Env,
-) -> Result<(ldap3::Ldap, ad::ManagedScope, ad::StartupChecks), String> {
+type OpenAd = (
+    ldap3::Ldap,
+    ad::ManagedScope,
+    ad::StartupChecks,
+    Operational,
+);
+
+async fn open_ad(pool: &PgPool, env: &Env) -> Result<OpenAd, String> {
+    let ops = load_operational(pool).await?;
     let cfg = ad::load_config(pool, &env.aead_key, env.ad_ca_file.as_deref())
         .await
         .map_err(|e| format!("AD ayarları okunamadı: {e}"))?
         .ok_or_else(|| "AD yapılandırılmamış".to_string())?;
-    let scope = ad::parse_scope(|name| std::env::var(name).ok())
+    let scope = ad::parse_scope(|name| ops.map.get(name).cloned())
         .map_err(|e| format!("yönetilen kapsam geçersiz: {e}"))?;
     let mut ldap = ad::connect(&cfg).await.map_err(|e| e.to_string())?;
     let checks = ad::startup_checks(&mut ldap, &scope)
         .await
         .map_err(|e| e.to_string())?;
-    Ok((ldap, scope, checks))
+    Ok((ldap, scope, checks, ops))
 }
 
 // Mutabakat (ADR-099): yonetilen kullanici OU'larindaki hesaplar okunur ve
@@ -219,7 +253,7 @@ async fn run_reconcile(
     target: i64,
     read_job_id: i64,
 ) -> Result<String, String> {
-    let (mut ldap, scope, _checks) = open_ad(pool, env).await?;
+    let (mut ldap, scope, _checks, _ops) = open_ad(pool, env).await?;
     // ADR-106 madde 5: TC kimlik no yalnizca Yapilandirma'da oznitelik verildiyse okunur
     let national_id_attr = ad::national_id_attribute(pool).await?;
     let accounts = ad::read_accounts(&mut ldap, &scope, national_id_attr.as_deref())
@@ -254,8 +288,8 @@ async fn run_reconcile(
 // "esige giren fark var mi" baglantiya yazilir. Hedefe yazilmaz, sayaclar degismez;
 // hesaplanamayan baglanti nedeniyle isaretlenir, is dusmez.
 async fn run_manage_diff(pool: &PgPool, env: &Env, target: i64) -> Result<String, String> {
-    let (mut ldap, _scope, _checks) = open_ad(pool, env).await?;
-    let engine_env = engine_env_of(env, "read-lane");
+    let (mut ldap, _scope, _checks, ops) = open_ad(pool, env).await?;
+    let engine_env = engine_env_of(env, "read-lane", &ops);
     let ids: Vec<i64> = sqlx::query_scalar(
         "SELECT identity_id FROM account_links WHERE target_system_id = $1 \
          AND mode = 'observed' AND deleted_by_us_at IS NULL ORDER BY identity_id",
@@ -298,7 +332,7 @@ async fn run_manage_diff(pool: &PgPool, env: &Env, target: i64) -> Result<String
 
 // docs/03 katalog.
 async fn refresh_catalog(pool: &PgPool, env: &Env, target: i64) -> Result<String, String> {
-    let (mut ldap, scope, checks) = open_ad(pool, env).await?;
+    let (mut ldap, scope, checks, _ops) = open_ad(pool, env).await?;
     let snapshot = ad::read_catalog(&mut ldap, &scope, &checks)
         .await
         .map_err(|e| e.to_string())?;
@@ -357,6 +391,7 @@ async fn run() -> ExitCode {
     let worker_id = worker_id();
     println!("worker: {worker_id} başladı, {POLL_INTERVAL:?} aralıkla yoklanıyor");
     let env = Arc::new(env);
+    log_operational_at_startup(&pool).await;
     request_catalog_refresh_at_startup(&pool).await;
     tokio::spawn(run_read_lane(
         pool.clone(),
@@ -398,8 +433,13 @@ async fn tick_if_due(pool: &PgPool, env: &Env, worker_id: &str, next_tick: &mut 
     *next_tick = Instant::now() + TICK_INTERVAL;
     let time_zone = env.time_zone.as_str();
     // F-19 / ADR-054: mod ve son gorulme veritabanina, dakikada bir (metrik ucu + panel)
-    if let Err(e) = heartbeat::record(pool, worker_id, env.write_mode.dry_run).await {
-        eprintln!("worker: durum satırı yazılamadı: {e}");
+    match load_operational(pool).await {
+        Ok(ops) => {
+            if let Err(e) = heartbeat::record(pool, worker_id, ops.write_mode.dry_run).await {
+                eprintln!("worker: durum satırı yazılamadı: {e}");
+            }
+        }
+        Err(e) => eprintln!("worker: {e}"),
     }
     match scheduler::tick(pool, time_zone).await {
         Ok(0) => {}
@@ -423,23 +463,30 @@ fn unreachable_targets(marks: &HashMap<i64, Instant>, now: Instant) -> Vec<i64> 
 }
 
 // Doner: hedef erisilemez isaretlenmeli mi.
-fn engine_env_of<'a>(env: &'a Env, worker_id: &'a str) -> engine::EngineEnv<'a> {
+fn engine_env_of<'a>(
+    env: &'a Env,
+    worker_id: &'a str,
+    ops: &'a Operational,
+) -> engine::EngineEnv<'a> {
     engine::EngineEnv {
         time_zone: &env.time_zone,
-        mode: env.write_mode,
+        mode: ops.write_mode,
+        settings: &ops.map,
         aead_key: &env.aead_key,
         ad_ca_file: env.ad_ca_file.as_deref(),
         worker_id,
         sensitive_mapping_enabled: env.sensitive_mapping_enabled,
-        first_login_change_required: env.first_login_change_required,
+        first_login_change_required: ops.first_login_change_required,
         ownership_mode_enabled: env.ownership_mode_enabled,
         limits: env.limits,
     }
 }
 
 async fn process_job(pool: &PgPool, job: &queue::ClaimedJob, worker_id: &str, env: &Env) -> bool {
-    let engine_env = engine_env_of(env, worker_id);
-    let run = engine::run_job(pool, job, &engine_env).await;
+    let run = match load_operational(pool).await {
+        Ok(ops) => engine::run_job(pool, job, &engine_env_of(env, worker_id, &ops)).await,
+        Err(e) => Err(engine::JobError::Failed(e)),
+    };
     let (outcome, unreachable) = match run {
         Ok(result) => (
             queue::complete(pool, job, worker_id, &result)
@@ -490,6 +537,48 @@ mod tests {
     use super::*;
 
     #[test]
+    fn operational_settings_parse_or_fail_loudly() {
+        let map = |pairs: &[(&str, &str)]| -> HashMap<String, String> {
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        };
+        let ops = operational_of(map(&[("DRY_RUN", "0")])).unwrap();
+        assert!(!ops.write_mode.dry_run);
+        assert!(ops.first_login_change_required, "verilmezse açık (ADR-019)");
+        let err = operational_of(map(&[("DRY_RUN", "belki")])).err().unwrap();
+        assert!(err.contains("DRY_RUN"), "{err}");
+        assert!(
+            operational_of(map(&[])).is_err(),
+            "DRY_RUN yoksa iş yürümez"
+        );
+        assert!(operational_of(map(&[
+            ("DRY_RUN", "true"),
+            ("FIRST_LOGIN_CHANGE_REQUIRED", "")
+        ]))
+        .is_err());
+    }
+
+    // ADR-131 madde 6: ekrandaki degisiklik bir sonraki okumada etkili, yeniden baslatma yok.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn dry_run_is_read_per_job_from_the_table() {
+        let (admin_pool, pool, db_name) = test_support::fresh_migrated_db().await;
+        assert!(
+            load_operational(&pool).await.unwrap().write_mode.dry_run,
+            "seed: açık"
+        );
+        test_support::set_setting(&pool, "DRY_RUN", "false").await;
+        test_support::set_setting(&pool, "FIRST_LOGIN_CHANGE_REQUIRED", "false").await;
+        let ops = load_operational(&pool).await.unwrap();
+        assert!(!ops.write_mode.dry_run);
+        assert!(!ops.first_login_change_required);
+        drop(pool);
+        test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
+    #[test]
     fn unreachable_marks_expire() {
         let now = Instant::now();
         let marks = HashMap::from([
@@ -526,7 +615,6 @@ mod tests {
         // baska test yok (backend migrate testindeki desenle ayni).
         unsafe {
             std::env::set_var("DATABASE_URL", &test_url);
-            std::env::set_var("DRY_RUN", "true");
             std::env::set_var(
                 "AEAD_MASTER_KEY",
                 "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",

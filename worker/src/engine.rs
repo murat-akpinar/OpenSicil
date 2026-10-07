@@ -30,6 +30,8 @@ use crate::writes::{self, Applied, Mode, OperationClass, WriteFailure, WriteOp, 
 pub struct EngineEnv<'a> {
     pub time_zone: &'a str,
     pub mode: Mode,
+    /// ADR-131: isletme ayarlari (kapsam, sablonlar, pasif OU); is basina okunur
+    pub settings: &'a HashMap<String, String>,
     pub aead_key: &'a [u8; crate::crypto::KEY_LEN],
     pub ad_ca_file: Option<&'a str>,
     pub worker_id: &'a str,
@@ -352,7 +354,7 @@ async fn ensure_names(c: &AdJob<'_>, ldap: &mut Ldap) -> Result<Names, JobError>
             upn: upn.clone(),
         });
     }
-    let candidate = candidate_for(person)?;
+    let candidate = candidate_for(person, c.env.settings)?;
     let names = resolve_names(c, ldap, &candidate).await?;
     sqlx::query("UPDATE identities SET username = $2, email = $3, upn = $4 WHERE id = $1")
         .bind(c.job.identity_id)
@@ -366,7 +368,10 @@ async fn ensure_names(c: &AdJob<'_>, ldap: &mut Ldap) -> Result<Names, JobError>
 }
 
 // ADR-022: elle girilen ad varsa sablon calismaz; e-posta yerel kismi da odur.
-fn candidate_for(person: &model::Person) -> Result<username::Candidate, JobError> {
+fn candidate_for(
+    person: &model::Person,
+    settings: &HashMap<String, String>,
+) -> Result<username::Candidate, JobError> {
     let override_conflicts = person.name_conflict_override;
     let requested = person
         .requested_username
@@ -382,7 +387,7 @@ fn candidate_for(person: &model::Person) -> Result<username::Candidate, JobError
             override_conflicts,
         });
     }
-    let templates = username::Templates::from_lookup(|n| std::env::var(n).ok());
+    let templates = username::Templates::from_lookup(|n| settings.get(n).cloned());
     let input = username::NameInput {
         given_names: &person.given_name,
         surname: &person.surname,
@@ -440,8 +445,10 @@ async fn container_dn(c: &AdJob<'_>, ldap: &mut Ldap) -> Result<String, JobError
     let guid = match c.desired.container {
         Container::Item(id) => catalog_guid(c.pool, id).await?,
         Container::Passive => {
-            return passive_ou().ok_or_else(|| {
-                JobError::Failed("pasif OU tanımlı değil (AD_PASSIVE_OU)".to_string())
+            return passive_ou(c.env.settings).ok_or_else(|| {
+                JobError::Failed(
+                    "pasif OU Ayarlar ekranında tanımlı değil (AD_PASSIVE_OU)".to_string(),
+                )
             })
         }
         Container::Unchanged | Container::Unspecified => None,
@@ -691,7 +698,7 @@ async fn adoption_violation(
     ldap: &mut Ldap,
     cand: &adoption::Candidate,
 ) -> Result<Option<String>, JobError> {
-    let scope = ad::parse_scope(|n| std::env::var(n).ok()).map_err(JobError::Failed)?;
+    let scope = ad::parse_scope(|n| c.env.settings.get(n).cloned()).map_err(JobError::Failed)?;
     if !ad::under_any(&cand.dn, &scope.user_ous) {
         return Ok(Some("yönetilen kullanıcı OU'larının dışında".to_string()));
     }
@@ -1371,7 +1378,9 @@ async fn move_if_needed(
 ) -> Result<(String, bool), JobError> {
     let target_ou = match c.desired.container {
         Container::Unchanged | Container::Unspecified => return Ok((account.dn.clone(), false)),
-        Container::Passive if passive_ou().is_none() => return Ok((account.dn.clone(), false)),
+        Container::Passive if passive_ou(c.env.settings).is_none() => {
+            return Ok((account.dn.clone(), false))
+        }
         _ => container_dn(c, ldap).await?,
     };
     let Some((rdn, parent)) = ad_account::split_dn(&account.dn) else {
@@ -1410,10 +1419,11 @@ async fn move_if_needed(
     })
 }
 
-fn passive_ou() -> Option<String> {
-    std::env::var("AD_PASSIVE_OU")
-        .ok()
-        .filter(|v| !v.trim().is_empty())
+fn passive_ou(settings: &HashMap<String, String>) -> Option<String> {
+    settings
+        .get(crate::scope::PASSIVE_OU)
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
 }
 
 struct EnabledPlan {
@@ -1547,9 +1557,11 @@ mod tests {
         .await
         .unwrap();
         let ca = var("AD_CA_FILE");
+        let settings = test_support::settings(&pool).await;
         let env = EngineEnv {
             time_zone: "Europe/Istanbul",
             mode: Mode { dry_run: false },
+            settings: &settings,
             aead_key: &key,
             ad_ca_file: Some(&ca),
             worker_id: "read-lane",
@@ -1605,11 +1617,19 @@ mod tests {
         )
         .await;
         test_support::point_model_at_real_catalog(&pool, &seed, &cfg).await;
-        // SAFETY: tek is parcacikli test; ayni degiskenleri eszamanli degistiren baska test yok.
-        unsafe {
-            std::env::set_var("AD_MANAGED_USER_OUS", "OU=Personel,DC=opensicil,DC=lab");
-            std::env::set_var("AD_MANAGED_GROUP_OUS", "OU=Gruplar,DC=opensicil,DC=lab");
-        }
+        test_support::set_setting(
+            &pool,
+            "AD_MANAGED_USER_OUS",
+            "OU=Personel,DC=opensicil,DC=lab",
+        )
+        .await;
+        test_support::set_setting(
+            &pool,
+            "AD_MANAGED_GROUP_OUS",
+            "OU=Gruplar,DC=opensicil,DC=lab",
+        )
+        .await;
+        let settings = test_support::settings(&pool).await;
         let mut ldap = ad::connect(&cfg).await.unwrap();
         let base = ad::base_dn(&mut ldap).await.unwrap();
         let existing = adoption::find_by_sam(&mut ldap, &base, "mevcut.personel", None)
@@ -1686,6 +1706,7 @@ mod tests {
         let env = |ownership: bool, dry_run: bool| EngineEnv {
             time_zone: "Europe/Istanbul",
             mode: Mode { dry_run },
+            settings: &settings,
             aead_key: &key,
             ad_ca_file: Some(&ca),
             worker_id: "w1",
@@ -2080,9 +2101,11 @@ mod tests {
             .unwrap()
             .unwrap_or(job);
         let ca = var("AD_CA_FILE");
+        let settings = test_support::settings(&pool).await;
         let env = |dry_run: bool, change_required: bool| EngineEnv {
             time_zone: "Europe/Istanbul",
             mode: Mode { dry_run },
+            settings: &settings,
             aead_key: &key,
             ad_ca_file: Some(&ca),
             worker_id: "w1",
@@ -2382,9 +2405,18 @@ mod tests {
             .unwrap()
             .unwrap_or(job);
         let ca = var("AD_CA_FILE");
+        // Pasif OU bastan tanimli: ayrilisa kadar hicbir adim pasif konteynere bakmaz
+        test_support::set_setting(
+            &pool,
+            "AD_PASSIVE_OU",
+            "OU=Pasif,OU=Personel,DC=opensicil,DC=lab",
+        )
+        .await;
+        let settings = test_support::settings(&pool).await;
         let env = |dry_run: bool| EngineEnv {
             time_zone: "Europe/Istanbul",
             mode: Mode { dry_run },
+            settings: &settings,
             aead_key: &key,
             ad_ca_file: Some(&ca),
             worker_id: "w1",
@@ -2637,10 +2669,6 @@ mod tests {
         );
         assert!(account.member_of.iter().any(|g| g.contains("GG-Nobet")));
         assert!(!account.member_of.iter().any(|g| g.contains("GG-VPN")));
-        // SAFETY: tek is parcacikli test; ayni degiskeni eszamanli degistiren baska test yok.
-        unsafe {
-            std::env::set_var("AD_PASSIVE_OU", "OU=Pasif,OU=Personel,DC=opensicil,DC=lab");
-        }
 
         // ADR-053/059: tarihli aski — hesap pasiflesir ama uyelik ve OU korunur (ayrilis degil);
         // aski kalkinca yeniden etkinlesir. Pasif OU tanimli, yine tasinmaz.

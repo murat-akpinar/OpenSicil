@@ -326,3 +326,19 @@ pub async fn enqueue(pool: &PgPool, identity: i64, target: i64, priority: i16) -
     .await
     .expect("iş kuyruğa yazılamadı")
 }
+
+// ADR-131: isletme ayarlari tabloda; testler satiri gunceller, motor eslemeyi okur.
+pub async fn set_setting(pool: &PgPool, key: &str, value: &str) {
+    sqlx::query("UPDATE operational_settings SET value = $2 WHERE key = $1")
+        .bind(key)
+        .bind(value)
+        .execute(pool)
+        .await
+        .expect("işletme ayarı yazılamadı");
+}
+
+pub async fn settings(pool: &PgPool) -> std::collections::HashMap<String, String> {
+    crate::common_settings::load_operational(pool)
+        .await
+        .expect("işletme ayarları okunamadı")
+}

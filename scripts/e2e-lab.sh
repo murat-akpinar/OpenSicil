@@ -44,6 +44,8 @@ psql -d postgres -c "CREATE DATABASE $DB" >/dev/null
   POSTGRES_BACKEND_USER=e2e_backend POSTGRES_BACKEND_PASSWORD=e2e-backend-pw \
   POSTGRES_WORKER_USER=e2e_worker POSTGRES_WORKER_PASSWORD=e2e-worker-pw \
   target/debug/backend migrate >"$WORK/migrate.log")
+# ADR-131: worker'in kapsami ve kuru calistirmasi Ayarlar tablosunda
+psql -d $DB -c "UPDATE operational_settings s SET value = v.value FROM (VALUES ('DRY_RUN', 'false'), ('AD_MANAGED_USER_OUS', 'OU=Personel,DC=opensicil,DC=lab'), ('AD_PASSIVE_OU', 'OU=Pasif,OU=Personel,DC=opensicil,DC=lab'), ('AD_MANAGED_GROUP_OUS', 'OU=Gruplar,DC=opensicil,DC=lab')) v(key, value) WHERE s.key = v.key" >/dev/null
 
 echo "2) backend (servis rolüyle)"
 env "${COMMON[@]}" DATABASE_URL="postgres://e2e_backend:e2e-backend-pw@$PG_HOST/$DB" \
@@ -69,12 +71,8 @@ curl -s -o /dev/null -b "$BOOT" \
   --data-urlencode "oidc_client_secret=lab-only-not-secret" "$BASE/config"
 
 echo "4) worker (servis rolüyle, canlı mod) → açılışta katalog"
-env "${COMMON[@]}" DATABASE_URL="postgres://e2e_worker:e2e-worker-pw@$PG_HOST/$DB" DRY_RUN=false \
-  AD_CA_FILE="$PWD/samba-lab/tls/ca.pem" USERNAME_TEMPLATE= EMAIL_LOCAL_TEMPLATE= \
-  AD_MANAGED_USER_OUS="OU=Personel,DC=opensicil,DC=lab" \
-  AD_PASSIVE_OU="OU=Pasif,OU=Personel,DC=opensicil,DC=lab" \
-  AD_MANAGED_GROUP_OUS="OU=Gruplar,DC=opensicil,DC=lab" ZIMBRA_MANAGED_DOMAINS= \
-  worker/target/debug/worker >"$WORK/worker.log" 2>&1 &
+env "${COMMON[@]}" DATABASE_URL="postgres://e2e_worker:e2e-worker-pw@$PG_HOST/$DB" \
+  AD_CA_FILE="$PWD/samba-lab/tls/ca.pem" worker/target/debug/worker >"$WORK/worker.log" 2>&1 &
 WORKER_PID=$!
 for _ in $(seq 1 30); do
   [ "$(psql -d $DB -c "SELECT count(*) FROM catalog_items WHERE kind = 'ou' AND display_name = 'Personel'")" = "1" ] && break

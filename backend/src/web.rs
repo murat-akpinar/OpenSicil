@@ -693,7 +693,12 @@ async fn operational_submit(
         )
         .await;
     }
-    Redirect::to("/config#limits").into_response()
+    let section = form
+        .get("section")
+        .map(String::as_str)
+        .filter(|s| crate::operational_settings::SECTIONS.contains(s))
+        .unwrap_or("limits");
+    Redirect::to(&format!("/config#{section}")).into_response()
 }
 // --- END FEATURE: operational-settings ---
 
@@ -1072,7 +1077,7 @@ mod tests {
             .unwrap();
         let body = body_string(response).await;
         assert!(body.contains(r#"id="limits""#), "{body}");
-        assert!(body.contains(r#"name="CHANGE_SET_THRESHOLD" form="ops-form" value="10""#));
+        assert!(body.contains(r#"name="CHANGE_SET_THRESHOLD" form="ops-limits" value="10""#));
         assert_eq!(crate::change_set::threshold(&pool).await.unwrap(), 10);
 
         let response = post("CHANGE_SET_THRESHOLD=3").await;
@@ -1111,6 +1116,46 @@ mod tests {
             audited,
             vec![("CHANGE_SET_THRESHOLD".into(), "10".into(), "3".into())]
         );
+
+        // Kapsam bolumu: yasakli konteyner reddedilir, hicbir kapsam satiri yazilmaz
+        let response = post(
+            "section=scope&AD_MANAGED_USER_OUS=OU%3DPersonel%2CDC%3Dx&\
+             AD_MANAGED_GROUP_OUS=CN%3DUsers%2CDC%3Dx&AD_PASSIVE_OU=&ZIMBRA_MANAGED_DOMAINS=",
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(body_string(response)
+            .await
+            .contains("AD_MANAGED_GROUP_OUS-err"));
+        let scope = |pool: sqlx::PgPool| async move {
+            crate::common_settings::load_operational(&pool)
+                .await
+                .unwrap()["AD_MANAGED_USER_OUS"]
+                .clone()
+        };
+        assert_eq!(scope(pool.clone()).await, "");
+
+        let response = post(
+            "section=scope&AD_MANAGED_USER_OUS=OU%3DPersonel%2CDC%3Dx&\
+             AD_MANAGED_GROUP_OUS=OU%3DGruplar%2CDC%3Dx&AD_PASSIVE_OU=&ZIMBRA_MANAGED_DOMAINS=",
+        )
+        .await;
+        assert_eq!(location_of(&response), "/config#scope");
+        assert_eq!(scope(pool.clone()).await, "OU=Personel,DC=x");
+
+        // Kuru calistirma ekrandan kapanir; degisiklik denetimde (ADR-131 madde 8)
+        let response =
+            post("section=execution&DRY_RUN=false&FIRST_LOGIN_CHANGE_REQUIRED=true").await;
+        assert_eq!(location_of(&response), "/config#execution");
+        let dry_run: (String, String) = sqlx::query_as(
+            "SELECT detail->>'before', detail->>'after' FROM audit_log \
+             WHERE event_type = $1 AND detail->>'key' = 'DRY_RUN'",
+        )
+        .bind(crate::audit::SETTINGS_CHANGED)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(dry_run, ("true".into(), "false".into()));
 
         drop(pool);
         crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
