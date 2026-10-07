@@ -226,7 +226,7 @@ pub async fn metrics(State(state): State<AppState>, headers: HeaderMap) -> Respo
     if state.metrics_token.is_empty() || !token_matches(bearer, &state.metrics_token) {
         return (StatusCode::UNAUTHORIZED, "unauthorized\n").into_response();
     }
-    let limits = match crate::common_settings::CommonSettings::from_env() {
+    let limits = match state.common().await {
         Ok(c) => (
             c.hourly_destructive_limit,
             c.hourly_grant_limit,

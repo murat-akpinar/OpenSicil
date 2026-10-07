@@ -159,6 +159,10 @@ async fn show(
     if !allowed(&op, AUTHORITIES) {
         return forbidden(op.lang);
     }
+    let time_zone = match state.time_zone().await {
+        Ok(tz) => tz,
+        Err(response) => return *response,
+    };
     let header = match person_header(&state.pool, id).await {
         Ok(Some(h)) => h,
         Ok(None) => {
@@ -177,8 +181,7 @@ async fn show(
     match status {
         Status::Pending => {
             page.pending = true;
-            page.jobs = match crate::identity::load_jobs(&state.pool, op.lang, &state.time_zone, id)
-                .await
+            page.jobs = match crate::identity::load_jobs(&state.pool, op.lang, &time_zone, id).await
             {
                 Ok(jobs) => jobs,
                 Err(e) => return internal("işler okunamadı", e),

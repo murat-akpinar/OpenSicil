@@ -23,9 +23,8 @@ AD_PASSWORD=$(sed -n 's/^- Parola: //p' tmp/lab-ad-notlari.md | head -1)
 
 AEAD_MASTER_KEY=$(head -c 32 /dev/urandom | base64)
 BLIND_INDEX_KEY=$(head -c 32 /dev/urandom | base64)
-COMMON=(OWNERSHIP_MODE_ENABLED=false HOURLY_DESTRUCTIVE_LIMIT=50 HOURLY_GRANT_LIMIT=50
-        HOURLY_FIRST_PASSWORD_LIMIT=50 EMERGENCY_QUOTA=5 SENSITIVE_MAPPING_ENABLED=false
-        TZ=Europe/Istanbul AEAD_MASTER_KEY="$AEAD_MASTER_KEY" BLIND_INDEX_KEY="$BLIND_INDEX_KEY")
+# ortak ayarlar tablonun seed'inden gelir (ADR-131); env'de yalnizca anahtarlar
+COMMON=(AEAD_MASTER_KEY="$AEAD_MASTER_KEY" BLIND_INDEX_KEY="$BLIND_INDEX_KEY")
 WORK=$(mktemp -d)
 BACKEND_PID=""; WORKER_PID=""
 

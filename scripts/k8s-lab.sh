@@ -72,9 +72,8 @@ k create secret generic worker-env --from-literal=DATABASE_URL="postgres://$WU:$
 openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj '/CN=localhost' -addext 'subjectAltName=DNS:localhost' \
   -keyout "$WORK/key.pem" -out "$WORK/cert.pem" >/dev/null 2>&1
 k create secret generic nginx-tls --from-file=cert.pem="$WORK/cert.pem" --from-file=key.pem="$WORK/key.pem" >/dev/null
-k create configmap common --from-literal=OWNERSHIP_MODE_ENABLED=false --from-literal=HOURLY_DESTRUCTIVE_LIMIT=50 \
-  --from-literal=HOURLY_GRANT_LIMIT=500 --from-literal=HOURLY_FIRST_PASSWORD_LIMIT=50 --from-literal=EMERGENCY_QUOTA=5 \
-  --from-literal=SENSITIVE_MAPPING_ENABLED=false --from-literal=TZ=Europe/Istanbul >/dev/null
+# ortak ayarlar Ayarlar tablosunda (ADR-131); manifest configMapRef'i bos haritayi okur
+k create configmap common >/dev/null
 k create configmap backend-config --from-literal=PUBLIC_URL="$BASE" \
   --from-literal=APPROVAL_TIMELOCK_HOURS=0 --from-literal=AD_CA_FILE=/etc/opensicil/ad-ca.pem >/dev/null
 k create configmap worker-config --from-literal=AD_CA_FILE=/etc/opensicil/ad-ca.pem >/dev/null
@@ -100,7 +99,7 @@ echo "4) migration Job'ı → servisler kendiliğinden hazır"
 k apply -f k8s-lab/migrate-job.yaml >/dev/null
 k wait --for=condition=complete job/migrate --timeout=300s >/dev/null
 # ADR-131: kapsam ve canli mod Ayarlar tablosunda; worker is basina okur
-dbq "UPDATE operational_settings s SET value = v.value FROM (VALUES ('DRY_RUN', 'false'), ('AD_MANAGED_USER_OUS', '$USER_OU'), ('AD_PASSIVE_OU', '$PASSIVE_OU'), ('AD_MANAGED_GROUP_OUS', '$GROUP_OU')) v(key, value) WHERE s.key = v.key" >/dev/null
+dbq "UPDATE operational_settings s SET value = v.value FROM (VALUES ('DRY_RUN', 'false'), ('AD_MANAGED_USER_OUS', '$USER_OU'), ('AD_PASSIVE_OU', '$PASSIVE_OU'), ('AD_MANAGED_GROUP_OUS', '$GROUP_OU'), ('HOURLY_GRANT_LIMIT', '500')) v(key, value) WHERE s.key = v.key" >/dev/null
 JOB_DONE=$(k get job migrate -o jsonpath='{.status.completionTime}')
 T0=$(date +%s)
 k rollout status deploy/backend --timeout=600s >/dev/null

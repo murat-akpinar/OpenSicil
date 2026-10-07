@@ -1452,9 +1452,10 @@ struct UploadForm {
     confirm_renumber: Option<String>,
 }
 
-/// ADR-023 madde 1 → ADR-039: sahiplenme ortak ayar, backend kendi ortamindan okur.
-fn ownership_enabled() -> bool {
-    crate::common_settings::CommonSettings::from_env().is_ok_and(|c| c.ownership_mode_enabled)
+/// ADR-023 madde 1 → ADR-131: sahiplenme ortak ayar, her istekte tablodan okunur;
+/// okunamazsa kapali sayilir (ipuclu satir sahiplenilmez, yalniz yeni kayit acilir).
+async fn ownership_enabled(state: &AppState) -> bool {
+    state.common().await.is_ok_and(|c| c.ownership_mode_enabled)
 }
 
 fn keys_of(state: &AppState) -> Keys<'_> {
@@ -1471,7 +1472,7 @@ async fn render_page(state: &AppState, op: &Operator, notice: Notice) -> Respons
             shell: Shell::of(op),
             notice,
             can_import: allowed(op, AUTHORITIES),
-            ownership: ownership_enabled(),
+            ownership: ownership_enabled(state).await,
             pending,
             columns: Column::ALL
                 .into_iter()
@@ -1524,7 +1525,8 @@ async fn parse_and_plan(
     let threshold = crate::change_set::threshold(&state.pool)
         .await
         .map_err(|e| Box::new(internal("değişiklik seti eşiği okunamadı", e)))?;
-    match plan(&state.pool, &keys_of(state), ownership_enabled(), &table).await {
+    let ownership = ownership_enabled(state).await;
+    match plan(&state.pool, &keys_of(state), ownership, &table).await {
         Ok(plan) => Ok((table, plan, threshold)),
         Err(e) => Err(Box::new(internal("içe aktarma planlanamadı", e))),
     }
@@ -1642,7 +1644,12 @@ async fn apply_and_audit(
     rows: usize,
     confirmed: Confirmed,
 ) -> Result<Applied, sqlx::Error> {
-    let applied = apply(&state.pool, &keys_of(state), &state.time_zone, plan).await?;
+    let time_zone = state
+        .common()
+        .await
+        .map_err(sqlx::Error::Protocol)?
+        .time_zone;
+    let applied = apply(&state.pool, &keys_of(state), &time_zone, plan).await?;
     // ADR-018: dosya icerigi degil; kim, ne zaman, kac satir (ve onaylar, ADR-042/055)
     let detail = serde_json::json!({ "rows": rows, "created": applied.created.len(),
         "updated": applied.updated.len(), "cleared": plan.cleared,
@@ -1697,7 +1704,7 @@ async fn load_batch(
     match plan(
         &state.pool,
         &keys_of(state),
-        ownership_enabled(),
+        ownership_enabled(state).await,
         &batch.table,
     )
     .await

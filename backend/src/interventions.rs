@@ -121,7 +121,11 @@ pub fn routes() -> Router<AppState> {
 }
 
 async fn page(OperatorSession(op): OperatorSession, State(state): State<AppState>) -> Response {
-    match load(&state.pool, op.lang, &state.time_zone).await {
+    let time_zone = match state.time_zone().await {
+        Ok(tz) => tz,
+        Err(response) => return *response,
+    };
+    match load(&state.pool, op.lang, &time_zone).await {
         Ok(rows) => render(&InterventionsTemplate {
             lang: op.lang,
             shell: Shell::of(&op),

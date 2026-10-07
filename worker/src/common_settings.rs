@@ -1,6 +1,6 @@
-// Ortak ayarlar (ADR-039): backend ve worker ayni .env degiskenlerini okur;
-// etkin ayar tablosu yoktur, yetkili worker'dir, backend yalnizca ayni degeri
-// onceden gosterir. backend/src/common_settings.rs ve worker/src/common_settings.rs
+// Ortak ayarlar (kurallar ADR-039, yeri ADR-131): backend ve worker ayni
+// `operational_settings` satirlarini her is/istekte okur; yetkili worker'dir,
+// backend ayni degeri onceden gosterir. backend/src/common_settings.rs ve worker/src/common_settings.rs
 // birebir aynidir (ADR-070: bagimsiz crate'ler, paylasilan crate yok) — birini
 // degistiren digerini de degistirir; backend main.rs testi ikisini karsilastirir.
 
@@ -19,21 +19,39 @@ pub struct CommonSettings {
 }
 
 impl CommonSettings {
-    pub fn from_env() -> Result<Self, String> {
-        Self::from_lookup(|name| std::env::var(name).ok())
-    }
-
     // Saf: degiskenleri bir arama fonksiyonundan alir, testler ortami degistirmez.
     pub fn from_lookup(lookup: impl Fn(&str) -> Option<String>) -> Result<Self, String> {
         Ok(Self {
             ownership_mode_enabled: parse_bool(&lookup, "OWNERSHIP_MODE_ENABLED")?,
-            hourly_destructive_limit: parse_limit(&lookup, "HOURLY_DESTRUCTIVE_LIMIT", 1)?,
-            hourly_grant_limit: parse_limit(&lookup, "HOURLY_GRANT_LIMIT", 1)?,
-            hourly_first_password_limit: parse_limit(&lookup, "HOURLY_FIRST_PASSWORD_LIMIT", 1)?,
-            emergency_quota: parse_limit(&lookup, "EMERGENCY_QUOTA", 0)?,
+            hourly_destructive_limit: parse_limit(&lookup, "HOURLY_DESTRUCTIVE_LIMIT", LIMIT_MIN)?,
+            hourly_grant_limit: parse_limit(&lookup, "HOURLY_GRANT_LIMIT", LIMIT_MIN)?,
+            hourly_first_password_limit: parse_limit(
+                &lookup,
+                "HOURLY_FIRST_PASSWORD_LIMIT",
+                LIMIT_MIN,
+            )?,
+            emergency_quota: parse_limit(&lookup, "EMERGENCY_QUOTA", QUOTA_MIN)?,
             sensitive_mapping_enabled: parse_bool(&lookup, "SENSITIVE_MAPPING_ENABLED")?,
             time_zone: parse_time_zone(&lookup)?,
         })
+    }
+}
+
+/// Ayarlar ekrani kayitta ayni kurali cagirir (ADR-131 madde 5); kaydedilecek
+/// bicimi doner. Worker cagirmaz, okurken `from_lookup` ayni kurali isletir.
+#[allow(dead_code)]
+pub fn check(name: &str, raw: &str) -> Result<String, String> {
+    let lookup = |n: &str| (n == name).then(|| raw.to_string());
+    match name {
+        "OWNERSHIP_MODE_ENABLED" | "SENSITIVE_MAPPING_ENABLED" => {
+            parse_bool(&lookup, name).map(|b| b.to_string())
+        }
+        "HOURLY_DESTRUCTIVE_LIMIT" | "HOURLY_GRANT_LIMIT" | "HOURLY_FIRST_PASSWORD_LIMIT" => {
+            parse_limit(&lookup, name, LIMIT_MIN).map(|n| n.to_string())
+        }
+        "EMERGENCY_QUOTA" => parse_limit(&lookup, name, QUOTA_MIN).map(|n| n.to_string()),
+        "TZ" => parse_time_zone(&lookup),
+        other => Err(format!("{other} ortak ayar değil")),
     }
 }
 
@@ -67,7 +85,7 @@ impl fmt::Display for CommonSettings {
 fn required(lookup: &impl Fn(&str) -> Option<String>, name: &str) -> Result<String, String> {
     lookup(name)
         .filter(|v| !v.trim().is_empty())
-        .ok_or_else(|| format!("ortam değişkeni eksik: {name}"))
+        .ok_or_else(|| format!("ayar eksik: {name}"))
 }
 
 fn parse_bool(lookup: &impl Fn(&str) -> Option<String>, name: &str) -> Result<bool, String> {
@@ -77,6 +95,9 @@ fn parse_bool(lookup: &impl Fn(&str) -> Option<String>, name: &str) -> Result<bo
         other => Err(format!("{name} true ya da false olmalı, '{other}' geldi")),
     }
 }
+
+const LIMIT_MIN: u32 = 1;
+const QUOTA_MIN: u32 = 0;
 
 // Sayaç sınırı mutlak sayıdır (ADR-016); yıkıcı/verme/ilk parola için 0 her işi
 // sonsuza kadar bekletir, o yüzden en az 1; acil kota 0 olabilir (kota yok).
@@ -116,8 +137,8 @@ pub mod tests {
     use super::*;
     use std::collections::HashMap;
 
-    // .env.example'daki varsayilanlar; run() testleri ortami bununla kurar.
-    pub const ENV_EXAMPLE_DEFAULTS: [(&str, &str); 7] = [
+    // 0034_operational_settings.sql'in seed'i; `seed_matches_defaults` ikisini karsilastirir.
+    pub const SEED_DEFAULTS: [(&str, &str); 7] = [
         ("OWNERSHIP_MODE_ENABLED", "false"),
         ("HOURLY_DESTRUCTIVE_LIMIT", "50"),
         ("HOURLY_GRANT_LIMIT", "50"),
@@ -128,7 +149,7 @@ pub mod tests {
     ];
 
     fn env(overrides: &[(&str, &str)]) -> HashMap<String, String> {
-        let mut map: HashMap<String, String> = ENV_EXAMPLE_DEFAULTS
+        let mut map: HashMap<String, String> = SEED_DEFAULTS
             .into_iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
@@ -144,7 +165,7 @@ pub mod tests {
     }
 
     #[test]
-    fn parses_env_example_defaults() {
+    fn parses_seed_defaults() {
         let s = parse(&[]).unwrap();
         assert_eq!(
             s,
@@ -169,6 +190,17 @@ pub mod tests {
     }
 
     #[test]
+    fn check_normalizes_one_value_with_the_same_rules() {
+        assert_eq!(check("OWNERSHIP_MODE_ENABLED", " 1 ").unwrap(), "true");
+        assert_eq!(check("HOURLY_GRANT_LIMIT", " 7").unwrap(), "7");
+        assert_eq!(check("EMERGENCY_QUOTA", "0").unwrap(), "0");
+        assert_eq!(check("TZ", " UTC ").unwrap(), "UTC");
+        assert!(check("HOURLY_DESTRUCTIVE_LIMIT", "0").is_err());
+        assert!(check("TZ", "Europe Istanbul").is_err());
+        assert!(check("DRY_RUN", "true").is_err());
+    }
+
+    #[test]
     fn rejects_missing_zero_limit_bad_bool_and_bad_tz() {
         let cases: [(&str, &str, &str); 5] = [
             ("HOURLY_DESTRUCTIVE_LIMIT", "", "eksik"),
@@ -184,5 +216,20 @@ pub mod tests {
                 "{why}: hata değişken adını söylemeli: {err}"
             );
         }
+    }
+
+    // ADR-131: migration'in seed'i bugunku varsayilanlarin aynisi; iki servis bu satiri okur.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn seed_matches_defaults() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        let map = load_operational(&pool).await.unwrap();
+        for (key, value) in SEED_DEFAULTS {
+            assert_eq!(map.get(key).map(String::as_str), Some(value), "{key}");
+        }
+        let seeded = CommonSettings::from_lookup(|name| map.get(name).cloned()).unwrap();
+        assert_eq!(seeded, parse(&[]).unwrap());
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
     }
 }

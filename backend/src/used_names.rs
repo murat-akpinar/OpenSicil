@@ -97,7 +97,11 @@ struct UsedNamesTemplate {
 }
 
 async fn render_page(state: &AppState, op: &Operator, error: String) -> Response {
-    match list(&state.pool, &state.time_zone).await {
+    let time_zone = match state.time_zone().await {
+        Ok(tz) => tz,
+        Err(response) => return *response,
+    };
+    match list(&state.pool, &time_zone).await {
         Ok(names) => render(&UsedNamesTemplate {
             lang: op.lang,
             shell: Shell::of(op),

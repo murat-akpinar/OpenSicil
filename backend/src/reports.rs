@@ -73,13 +73,17 @@ pub fn routes() -> Router<AppState> {
 }
 
 async fn page(OperatorSession(op): OperatorSession, State(state): State<AppState>) -> Response {
+    let time_zone = match state.time_zone().await {
+        Ok(tz) => tz,
+        Err(response) => return *response,
+    };
     // Sayilar gidilecek ekranlarin kendi yardimcilarindan okunur, kopya SQL yok:
     // rozet "3" diyorsa liste uc satir gostermek zorunda.
     let loaded = tokio::try_join!(
         counts(&state.pool),
         crate::reconcile::unadopted(&state.pool),
         crate::deletions::awaiting_count(&state.pool),
-        crate::upcoming::list(&state.pool, &state.time_zone, crate::upcoming::DEFAULT_DAYS),
+        crate::upcoming::list(&state.pool, &time_zone, crate::upcoming::DEFAULT_DAYS),
         crate::bulk_manage::coverage(&state.pool),
     );
     let (counts, unadopted, deletions, upcoming, coverage) = match loaded {

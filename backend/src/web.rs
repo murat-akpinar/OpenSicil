@@ -24,10 +24,27 @@ pub struct AppState {
     // kimlik numarasi blind index'i (ADR-010); kimlik kayit formu kullanir
     pub blind_index_key: [u8; crate::crypto::KEY_LEN],
     pub public_url: String,
-    // kurulum saat dilimi (ADR-039); operator reddi kimlik durumunu bununla turetir
-    pub time_zone: String,
     // metrik ucunun Bearer token'i (ADR-061 madde 8); bos = uc kapali
     pub metrics_token: String,
+}
+
+impl AppState {
+    /// ADR-131 madde 6: ortak ayarlar her istekte tablodan okunur, onbellek yok;
+    /// worker ayni satiri okur. Bozuk deger sessiz varsayilana dusmez.
+    pub async fn common(&self) -> Result<crate::common_settings::CommonSettings, String> {
+        let map = crate::common_settings::load_operational(&self.pool)
+            .await
+            .map_err(|e| format!("işletme ayarları okunamadı: {e}"))?;
+        crate::common_settings::CommonSettings::from_lookup(|name| map.get(name).cloned())
+    }
+
+    /// Kurumun saat dilimi (ADR-131 madde 11); okunamazsa istek 500 ile biter.
+    pub async fn time_zone(&self) -> Result<String, Box<Response>> {
+        self.common()
+            .await
+            .map(|c| c.time_zone)
+            .map_err(|e| Box::new(internal("ortak ayarlar okunamadı", e)))
+    }
 }
 
 // --- START FEATURE: bootstrap-admin ---
@@ -68,10 +85,14 @@ async fn render_operator_home(
     authorities: Vec<String>,
     query: HomeQuery,
 ) -> Response {
+    let time_zone = match state.time_zone().await {
+        Ok(tz) => tz,
+        Err(response) => return *response,
+    };
     let days = crate::dashboard::window(query.days.and_then(|d| d.trim().parse().ok()));
     let loaded = tokio::try_join!(
-        crate::dashboard::load(&state.pool, &state.time_zone, days),
-        crate::identity::recent(&state.pool, &state.time_zone),
+        crate::dashboard::load(&state.pool, &time_zone, days),
+        crate::identity::recent(&state.pool, &time_zone),
     );
     match loaded {
         Ok((dash, identities)) => render(&OperatorHomeTemplate {
@@ -394,10 +415,12 @@ async fn establish_oidc_session(
 // Uc kapinin ortak son adimi (ADR-095 madde 5): ayrilmis operator reddi,
 // oturum satiri, denetim kaydi, cerez ve giris sonrasi sayfa.
 async fn establish_operator_session(state: &AppState, operator: Operator) -> Response {
+    let time_zone = match state.time_zone().await {
+        Ok(tz) => tz,
+        Err(response) => return *response,
+    };
     // ADR-059 madde 1: ayrilmis/askidaki operator oturum acamaz
-    match crate::operator_guard::check_operator(&state.pool, &state.time_zone, &operator.username)
-        .await
-    {
+    match crate::operator_guard::check_operator(&state.pool, &time_zone, &operator.username).await {
         Ok(crate::operator_guard::Verdict::Allowed) => {}
         Ok(crate::operator_guard::Verdict::Rejected(reason)) => {
             return crate::operator_guard::rejection_response(state, &operator, reason).await;
@@ -670,7 +693,11 @@ async fn operational_submit(
         Ok(current) => current,
         Err(e) => return internal("işletme ayarları okunamadı", e),
     };
-    let changes = match crate::operational_settings::plan(&current, &form) {
+    let planned = match crate::operational_settings::plan(&current, &form) {
+        Ok(changes) => unknown_time_zone(&state, changes, &form).await,
+        Err(view) => Err(view),
+    };
+    let changes = match planned {
         Ok(changes) => changes,
         Err(view) => {
             let page = render_config(&state, &operator, Some(view)).await;
@@ -699,6 +726,29 @@ async fn operational_submit(
         .filter(|s| crate::operational_settings::SECTIONS.contains(s))
         .unwrap_or("limits");
     Redirect::to(&format!("/config#{section}")).into_response()
+}
+/// Bicimce dogru ama Postgres'in tanimadigi saat dilimi her sorguyu dusururdu;
+/// kayitta reddedilir (acilistaki `check_time_zone` kuralinin aynisi).
+async fn unknown_time_zone(
+    state: &AppState,
+    changes: Vec<crate::operational_settings::Change>,
+    form: &std::collections::HashMap<String, String>,
+) -> Result<Vec<crate::operational_settings::Change>, crate::operational_settings::View> {
+    let tz = crate::operational_settings::TIME_ZONE;
+    let Some(change) = changes.iter().find(|c| c.key == tz) else {
+        return Ok(changes);
+    };
+    match crate::db::check_time_zone(&state.pool, &change.after).await {
+        Ok(()) => Ok(changes),
+        Err(e) => {
+            let mut values = crate::common_settings::load_operational(&state.pool)
+                .await
+                .unwrap_or_default();
+            values.extend(form.iter().map(|(k, v)| (k.clone(), v.clone())));
+            let errors = [(tz.to_string(), e)].into_iter().collect();
+            Err(crate::operational_settings::View { values, errors })
+        }
+    }
 }
 // --- END FEATURE: operational-settings ---
 
@@ -772,7 +822,6 @@ pub(crate) fn test_state(pool: PgPool, public_url: &str) -> AppState {
         aead_key: [3u8; crate::crypto::KEY_LEN],
         blind_index_key: [4u8; crate::crypto::KEY_LEN],
         public_url: public_url.to_string(),
-        time_zone: "Europe/Istanbul".to_string(),
         metrics_token: "metrics-test-token".to_string(),
     }
 }
@@ -1156,6 +1205,28 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(dry_run, ("true".into(), "false".into()));
+
+        // Ortak ayarlar: sayac ekrandan iner, bir sonraki okumada etkili (yeniden baslatma yok)
+        let response = post("section=limits&HOURLY_DESTRUCTIVE_LIMIT=1").await;
+        assert_eq!(location_of(&response), "/config#limits");
+        let state = test_state(pool.clone(), "https://localhost");
+        assert_eq!(state.common().await.unwrap().hourly_destructive_limit, 1);
+        assert_eq!(
+            post("section=limits&HOURLY_DESTRUCTIVE_LIMIT=0")
+                .await
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+        // Bicimce dogru ama Postgres'in tanimadigi saat dilimi kaydedilmez
+        let response = post("section=execution&TZ=Mars%2FOlympus").await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(body_string(response).await.contains("TZ-err"));
+        assert_eq!(state.time_zone().await.unwrap(), "Europe/Istanbul");
+        assert_eq!(
+            post("section=execution&TZ=UTC").await.status(),
+            StatusCode::SEE_OTHER
+        );
+        assert_eq!(state.time_zone().await.unwrap(), "UTC");
 
         drop(pool);
         crate::test_support::drop_temp_db(&admin_pool, &db_name).await;

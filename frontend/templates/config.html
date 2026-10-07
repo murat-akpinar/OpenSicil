@@ -167,6 +167,13 @@
         <div class="field-grid">
           {% call text_field(ops, "CHANGE_SET_THRESHOLD", lang.t("config.change_set_threshold"), "10", "ops-limits") %}
         </div>
+        <p class="hint mt-4 mb-3">{{ lang.t("config.hourly_hint") }}</p>
+        <div class="field-grid">
+          {% call text_field(ops, "HOURLY_DESTRUCTIVE_LIMIT", lang.t("config.hourly_destructive"), "50", "ops-limits") %}
+          {% call text_field(ops, "HOURLY_GRANT_LIMIT", lang.t("config.hourly_grant"), "50", "ops-limits") %}
+          {% call text_field(ops, "HOURLY_FIRST_PASSWORD_LIMIT", lang.t("config.hourly_first_password"), "50", "ops-limits") %}
+          {% call text_field(ops, "EMERGENCY_QUOTA", lang.t("config.emergency_quota"), "5", "ops-limits") %}
+        </div>
         {% call save_button("ops-limits") %}
       </section>
 
@@ -178,6 +185,9 @@
         <div class="field-grid">
           {% call bool_field(ops, "DRY_RUN", lang.t("config.dry_run"), lang.t("config.dry_run_hint"), "ops-execution") %}
           {% call bool_field(ops, "FIRST_LOGIN_CHANGE_REQUIRED", lang.t("config.first_login"), lang.t("config.first_login_hint"), "ops-execution") %}
+          {% call bool_field(ops, "OWNERSHIP_MODE_ENABLED", lang.t("config.ownership"), lang.t("config.ownership_hint"), "ops-execution") %}
+          {% call bool_field(ops, "SENSITIVE_MAPPING_ENABLED", lang.t("config.sensitive_mapping"), lang.t("config.sensitive_mapping_hint"), "ops-execution") %}
+          {% call text_field(ops, "TZ", lang.t("config.time_zone"), "Europe/Istanbul", "ops-execution") %}
         </div>
         {% call save_button("ops-execution") %}
       </section>

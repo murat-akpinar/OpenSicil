@@ -621,7 +621,14 @@ async fn recompute(
     id: i64,
     staged: &StagedDefinition,
 ) -> Option<Impact> {
-    match change_set::preview(&state.pool, &state.time_zone, &staged.as_draft(owner, id)).await {
+    let time_zone = match state.common().await {
+        Ok(common) => common.time_zone,
+        Err(e) => {
+            eprintln!("web: onay anında ortak ayarlar okunamadı: {e}");
+            return None;
+        }
+    };
+    match change_set::preview(&state.pool, &time_zone, &staged.as_draft(owner, id)).await {
         Ok(impact) => Some(impact),
         Err(e) => {
             eprintln!("web: onay anında etki yeniden hesaplanamadı: {e}");
@@ -936,7 +943,11 @@ async fn stage_or_publish(state: &AppState, sub: Submission<'_>) -> Response {
         Ok(t) => t,
         Err(e) => return internal("değişiklik seti eşiği okunamadı", e),
     };
-    let (impact, info) = impact_notice(state, op.lang, &draft, threshold).await;
+    let time_zone = match state.time_zone().await {
+        Ok(tz) => tz,
+        Err(response) => return *response,
+    };
+    let (impact, info) = impact_notice(state, op.lang, &draft, (threshold, &time_zone)).await;
     if let Err(e) = org::validate_definition(&state.pool, owner, id, &sub.edit, sub.parent_id).await
     {
         return match save_error(e, "tanım doğrulanamadı") {
@@ -1039,9 +1050,9 @@ async fn impact_notice(
     state: &AppState,
     lang: Lang,
     draft: &Draft<'_>,
-    threshold: usize,
+    (threshold, time_zone): (usize, &str),
 ) -> (Impact, String) {
-    match change_set::preview(&state.pool, &state.time_zone, draft).await {
+    match change_set::preview(&state.pool, time_zone, draft).await {
         Ok(impact) => {
             let text = impact_text(lang, &impact, threshold);
             (impact, text)
@@ -1323,10 +1334,14 @@ async fn reject_department(
 }
 
 async fn render_targets(state: &AppState, op: &Operator, notice: Notice) -> Response {
+    let time_zone = match state.time_zone().await {
+        Ok(tz) => tz,
+        Err(response) => return *response,
+    };
     let (targets, options, refreshes) = match (
         org::list_targets(&state.pool).await,
         org::catalog_options(&state.pool).await,
-        org::last_catalog_refresh(&state.pool, &state.time_zone).await,
+        org::last_catalog_refresh(&state.pool, &time_zone).await,
     ) {
         (Ok(t), Ok(o), Ok(r)) => (t, o, r),
         (Err(e), _, _) | (_, Err(e), _) | (_, _, Err(e)) => {

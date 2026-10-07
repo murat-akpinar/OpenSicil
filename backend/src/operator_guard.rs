@@ -131,7 +131,11 @@ pub async fn enforce(
     if let Some(redirect) = password_change_due(&state, &operator, request.uri().path()).await {
         return redirect;
     }
-    match check_operator(&state.pool, &state.time_zone, &operator.username).await {
+    let time_zone = match state.time_zone().await {
+        Ok(tz) => tz,
+        Err(response) => return *response,
+    };
+    match check_operator(&state.pool, &time_zone, &operator.username).await {
         Ok(Verdict::Allowed) => next.run(request).await,
         Ok(Verdict::Rejected(reason)) => {
             if let Err(e) = crate::operator_session::delete_session(&state.pool, &token).await {

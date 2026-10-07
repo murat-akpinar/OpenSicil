@@ -166,7 +166,11 @@ async fn render_page(
     op: &crate::operator_session::Operator,
     notice: Notice,
 ) -> Response {
-    match load(&state.pool, &state.time_zone).await {
+    let time_zone = match state.time_zone().await {
+        Ok(tz) => tz,
+        Err(response) => return *response,
+    };
+    match load(&state.pool, &time_zone).await {
         Ok(rows) => render(&DeletionsTemplate {
             lang: op.lang,
             shell: Shell::of(op),

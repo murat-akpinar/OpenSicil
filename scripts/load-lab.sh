@@ -27,9 +27,8 @@ AD_LAB_PASSWORD=${AD_LAB_PASSWORD:-lab-only-not-secret-Aa1}
 AEAD_MASTER_KEY=$(head -c 32 /dev/urandom | base64)
 BLIND_INDEX_KEY=$(head -c 32 /dev/urandom | base64)
 # 5.000–50.000 satırı (docs/09); verme sayacı ölçüm için set büyüklüğünün üstünde
-COMMON=(OWNERSHIP_MODE_ENABLED=false HOURLY_DESTRUCTIVE_LIMIT=500 HOURLY_GRANT_LIMIT=$((N_SET * 2))
-        HOURLY_FIRST_PASSWORD_LIMIT=300 EMERGENCY_QUOTA=20 SENSITIVE_MAPPING_ENABLED=false
-        TZ=Europe/Istanbul AEAD_MASTER_KEY="$AEAD_MASTER_KEY" BLIND_INDEX_KEY="$BLIND_INDEX_KEY")
+# sayac sinirlari migration'dan sonra Ayarlar tablosuna yazilir (ADR-131)
+COMMON=(AEAD_MASTER_KEY="$AEAD_MASTER_KEY" BLIND_INDEX_KEY="$BLIND_INDEX_KEY")
 WORK=$(mktemp -d)
 BACKEND_PID=""; WORKER_PID=""; SAMPLER_PID=""
 RESULTS=()
@@ -65,7 +64,7 @@ psql -d postgres -c "CREATE DATABASE $DB" >/dev/null
   POSTGRES_WORKER_USER=load_worker POSTGRES_WORKER_PASSWORD=load-worker-pw \
   "target/$PROFILE/backend" migrate >"$WORK/migrate.log")
 # ADR-131: worker'in kapsami (yuk agaci) ve canli mod Ayarlar tablosunda
-q "UPDATE operational_settings s SET value = v.value FROM (VALUES ('DRY_RUN', 'false'), ('AD_MANAGED_USER_OUS', '$USER_OU'), ('AD_PASSIVE_OU', '$PASSIVE_OU'), ('AD_MANAGED_GROUP_OUS', '$GROUP_OU')) v(key, value) WHERE s.key = v.key" >/dev/null
+q "UPDATE operational_settings s SET value = v.value FROM (VALUES ('DRY_RUN', 'false'), ('AD_MANAGED_USER_OUS', '$USER_OU'), ('AD_PASSIVE_OU', '$PASSIVE_OU'), ('AD_MANAGED_GROUP_OUS', '$GROUP_OU'), ('HOURLY_DESTRUCTIVE_LIMIT', '500'), ('HOURLY_GRANT_LIMIT', '$((N_SET * 2))'), ('HOURLY_FIRST_PASSWORD_LIMIT', '300'), ('EMERGENCY_QUOTA', '20')) v(key, value) WHERE s.key = v.key" >/dev/null
 
 # ---- 2. AD ağacı: hesaplar ve gruplar (LDIF + ldbadd, samba-tool'dan yüz kat hızlı) ----
 echo "2) lab AD'de yük ağacı: $N_IDENTITIES hesap, $N_GROUPS grup"

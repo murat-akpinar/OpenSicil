@@ -183,6 +183,10 @@ async fn list_page(
     State(state): State<AppState>,
     Query(q): Query<ListQuery>,
 ) -> Response {
+    let time_zone = match state.time_zone().await {
+        Ok(tz) => tz,
+        Err(response) => return *response,
+    };
     let query = q.q.unwrap_or_default();
     let offset = q.offset.unwrap_or(0).max(0);
     let unassigned_only = q.unassigned.as_deref() == Some("1");
@@ -209,7 +213,7 @@ async fn list_page(
         Ok(n) => n,
         Err(e) => return internal("rolü atanmamış sayısı okunamadı", e),
     };
-    let (rows, total) = match identity::page(&state.pool, &state.time_zone, &listing).await {
+    let (rows, total) = match identity::page(&state.pool, &time_zone, &listing).await {
         Ok(listed) => listed,
         Err(e) => return internal("personel listesi okunamadı", e),
     };
@@ -464,15 +468,13 @@ async fn departure(
     if !allowed(&op, REGISTER_AUTHORITIES) {
         return forbidden(op.lang);
     }
+    let time_zone = match state.time_zone().await {
+        Ok(tz) => tz,
+        Err(response) => return *response,
+    };
     let handover = opt(&form.handover_manager_id).and_then(|h| h.parse::<i64>().ok());
-    let outcome = identity::set_departure(
-        &state.pool,
-        &state.time_zone,
-        id,
-        form.end_date.trim(),
-        handover,
-    )
-    .await;
+    let outcome =
+        identity::set_departure(&state.pool, &time_zone, id, form.end_date.trim(), handover).await;
     let detail =
         serde_json::json!({ "end_date": form.end_date.trim(), "handover_manager_id": handover });
     match outcome {
@@ -739,6 +741,10 @@ async fn assign_role(
     if !allowed(&op, REGISTER_AUTHORITIES) {
         return forbidden(op.lang);
     }
+    let time_zone = match state.time_zone().await {
+        Ok(tz) => tz,
+        Err(response) => return *response,
+    };
     let Ok(role_id) = form.role_id.trim().parse::<i64>() else {
         return (
             StatusCode::BAD_REQUEST,
@@ -751,7 +757,7 @@ async fn assign_role(
     if ends_on.is_some_and(|d| crate::desired_state::Date::from_iso(d).is_none()) {
         return (StatusCode::BAD_REQUEST, op.lang.t("err.end_date_format")).into_response();
     }
-    match identity::assign_role(&state.pool, &state.time_zone, id, role_id, ends_on).await {
+    match identity::assign_role(&state.pool, &time_zone, id, role_id, ends_on).await {
         Ok(true) => {
             let detail = serde_json::json!({ "role_id": role_id, "ends_on": ends_on });
             audit_operator(
@@ -945,8 +951,7 @@ async fn render_form(
                 FormMode::Edit(id) => format!("/identities/{id}/edit"),
                 _ => "/identities".to_string(),
             },
-            ownership_enabled: crate::common_settings::CommonSettings::from_env()
-                .is_ok_and(|c| c.ownership_mode_enabled),
+            ownership_enabled: state.common().await.is_ok_and(|c| c.ownership_mode_enabled),
         }),
         Err(e) => internal("form seçenekleri okunamadı", e),
     }
@@ -960,6 +965,10 @@ async fn create(
     if !allowed(&op, REGISTER_AUTHORITIES) {
         return forbidden(op.lang);
     }
+    let time_zone = match state.time_zone().await {
+        Ok(tz) => tz,
+        Err(response) => return *response,
+    };
     let new = match identity::validate(&form) {
         Ok(n) => n,
         Err(key) => return form_error(&state, &op, form, key, FormMode::New).await,
@@ -977,7 +986,7 @@ async fn create(
         if !allowed(&op, crate::first_password::AUTHORITIES) {
             return forbidden(op.lang);
         }
-        match identity::starts_by_today(&state.pool, &new.start_date, &state.time_zone).await {
+        match identity::starts_by_today(&state.pool, &new.start_date, &time_zone).await {
             Ok(true) => {}
             Ok(false) => {
                 let key = "err.first_password_start_date";
@@ -991,7 +1000,7 @@ async fn create(
         blind_index: &state.blind_index_key,
     };
     let requested_by = issue.then_some(op.username.as_str());
-    let created = identity::create(&state.pool, &keys, &state.time_zone, &new, requested_by).await;
+    let created = identity::create(&state.pool, &keys, &time_zone, &new, requested_by).await;
     let (id, first_password) = match created {
         Ok(created) => created,
         Err(identity::CreateError::DuplicateNationalId) => {
@@ -1045,7 +1054,11 @@ async fn show(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Response {
-    match identity::load_page(&state.pool, &state.time_zone, &state.aead_key, id, op.lang).await {
+    let time_zone = match state.time_zone().await {
+        Ok(tz) => tz,
+        Err(response) => return *response,
+    };
+    match identity::load_page(&state.pool, &time_zone, &state.aead_key, id, op.lang).await {
         Ok(Some(page)) => render(&PersonTemplate {
             lang: op.lang,
             shell: Shell::of(&op),

@@ -36,19 +36,16 @@ struct Config {
     aead_key: [u8; crate::crypto::KEY_LEN],
     blind_index_key: [u8; crate::crypto::KEY_LEN],
     public_url: String,
-    time_zone: String,
     metrics_token: String,
 }
 
-// Butun ortam degiskenleri acilista dogrulanir: eksik anahtar ya da bozuk ortak
-// ayar ilk istekte degil kurulumda goze carpar (ADR-010, ADR-039).
+// Butun ortam degiskenleri acilista dogrulanir: eksik anahtar ilk istekte degil
+// kurulumda goze carpar (ADR-010). Ortak ayarlar tablodadir (ADR-131), havuzla okunur.
 fn load_config() -> Result<Config, String> {
     let database_url = env_required("DATABASE_URL")?;
     let aead_key = key_from_env("AEAD_MASTER_KEY")?;
     let blind_index_key = key_from_env("BLIND_INDEX_KEY")?;
     let public_url = env_required("PUBLIC_URL")?;
-    let common = crate::common_settings::CommonSettings::from_env()?;
-    println!("backend: ortak ayarlar: {common}");
     // ADR-061 madde 8: token zorunlu — bos deger ucu kapali tutar, uyarilir
     let metrics_token = env_required("METRICS_TOKEN")?.trim().to_string();
     if metrics_token.is_empty() {
@@ -59,7 +56,6 @@ fn load_config() -> Result<Config, String> {
         aead_key,
         blind_index_key,
         public_url,
-        time_zone: common.time_zone,
         metrics_token,
     })
 }
@@ -71,13 +67,12 @@ fn env_required(var: &str) -> Result<String, String> {
 // Ayar okuma + havuz; run()'u <= 50 satir tutar (security.md).
 async fn startup() -> Result<AppState, String> {
     let c = load_config()?;
-    let pool = prepare_pool(&c.database_url, &c.time_zone).await?;
+    let pool = prepare_pool(&c.database_url).await?;
     Ok(AppState {
         pool,
         aead_key: c.aead_key,
         blind_index_key: c.blind_index_key,
         public_url: c.public_url,
-        time_zone: c.time_zone,
         metrics_token: c.metrics_token,
     })
 }
@@ -115,14 +110,21 @@ fn key_from_env(var: &str) -> Result<[u8; crate::crypto::KEY_LEN], String> {
 }
 
 // Baglanti, sema (ADR-061 madde 3) ve saat dilimi kontrolu tek yerde (run() ≤ 50 satir).
-async fn prepare_pool(database_url: &str, time_zone: &str) -> Result<sqlx::PgPool, String> {
+// Ortak ayarlar acilista bir kez loglanir: worker'in satiriyla yan yana konunca
+// ikisinin ayni tablo satirini okudugu gorulur (ADR-131); istekler yine tablodan okur.
+async fn prepare_pool(database_url: &str) -> Result<sqlx::PgPool, String> {
     let pool = crate::db::connect_pool(database_url)
         .await
         .map_err(|e| format!("veritabanına bağlanılamadı: {e}"))?;
     crate::db::check_schema_ready(&pool)
         .await
         .map_err(|e| format!("şema hazır değil: {e}"))?;
-    crate::db::check_time_zone(&pool, time_zone).await?;
+    let map = crate::common_settings::load_operational(&pool)
+        .await
+        .map_err(|e| format!("işletme ayarları okunamadı: {e}"))?;
+    let common = crate::common_settings::CommonSettings::from_lookup(|n| map.get(n).cloned())?;
+    println!("backend: ortak ayarlar: {common}");
+    crate::db::check_time_zone(&pool, &common.time_zone).await?;
     Ok(pool)
 }
 
@@ -159,7 +161,6 @@ mod tests {
             aead_key: [0u8; crate::crypto::KEY_LEN],
             blind_index_key: [0u8; crate::crypto::KEY_LEN],
             public_url: "https://localhost".to_string(),
-            time_zone: "Europe/Istanbul".to_string(),
             metrics_token: String::new(),
         }
     }

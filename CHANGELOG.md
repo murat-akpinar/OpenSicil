@@ -193,4 +193,5 @@
 - Eşiği aşan işi başlatan kendi onaylar, ikinci yönetici şartı kalkar
 - Işletme ayarları tablosu doğar, değişiklik seti eşiği Ayarlar ekranından verilir
 - Worker'ın kapsam, adlandırma ve yürütme ayarları Ayarlar ekranından okunur
+- Ortak yedi ayar Ayarlar ekranından okunur, .env açılış kablolamasına iner
 

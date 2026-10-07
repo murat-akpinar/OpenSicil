@@ -64,17 +64,11 @@ async fn prepare_pool(database_url: &str) -> Result<PgPool, String> {
     Ok(pool)
 }
 
+// Acilis kablolamasi (ADR-131 madde 1); is ayarlari `Operational`'da.
 struct Env {
     database_url: String,
-    time_zone: String,
     aead_key: [u8; crypto::KEY_LEN],
     ad_ca_file: Option<String>,
-    // ADR-029: hassas kaynak (kimlik no, cep) eslemesi; kapaliyken satir reddedilir
-    sensitive_mapping_enabled: bool,
-    // ADR-018: sahiplenme (ortak ayar, varsayilan kapali)
-    ownership_mode_enabled: bool,
-    // ADR-016/050: saatlik fren sayaclari ve acil kota
-    limits: counters::Limits,
 }
 
 // ADR-131 madde 6: isletme ayarlari is/tik basina tablodan okunur; ekrandaki
@@ -84,6 +78,8 @@ struct Operational {
     write_mode: writes::Mode,
     // ADR-019: ilk paroladan sonra pwdLastSet 0; varsayilan acik
     first_login_change_required: bool,
+    // Ortak yedi ayar (ADR-039 kurallari, yeri ADR-131): backend ayni satiri okur
+    common: common_settings::CommonSettings,
 }
 
 fn parse_bool_setting(map: &HashMap<String, String>, name: &str) -> Result<Option<bool>, String> {
@@ -101,7 +97,9 @@ fn operational_of(map: HashMap<String, String>) -> Result<Operational, String> {
         .ok_or_else(|| "DRY_RUN Ayarlar ekranında tanımlı değil".to_string())?;
     let first_login_change_required =
         parse_bool_setting(&map, "FIRST_LOGIN_CHANGE_REQUIRED")?.unwrap_or(true);
+    let common = common_settings::CommonSettings::from_lookup(|name| map.get(name).cloned())?;
     Ok(Operational {
+        common,
         map,
         write_mode: writes::Mode { dry_run },
         first_login_change_required,
@@ -120,8 +118,8 @@ async fn log_operational_at_startup(pool: &PgPool) {
     match load_operational(pool).await {
         Ok(ops) => {
             println!(
-                "worker: FIRST_LOGIN_CHANGE_REQUIRED={}",
-                ops.first_login_change_required
+                "worker: ortak ayarlar: {}; FIRST_LOGIN_CHANGE_REQUIRED={}",
+                ops.common, ops.first_login_change_required
             );
             if ops.write_mode.dry_run {
                 println!("worker: KURU ÇALIŞTIRMA açık — hedefe hiçbir şey yazılmaz (ADR-054)");
@@ -131,31 +129,18 @@ async fn log_operational_at_startup(pool: &PgPool) {
     }
 }
 
-// Ortak ayarlar acilista dogrulanir ve loglanir; backend'in satiriyla yan
-// yana konunca iki servisin sapmasi gorulur (ADR-039).
 fn load_env() -> Result<Env, String> {
     let database_url = std::env::var("DATABASE_URL")
         .map_err(|_| "worker: ortam değişkeni eksik: DATABASE_URL".to_string())?;
-    let common = common_settings::CommonSettings::from_env().map_err(|e| format!("worker: {e}"))?;
     let aead_key = std::env::var("AEAD_MASTER_KEY")
         .map_err(|_| "worker: ortam değişkeni eksik: AEAD_MASTER_KEY".to_string())
         .and_then(|v| {
             crypto::parse_key("AEAD_MASTER_KEY", &v).map_err(|e| format!("worker: {e}"))
         })?;
-    println!("worker: ortak ayarlar: {common}");
     Ok(Env {
         database_url,
         aead_key,
         ad_ca_file: std::env::var("AD_CA_FILE").ok(),
-        sensitive_mapping_enabled: common.sensitive_mapping_enabled,
-        ownership_mode_enabled: common.ownership_mode_enabled,
-        limits: counters::Limits {
-            destructive: common.hourly_destructive_limit,
-            grant: common.hourly_grant_limit,
-            first_password: common.hourly_first_password_limit,
-            emergency_quota: common.emergency_quota,
-        },
-        time_zone: common.time_zone,
     })
 }
 
@@ -408,7 +393,7 @@ async fn run() -> ExitCode {
         if let Err(e) = heartbeat::touch() {
             eprintln!("worker: nabız dosyasına yazılamadı: {e}");
         }
-        tick_if_due(&pool, &env, &worker_id, &mut next_tick).await;
+        tick_if_due(&pool, &worker_id, &mut next_tick).await;
         let skip = unreachable_targets(&unreachable, Instant::now());
         match queue::claim(&pool, &worker_id, &skip).await {
             Ok(Some(job)) => {
@@ -426,20 +411,19 @@ async fn run() -> ExitCode {
 }
 
 // Zamanlayici tiki (ADR-028): hata surec durdurmaz, sonraki tikte yeniden denenir.
-async fn tick_if_due(pool: &PgPool, env: &Env, worker_id: &str, next_tick: &mut Instant) {
+async fn tick_if_due(pool: &PgPool, worker_id: &str, next_tick: &mut Instant) {
     if Instant::now() < *next_tick {
         return;
     }
     *next_tick = Instant::now() + TICK_INTERVAL;
-    let time_zone = env.time_zone.as_str();
+    let ops = match load_operational(pool).await {
+        Ok(ops) => ops,
+        Err(e) => return eprintln!("worker: zamanlayıcı tiki atlandı: {e}"),
+    };
+    let time_zone = ops.common.time_zone.as_str();
     // F-19 / ADR-054: mod ve son gorulme veritabanina, dakikada bir (metrik ucu + panel)
-    match load_operational(pool).await {
-        Ok(ops) => {
-            if let Err(e) = heartbeat::record(pool, worker_id, ops.write_mode.dry_run).await {
-                eprintln!("worker: durum satırı yazılamadı: {e}");
-            }
-        }
-        Err(e) => eprintln!("worker: {e}"),
+    if let Err(e) = heartbeat::record(pool, worker_id, ops.write_mode.dry_run).await {
+        eprintln!("worker: durum satırı yazılamadı: {e}");
     }
     match scheduler::tick(pool, time_zone).await {
         Ok(0) => {}
@@ -469,16 +453,21 @@ fn engine_env_of<'a>(
     ops: &'a Operational,
 ) -> engine::EngineEnv<'a> {
     engine::EngineEnv {
-        time_zone: &env.time_zone,
+        time_zone: &ops.common.time_zone,
         mode: ops.write_mode,
         settings: &ops.map,
         aead_key: &env.aead_key,
         ad_ca_file: env.ad_ca_file.as_deref(),
         worker_id,
-        sensitive_mapping_enabled: env.sensitive_mapping_enabled,
+        sensitive_mapping_enabled: ops.common.sensitive_mapping_enabled,
         first_login_change_required: ops.first_login_change_required,
-        ownership_mode_enabled: env.ownership_mode_enabled,
-        limits: env.limits,
+        ownership_mode_enabled: ops.common.ownership_mode_enabled,
+        limits: counters::Limits {
+            destructive: ops.common.hourly_destructive_limit,
+            grant: ops.common.hourly_grant_limit,
+            first_password: ops.common.hourly_first_password_limit,
+            emergency_quota: ops.common.emergency_quota,
+        },
     }
 }
 
@@ -538,9 +527,11 @@ mod tests {
 
     #[test]
     fn operational_settings_parse_or_fail_loudly() {
+        // Ortak yedi ayar seed degerleriyle; test yalnizca worker'in kendi anahtarlarini oynatir
         let map = |pairs: &[(&str, &str)]| -> HashMap<String, String> {
-            pairs
+            common_settings::tests::SEED_DEFAULTS
                 .iter()
+                .chain(pairs)
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect()
         };
@@ -619,9 +610,6 @@ mod tests {
                 "AEAD_MASTER_KEY",
                 "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
             );
-            for (name, value) in common_settings::tests::ENV_EXAMPLE_DEFAULTS {
-                std::env::set_var(name, value);
-            }
         }
 
         let handle = tokio::spawn(run());

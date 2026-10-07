@@ -253,10 +253,14 @@ struct HubTemplate {
 const RECONCILE_JOB: &str = "reconcile";
 
 async fn hub(OperatorSession(op): OperatorSession, State(state): State<AppState>) -> Response {
+    let time_zone = match state.time_zone().await {
+        Ok(tz) => tz,
+        Err(response) => return *response,
+    };
     let loaded = tokio::try_join!(
         crate::org::list_targets(&state.pool),
         unadopted(&state.pool),
-        crate::org::last_read_job(&state.pool, &state.time_zone, RECONCILE_JOB),
+        crate::org::last_read_job(&state.pool, &time_zone, RECONCILE_JOB),
     );
     let (rows, unadopted, scans) = match loaded {
         Ok(loaded) => loaded,
@@ -290,11 +294,15 @@ async fn render_page(
     target: i64,
     notice: Notice,
 ) -> Response {
+    let time_zone = match state.time_zone().await {
+        Ok(tz) => tz,
+        Err(response) => return *response,
+    };
     let loaded = tokio::try_join!(
-        load(&state.pool, target, &state.time_zone),
+        load(&state.pool, target, &time_zone),
         crate::bulk_adopt::candidates(&state.pool, &state.aead_key, target),
         crate::identity::form_options(&state.pool),
-        crate::identity::today(&state.pool, &state.time_zone),
+        crate::identity::today(&state.pool, &time_zone),
         crate::identity::placeholder_role_id(&state.pool),
         crate::ad_diff::list(&state.pool, target),
     );
@@ -512,6 +520,10 @@ async fn adopt(
     if !allowed(&op, crate::bulk_adopt::AUTHORITIES) {
         return forbidden(op.lang);
     }
+    let time_zone = match state.time_zone().await {
+        Ok(tz) => tz,
+        Err(response) => return *response,
+    };
     let f = crate::org_web::Fields(form);
     let batch = match batch_from(&f) {
         Ok(batch) => batch,
@@ -527,7 +539,7 @@ async fn adopt(
     };
     let selected = f.all_i64("finding");
     let outcome =
-        crate::bulk_adopt::adopt(&state.pool, &keys, &state.time_zone, id, &selected, &batch).await;
+        crate::bulk_adopt::adopt(&state.pool, &keys, &time_zone, id, &selected, &batch).await;
     match outcome {
         Ok(outcome) => {
             audit_adoption(&state, &op, id, &outcome).await;

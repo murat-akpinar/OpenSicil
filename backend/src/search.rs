@@ -44,6 +44,10 @@ async fn search(
     State(state): State<AppState>,
     Query(params): Query<SearchQuery>,
 ) -> Response {
+    let time_zone = match state.time_zone().await {
+        Ok(tz) => tz,
+        Err(response) => return *response,
+    };
     let query = params.q.unwrap_or_default().trim().to_string();
     let shell = Shell::of(&op).with_query(query.clone());
     if query.chars().count() < MIN_QUERY_LEN {
@@ -55,7 +59,7 @@ async fn search(
             results: Vec::new(),
         });
     }
-    match crate::identity::search(&state.pool, &state.time_zone, &query).await {
+    match crate::identity::search(&state.pool, &time_zone, &query).await {
         Ok(results) => render(&SearchTemplate {
             lang: op.lang,
             shell,

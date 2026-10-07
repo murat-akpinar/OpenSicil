@@ -96,8 +96,12 @@ async fn page(
     State(state): State<AppState>,
     Query(q): Query<DaysQuery>,
 ) -> Response {
+    let time_zone = match state.time_zone().await {
+        Ok(tz) => tz,
+        Err(response) => return *response,
+    };
     let days = q.days.unwrap_or(DEFAULT_DAYS).clamp(1, MAX_DAYS);
-    match list(&state.pool, &state.time_zone, days).await {
+    match list(&state.pool, &time_zone, days).await {
         Ok(rows) => render(&UpcomingTemplate {
             lang: op.lang,
             shell: Shell::of(&op),

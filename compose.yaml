@@ -31,15 +31,8 @@ services:
       BLIND_INDEX_KEY: ${BLIND_INDEX_KEY}
       PUBLIC_URL: ${PUBLIC_URL}
       METRICS_TOKEN: ${METRICS_TOKEN}
-      OWNERSHIP_MODE_ENABLED: ${OWNERSHIP_MODE_ENABLED:-false}
-      HOURLY_DESTRUCTIVE_LIMIT: ${HOURLY_DESTRUCTIVE_LIMIT:-50}
-      HOURLY_GRANT_LIMIT: ${HOURLY_GRANT_LIMIT:-50}
-      HOURLY_FIRST_PASSWORD_LIMIT: ${HOURLY_FIRST_PASSWORD_LIMIT:-50}
-      EMERGENCY_QUOTA: ${EMERGENCY_QUOTA:-5}
-      SENSITIVE_MAPPING_ENABLED: ${SENSITIVE_MAPPING_ENABLED:-false}
       # AD bind giris kapisi (ADR-095): backend de DC'nin CA'sini dogrular
       AD_CA_FILE: /etc/opensicil/ad-ca.pem
-      TZ: ${TZ:-Europe/Istanbul}
     depends_on:
       db:
         condition: service_healthy
@@ -65,14 +58,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_WORKER_USER}:${POSTGRES_WORKER_PASSWORD}@db:5432/${POSTGRES_DB}
       AEAD_MASTER_KEY: ${AEAD_MASTER_KEY}
       BLIND_INDEX_KEY: ${BLIND_INDEX_KEY}
-      OWNERSHIP_MODE_ENABLED: ${OWNERSHIP_MODE_ENABLED:-false}
-      HOURLY_DESTRUCTIVE_LIMIT: ${HOURLY_DESTRUCTIVE_LIMIT:-50}
-      HOURLY_GRANT_LIMIT: ${HOURLY_GRANT_LIMIT:-50}
-      HOURLY_FIRST_PASSWORD_LIMIT: ${HOURLY_FIRST_PASSWORD_LIMIT:-50}
-      EMERGENCY_QUOTA: ${EMERGENCY_QUOTA:-5}
-      SENSITIVE_MAPPING_ENABLED: ${SENSITIVE_MAPPING_ENABLED:-false}
       AD_CA_FILE: /etc/opensicil/ad-ca.pem
-      TZ: ${TZ:-Europe/Istanbul}
     depends_on:
       db:
         condition: service_healthy

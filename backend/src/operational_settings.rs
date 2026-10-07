@@ -16,7 +16,7 @@ const DRY_RUN: &str = "DRY_RUN";
 const FIRST_LOGIN: &str = "FIRST_LOGIN_CHANGE_REQUIRED";
 
 /// Ekranin duzenledigi anahtarlar; ADR-131'in sonraki kutucuklari ekler.
-pub const EDITABLE: [&str; 9] = [
+pub const EDITABLE: [&str; 16] = [
     crate::change_set::THRESHOLD_KEY,
     USER_OUS,
     GROUP_OUS,
@@ -26,7 +26,17 @@ pub const EDITABLE: [&str; 9] = [
     EMAIL_LOCAL_TEMPLATE,
     DRY_RUN,
     FIRST_LOGIN,
+    "OWNERSHIP_MODE_ENABLED",
+    "SENSITIVE_MAPPING_ENABLED",
+    "HOURLY_DESTRUCTIVE_LIMIT",
+    "HOURLY_GRANT_LIMIT",
+    "HOURLY_FIRST_PASSWORD_LIMIT",
+    "EMERGENCY_QUOTA",
+    TIME_ZONE,
 ];
+
+/// Kurumun saat dilimi; kayitta Postgres'in tanidigi da sorulur (web.rs).
+pub const TIME_ZONE: &str = "TZ";
 
 /// Ekrandaki bolumler; kayittan sonra o bolume donulur.
 pub const SECTIONS: [&str; 4] = ["scope", "naming", "limits", "execution"];
@@ -43,6 +53,8 @@ pub fn validate(key: &str, raw: &str) -> Result<String, String> {
         ZIMBRA_DOMAINS => domains(raw),
         USERNAME_TEMPLATE | EMAIL_LOCAL_TEMPLATE => template(raw),
         DRY_RUN | FIRST_LOGIN => boolean(key, raw),
+        // Ortak yedi ayar: iki servisin okurken isletdigi kuralin aynisi (ikiz dosya)
+        other if EDITABLE.contains(&other) => crate::common_settings::check(other, raw),
         other => Err(format!("{other} ekrandan değiştirilemez")),
     }
 }
@@ -255,6 +267,13 @@ mod tests {
         assert_eq!(validate(DRY_RUN, "1").unwrap(), "true");
         assert_eq!(validate(FIRST_LOGIN, "false").unwrap(), "false");
         assert!(validate(DRY_RUN, "evet").is_err());
+        assert_eq!(validate("HOURLY_DESTRUCTIVE_LIMIT", " 1 ").unwrap(), "1");
+        assert!(validate("HOURLY_DESTRUCTIVE_LIMIT", "0").is_err());
+        assert_eq!(validate("OWNERSHIP_MODE_ENABLED", "1").unwrap(), "true");
+        assert_eq!(
+            validate(TIME_ZONE, "Europe/Istanbul").unwrap(),
+            "Europe/Istanbul"
+        );
     }
 
     #[test]
