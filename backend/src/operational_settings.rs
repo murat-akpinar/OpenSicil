@@ -16,7 +16,7 @@ const DRY_RUN: &str = "DRY_RUN";
 const FIRST_LOGIN: &str = "FIRST_LOGIN_CHANGE_REQUIRED";
 
 /// Ekranin duzenledigi anahtarlar; ADR-131'in sonraki kutucuklari ekler.
-pub const EDITABLE: [&str; 16] = [
+pub const EDITABLE: [&str; 17] = [
     crate::change_set::THRESHOLD_KEY,
     USER_OUS,
     GROUP_OUS,
@@ -33,6 +33,7 @@ pub const EDITABLE: [&str; 16] = [
     "HOURLY_FIRST_PASSWORD_LIMIT",
     "EMERGENCY_QUOTA",
     TIME_ZONE,
+    crate::common_settings::SCAN_AT,
 ];
 
 /// Kurumun saat dilimi; kayitta Postgres'in tanidigi da sorulur (web.rs).
@@ -53,6 +54,9 @@ pub fn validate(key: &str, raw: &str) -> Result<String, String> {
         ZIMBRA_DOMAINS => domains(raw),
         USERNAME_TEMPLATE | EMAIL_LOCAL_TEMPLATE => template(raw),
         DRY_RUN | FIRST_LOGIN => boolean(key, raw),
+        crate::common_settings::SCAN_AT => {
+            crate::common_settings::parse_scan_times(raw).map(|t| t.join(","))
+        }
         // Ortak yedi ayar: iki servisin okurken isletdigi kuralin aynisi (ikiz dosya)
         other if EDITABLE.contains(&other) => crate::common_settings::check(other, raw),
         other => Err(format!("{other} ekrandan değiştirilemez")),
@@ -274,6 +278,11 @@ mod tests {
             validate(TIME_ZONE, "Europe/Istanbul").unwrap(),
             "Europe/Istanbul"
         );
+        assert_eq!(
+            validate("RECONCILE_SCAN_AT", " 02:00, 18:00").unwrap(),
+            "02:00,18:00"
+        );
+        assert!(validate("RECONCILE_SCAN_AT", "25:00").is_err());
     }
 
     #[test]

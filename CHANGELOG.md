@@ -194,4 +194,5 @@
 - Işletme ayarları tablosu doğar, değişiklik seti eşiği Ayarlar ekranından verilir
 - Worker'ın kapsam, adlandırma ve yürütme ayarları Ayarlar ekranından okunur
 - Ortak yedi ayar Ayarlar ekranından okunur, .env açılış kablolamasına iner
+- Mutabakat taraması saatleri Ayarlar ekranından virgüllü liste olarak verilir
 

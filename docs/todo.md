@@ -811,7 +811,7 @@ Kurallar:
   - **Dikkat (vaultscan):** sunucunun `.env`'inde `OWNERSHIP_MODE_ENABLED=true` vardı, artık okunmuyor; tablo seed'i `false`. Sahiplenme isteniyorsa Ayarlar → Yürütme'den açılmalı
   - **Ertelenen (Windows AD açılınca):** tarayıcıdan sayaç 50 → 1 ile ikinci yıkıcı işin beklemesi ve sahiplenme modunun CSV doğrulamasını değiştirmesi (admin oturumu AD girişi istiyor)
 
-- [ ] Gece taramasının saatleri ekrandan verilir (ADR-124'ün kalanı, yeri ADR-131)
+- [x] Gece taramasının saatleri ekrandan verilir (ADR-124'ün kalanı, yeri ADR-131)
   - Kabul: `worker/src/scheduler.rs`'teki `NIGHTLY_SCAN_AFTER` sabiti yerine `RECONCILE_SCAN_AT` anahtarı; `open_nightly_scans` tek saat yerine saat listesi alır, SQL'de `$2::time[]`, sorgu **geçmiş en son dilime** bakar
   - Kabul: varsayılan `02:00` → davranış bugünkünün birebir aynısı (kurulum saat diliminde 02:00'den sonra, günde bir, AD yapılandırılmışsa)
   - Kabul: `04:30` → tarama 04:30'u geçen ilk tikte açılır, 02:00'de açılmaz
@@ -824,6 +824,10 @@ Kurallar:
   - Kabul: `docs/04-yasam-dongusu.md`'nin "Her gece 02:00 ve istendiğinde" satırı "Ayarlanan saatlerde (varsayılan 02:00) ve istendiğinde" olur; `docs/MAP.md`'nin scheduler satırı güncellenir
   - Not: `/reconcile` yalnızca "Son tarama"yı yazmaya devam eder; "sonraki tarama" göstergesi istenirse ayrı kutucuk
   - Doğrulama: worker testleri (saf ayrıştırma ve dilim seçimi + gerçek Postgres'te iki saatli liste); çalışan yığında saat ekrandan değiştirilip **worker yeniden başlatılmadan** o dilimin koştuğu görülür
+  - Not (2026-10-08): ayrıştırıcı `parse_scan_times` ikiz `common_settings.rs`'te (worker tikte okur, backend kayıtta aynı kuralı çağırır); `HH:MM` elle, bağımlılık yok. Dilim **bugünün** geçmiş en son saati: `WITH slot AS (… max(s) FROM unnest($2::time[]) s WHERE s <= şimdi)`, ilk dilimden önce tarama açılmaz — tek elemanlı liste eski sorgunun aynısı. Geri alma metni `read_lane::RECLAIMED` sabitine çıktı (kira SQL'i onu bağlıyor), gece sorgusu `result IS DISTINCT FROM` ile o satırı dilim tüketmiş saymıyor. Bozuk değer tabloda olursa (elle yazılırsa) tik yalnızca gece taramasını atlar ve loglar. Alan ekranda Yürütme bölümünde, yanında maliyet cümlesi
+  - Doğrulama (2026-10-08, vaultscan): worker **113 test**, backend **245 test** geçti (yeni: `common_settings::scan_times_are_hh_mm_lists_without_duplicates` iki crate'te — `9`, `25:00`, `02:0`, boş eleman, yinelenen saat, 25 değer reddi; `scheduler::nightly_scans_open_once_per_slot_only_when_ad_is_configured` — dilim başına bir, başarısız iş tüketir, geri alınmış iş tüketmez, iki dilimde son dilim için tek tarama; `operational_settings` doğrulamasına `RECONCILE_SCAN_AT`). Düşenler yine DC kapalı + lab Keycloak yok. fmt + clippy temiz, audit yalnızca `rsa`
+  - Doğrulama (çalışan yığın, vaultscan): yeniden kuruldu, dört servis `healthy`
+  - **Ertelenen (Windows AD açılınca):** saat ekrandan değiştirilip worker yeniden başlatılmadan dilimin koştuğunun görülmesi — vaultscan yığınında AD bağlantısı girilmemiş, admin oturumu AD girişi istiyor; davranış gerçek Postgres testinde
 ---
 
 ## Yer tutucu rol yönetilen bağlantıda olamaz: değişmez kural teste bağlanır

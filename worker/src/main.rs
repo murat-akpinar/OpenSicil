@@ -431,7 +431,12 @@ async fn tick_if_due(pool: &PgPool, worker_id: &str, next_tick: &mut Instant) {
         Err(e) => eprintln!("worker: zamanlayıcı tiki başarısız: {e}"),
     }
     // ADR-051/099: gece mutabakati okuma seridine istek olarak yazilir (F-13)
-    match scheduler::open_nightly_scans(pool, time_zone, scheduler::NIGHTLY_SCAN_AFTER).await {
+    let slots = ops.map.get(common_settings::SCAN_AT).map(String::as_str);
+    let slots = match common_settings::parse_scan_times(slots.unwrap_or_default()) {
+        Ok(slots) => slots,
+        Err(e) => return eprintln!("worker: gece taraması açılmadı: {e}"),
+    };
+    match scheduler::open_nightly_scans(pool, time_zone, &slots).await {
         Ok(0) => {}
         Ok(opened) => println!("worker: gece mutabakatı için {opened} okuma işi açıldı"),
         Err(e) => eprintln!("worker: {e}"),

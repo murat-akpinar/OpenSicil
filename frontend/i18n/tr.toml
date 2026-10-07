@@ -200,6 +200,8 @@ config.ownership_hint = "Açıkken mevcut AD hesapları gözlem moduyla sahiplen
 config.sensitive_mapping = "Hassas eşleme"
 config.sensitive_mapping_hint = "Açıkken kimlik no ve telefon hedef sisteme eşlenebilir; eşleme satırını yine Sistem yöneticisi açık onayla açar."
 config.time_zone = "Kurumun saat dilimi"
+config.scan_at = "Mutabakat taraması saatleri"
+config.scan_at_hint = "Kurumun saat diliminde virgülle ayrılmış HH:MM listesi (örn. 02:00,10:00,18:00); her saatte bir kez katalog ve mutabakat taraması açılır. Her tarama yönetilen OU'ları baştan okur: büyük dizinde sık saat DC'yi yorar, anlık ihtiyaç için Yeniden tara var."
 err.ldap_attribute_shape = "Öznitelik adı harfle başlamalı ve yalnızca harf, rakam ve tire içermeli (örn. extensionAttribute5)."
 
 # --- operator ana sayfasi ---

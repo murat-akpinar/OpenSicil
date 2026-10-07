@@ -55,6 +55,39 @@ pub fn check(name: &str, raw: &str) -> Result<String, String> {
     }
 }
 
+/// Gece taramasinin saatleri (ADR-124 kurallari, yeri ADR-131). Worker okur; backend
+/// kayitta ayni kurali cagirdigi icin ikiz dosyada.
+pub const SCAN_AT: &str = "RECONCILE_SCAN_AT";
+const MAX_SCAN_TIMES: usize = 24;
+
+/// Virgullu `HH:MM` listesi: en az bir, en cok 24 deger, yinelenen saat yok.
+/// Bozuk deger SQL'e hic gitmez.
+pub fn parse_scan_times(raw: &str) -> Result<Vec<String>, String> {
+    let times: Vec<String> = raw.split(',').map(|t| t.trim().to_string()).collect();
+    if let Some(bad) = times.iter().find(|t| !is_hh_mm(t)) {
+        return Err(format!("{SCAN_AT} HH:MM listesi olmalı, '{bad}' geldi"));
+    }
+    if times.len() > MAX_SCAN_TIMES {
+        return Err(format!("{SCAN_AT} en çok {MAX_SCAN_TIMES} saat alır"));
+    }
+    let mut sorted = times.clone();
+    sorted.sort();
+    sorted.dedup();
+    if sorted.len() != times.len() {
+        return Err(format!("{SCAN_AT} aynı saati iki kez içeriyor"));
+    }
+    Ok(times)
+}
+
+fn is_hh_mm(t: &str) -> bool {
+    let b = t.as_bytes();
+    b.len() == 5
+        && b[2] == b':'
+        && [0, 1, 3, 4].iter().all(|&i| b[i].is_ascii_digit())
+        && (b[0] - b'0') * 10 + (b[1] - b'0') < 24
+        && b[3] < b'6'
+}
+
 /// ADR-131: isletme ayarlari tablosu `from_lookup` aramasina verilecek esleme
 /// olarak okunur (`|name| map.get(name).cloned()`); onbellek yok, her is/istek okur.
 pub async fn load_operational(pool: &sqlx::PgPool) -> Result<HashMap<String, String>, sqlx::Error> {
@@ -198,6 +231,31 @@ pub mod tests {
         assert!(check("HOURLY_DESTRUCTIVE_LIMIT", "0").is_err());
         assert!(check("TZ", "Europe Istanbul").is_err());
         assert!(check("DRY_RUN", "true").is_err());
+    }
+
+    #[test]
+    fn scan_times_are_hh_mm_lists_without_duplicates() {
+        assert_eq!(parse_scan_times("02:00").unwrap(), ["02:00"]);
+        assert_eq!(
+            parse_scan_times("02:00, 10:00,18:00").unwrap(),
+            ["02:00", "10:00", "18:00"]
+        );
+        for bad in [
+            "9",
+            "25:00",
+            "02:0",
+            "02:00,",
+            "",
+            "02:00,02:00",
+            "12:60",
+            "ab:cd",
+        ] {
+            assert!(parse_scan_times(bad).is_err(), "{bad}");
+        }
+        let hourly: Vec<String> = (0..24).map(|h| format!("{h:02}:00")).collect();
+        assert_eq!(parse_scan_times(&hourly.join(",")).unwrap().len(), 24);
+        let too_many = format!("{},23:30", hourly.join(","));
+        assert!(parse_scan_times(&too_many).is_err());
     }
 
     #[test]

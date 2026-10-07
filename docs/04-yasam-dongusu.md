@@ -56,7 +56,7 @@ Hepsi kurulum ayarıdır. Tarihler **kurulumun saat dilimiyle** yorumlanır (var
 | Saklama süresi (hedef sistem başına) | AD 90 gün, dolunca silinir; Zimbra otomatik silme yok, onayla (ADR-024) |
 | Ayrılan postası | Ayrılış anında kullanıcının kendi yönlendirmesi ve filtresi temizlenir. Otomatik yanıt (açık), devir yöneticisine yönlendirme (**varsayılan kapalı**) ve adres defterinden gizleme bitişten 24 saat sonra, acil ayrılışta hemen yazılır (ADR-045, ADR-049) |
 | Askı | Başlangıç tarihinde 00:00. Askı bitişi iznin **son günüdür**; hesaplar ertesi gün 00:00'da açılır. Tarihsiz askı elle kaldırılır (ADR-053, ADR-059) |
-| Mutabakat raporu | Her gece 02:00 ve istendiğinde |
+| Mutabakat raporu | Ayarlanan saatlerde (varsayılan 02:00) ve istendiğinde |
 | Zamanlayıcı çözünürlüğü | 1 dakika; her tikte türetilen bilgi uygulanan bilgiyle karşılaştırılır, kaçırılan geçişler sonraki tikte yakalanır (ADR-028, ADR-038) |
 | Kuyruk yoklama | 5 saniye |
 

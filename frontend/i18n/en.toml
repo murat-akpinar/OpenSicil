@@ -200,6 +200,8 @@ config.ownership_hint = "While on, existing AD accounts can be adopted in observ
 config.sensitive_mapping = "Sensitive mapping"
 config.sensitive_mapping_hint = "While on, national ID and phone may be mapped to the target; a System administrator still enables each mapping row with explicit approval."
 config.time_zone = "Organisation time zone"
+config.scan_at = "Reconciliation scan times"
+config.scan_at_hint = "Comma-separated HH:MM list in the organisation time zone (e.g. 02:00,10:00,18:00); a catalog and reconciliation scan opens once at each time. Every scan reads the managed OUs from scratch: frequent times load a large directory's DC, use Rescan for ad-hoc needs."
 err.ldap_attribute_shape = "The attribute name must start with a letter and contain only letters, digits and hyphens (e.g. extensionAttribute5)."
 
 # --- operator home ---

@@ -33,9 +33,11 @@ pub struct ReadJob {
 // mutabakati sessizce duser. Kirasi dolmayana dokunulmaz: baska bir worker
 // kopyasinin suren taramasi calinmaz (ADR-061). Kira kolonu yokken alinmis
 // satirin (yukseltme ani) suresi `started_at`ten sayilir.
+/// Geri alinan isin sonuc metni; gece taramasi bu satiri "dilim tuketti" saymaz.
+pub const RECLAIMED: &str = "yarıda kaldı: iş kirası doldu, geri alındı";
+
 const CLAIM_SQL: &str = "WITH expired AS ( \
-    UPDATE read_jobs SET status = 'failed', finished_at = now(), \
-        result = 'yarıda kaldı: iş kirası doldu, geri alındı' \
+    UPDATE read_jobs SET status = 'failed', finished_at = now(), result = $2 \
     WHERE status = 'running' \
       AND COALESCE(locked_until, started_at + make_interval(mins => $1)) < now() \
     RETURNING id), \
@@ -50,6 +52,7 @@ const CLAIM_SQL: &str = "WITH expired AS ( \
 pub async fn claim(pool: &PgPool) -> Result<Option<ReadJob>, sqlx::Error> {
     let row: Option<(i64, String, i64)> = sqlx::query_as(CLAIM_SQL)
         .bind(crate::queue::LEASE_MINUTES)
+        .bind(RECLAIMED)
         .fetch_optional(pool)
         .await?;
     Ok(row.map(|(id, kind, target_system_id)| ReadJob {

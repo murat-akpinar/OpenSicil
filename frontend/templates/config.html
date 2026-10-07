@@ -188,6 +188,10 @@
           {% call bool_field(ops, "OWNERSHIP_MODE_ENABLED", lang.t("config.ownership"), lang.t("config.ownership_hint"), "ops-execution") %}
           {% call bool_field(ops, "SENSITIVE_MAPPING_ENABLED", lang.t("config.sensitive_mapping"), lang.t("config.sensitive_mapping_hint"), "ops-execution") %}
           {% call text_field(ops, "TZ", lang.t("config.time_zone"), "Europe/Istanbul", "ops-execution") %}
+          <div>
+            {% call text_field(ops, "RECONCILE_SCAN_AT", lang.t("config.scan_at"), "02:00", "ops-execution") %}
+            <span class="hint">{{ lang.t("config.scan_at_hint") }}</span>
+          </div>
         </div>
         {% call save_button("ops-execution") %}
       </section>
