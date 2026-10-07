@@ -873,7 +873,10 @@ async fn role_page(
     Path(key): Path<String>,
 ) -> Response {
     match resolve_key(&state, &op, Owner::Role, &key, true).await {
-        Ok(id) => render_role(&state, &op, id, Notice::default()).await,
+        Ok(id) => {
+            let notice = Notice::take(&state.pool, &op.username).await;
+            render_role(&state, &op, id, notice).await
+        }
         Err(response) => *response,
     }
 }
@@ -984,7 +987,7 @@ async fn stage(state: &AppState, sub: Submission<'_>, impact: Impact, info: Stri
     });
     audit_operator(state, op, event_of(owner), None, detail).await;
     let notice = Notice::info(format!("{}; {info}", op.lang.t("changeset.staged")));
-    render_definition(state, op, owner, id, notice).await
+    redirect_definition(state, op, owner, id, notice).await
 }
 
 // Taslak yayimlanir: model yazilir, bekleyen taslak silinir, isler acilir.
@@ -1020,7 +1023,20 @@ async fn publish(
     });
     audit_operator(state, op, event_of(owner), None, detail).await;
     enqueue_affected(state, owner, id).await;
-    render_definition(state, op, owner, id, notice).await
+    redirect_definition(state, op, owner, id, notice).await
+}
+
+/// ADR-126 madde 1: basari yolu sayfa basmaz, tanimin GET adresine yonlendirir;
+/// mesaj flash'tan bir kez basilir. Dogrulama hatasi formu yerinde gosterir.
+async fn redirect_definition(
+    state: &AppState,
+    op: &Operator,
+    owner: Owner,
+    id: i64,
+    notice: Notice,
+) -> Response {
+    let to = address(state, owner, id).await;
+    notice.redirect(&state.pool, op, &to).await
 }
 
 fn event_of(owner: Owner) -> &'static str {
@@ -1191,7 +1207,10 @@ async fn department_page(
     Path(key): Path<String>,
 ) -> Response {
     match resolve_key(&state, &op, Owner::Department, &key, true).await {
-        Ok(id) => render_department(&state, &op, id, Notice::default()).await,
+        Ok(id) => {
+            let notice = Notice::take(&state.pool, &op.username).await;
+            render_department(&state, &op, id, notice).await
+        }
         Err(response) => *response,
     }
 }
@@ -1284,10 +1303,11 @@ async fn reject(state: &AppState, op: &Operator, owner: Owner, id: i64) -> Respo
     let detail = serde_json::json!({ "action": "rejected", "id": id });
     audit_operator(state, op, event_of(owner), None, detail).await;
     let notice = Notice::info(op.lang.t("changeset.rejected").to_string());
-    render_definition(state, op, owner, id, notice).await
+    redirect_definition(state, op, owner, id, notice).await
 }
 
-/// Onay/red: anahtar sayisal ya da slug; POST yonlendirmez (ADR-107 madde 5).
+/// Onay/red: anahtar sayisal ya da slug; POST adresi slug'a cevirmez (ADR-107
+/// madde 5), sonucu tanimin GET adresine yonlendirir (ADR-126 madde 1).
 async fn decide_key(
     state: &AppState,
     op: &Operator,
@@ -1632,6 +1652,16 @@ mod tests {
             .unwrap()
     }
 
+    /// ADR-126 madde 1: basari POST'u 303 doner; mesaj yonlendirilen GET'te bir kez basilir.
+    async fn follow(app: &axum::Router, r: Response, cookie: &str) -> Response {
+        assert_eq!(r.status(), StatusCode::SEE_OTHER);
+        let to = r.headers()[header::LOCATION].to_str().unwrap().to_string();
+        app.clone()
+            .oneshot(request("GET", &to, "", cookie))
+            .await
+            .unwrap()
+    }
+
     async fn body_string(response: Response) -> String {
         let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
@@ -1729,7 +1759,8 @@ mod tests {
             catalog.gg_vpn, catalog.gg_nobet, catalog.ad, catalog.ad, catalog.sistem_uzmanlari_ou, catalog.ad, catalog.ad
         );
         // Kayit sonrasi sayfa etki ozetiyle doner (ADR-031/037): iki kimlik, iki ekleme.
-        let page = body_string(send("POST", role_url.clone(), body, admin.clone()).await).await;
+        let r = send("POST", role_url.clone(), body, admin.clone()).await;
+        let page = body_string(follow(&app, r, &admin).await).await;
         assert!(page.contains("1 kimlik etkilendi"), "{page}");
         assert!(page.contains("GG-VPN eklendi (1 kimlik)"), "{page}");
         let page =
@@ -1919,7 +1950,8 @@ mod tests {
             catalog.gg_vpn, catalog.ad
         );
 
-        let page = body_string(send(url.clone(), body, author.clone()).await).await;
+        let r = send(url.clone(), body, author.clone()).await;
+        let page = body_string(follow(&app, r, &author).await).await;
         assert!(page.contains("taslak onay bekliyor"), "{page}");
         let published: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM role_entitlements WHERE role_id = $1")
@@ -1971,8 +2003,15 @@ mod tests {
 
         // ADR-132: taslagi baslatan Sistem yoneticisi kendi onayini verir; model
         // yazilir, taslak duser, isler acilir.
-        let page =
-            body_string(send(format!("{url}/approve"), String::new(), author.clone()).await).await;
+        let page = body_string(
+            follow(
+                &app,
+                send(format!("{url}/approve"), String::new(), author.clone()).await,
+                &author,
+            )
+            .await,
+        )
+        .await;
         assert!(page.contains("onaylandı ve yayımlandı"), "{page}");
         let (items, draft): (i64, i64) = sqlx::query_as(
             "SELECT (SELECT COUNT(*) FROM role_entitlements WHERE role_id = $1), \
@@ -1992,7 +2031,8 @@ mod tests {
         // Red: taslak atilir, model degismez.
         let body = format!("name=Test+Rol%C3%BC&title=Uzman&pa.{}=true", catalog.ad);
         body_string(send(url.clone(), body, second.clone()).await).await;
-        let page = body_string(send(format!("{url}/reject"), String::new(), second).await).await;
+        let r = send(format!("{url}/reject"), String::new(), second.clone()).await;
+        let page = body_string(follow(&app, r, &second).await).await;
         assert!(page.contains("reddedildi"), "{page}");
         let (items, draft): (i64, i64) = sqlx::query_as(
             "SELECT (SELECT COUNT(*) FROM role_entitlements WHERE role_id = $1), \

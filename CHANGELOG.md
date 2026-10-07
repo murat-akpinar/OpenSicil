@@ -196,4 +196,5 @@
 - Worker'ın kapsam, adlandırma ve yürütme ayarları Ayarlar ekranından okunur
 - Ortak yedi ayar Ayarlar ekranından okunur, .env açılış kablolamasına iner
 - Mutabakat taraması saatleri Ayarlar ekranından virgüllü liste olarak verilir
+- Rol, departman, silme ve içe aktarma POST'ları sonucu yönlendirir, mesaj flash'tan basılır
 

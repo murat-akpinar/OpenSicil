@@ -1486,8 +1486,12 @@ async fn render_page(state: &AppState, op: &Operator, notice: Notice) -> Respons
     }
 }
 
+/// ADR-126 madde 1: uygula/onay/red basari yolu buraya yonlendirir, mesaj flash'ta.
+const IMPORTS: &str = "/imports";
+
 async fn page(OperatorSession(op): OperatorSession, State(state): State<AppState>) -> Response {
-    render_page(&state, &op, Notice::default()).await
+    let notice = Notice::take(&state.pool, &op.username).await;
+    render_page(&state, &op, notice).await
 }
 
 /// Ornek dosya: butun kanonik basliklar ve tek satir.
@@ -1617,7 +1621,7 @@ async fn upload(
                     &applied.updated.len().to_string(),
                 ],
             );
-            render_page(&state, &op, Notice::info(text)).await
+            Notice::info(text).redirect(&state.pool, &op, IMPORTS).await
         }
         Err(e) => internal("içe aktarma uygulanamadı", e),
     }
@@ -1789,7 +1793,7 @@ async fn approve(
             &applied.updated.len().to_string(),
         ],
     );
-    render_page(&state, &op, Notice::info(text)).await
+    Notice::info(text).redirect(&state.pool, &op, IMPORTS).await
 }
 
 /// Red: Sistem yoneticisi ya da partiyi yukleyen; parti silinir, hicbir sey uygulanmaz.
@@ -1814,18 +1818,19 @@ async fn reject(
     }
     let detail = serde_json::json!({ "batch_id": id, "by": batch.by_username });
     audit_operator(&state, &op, crate::audit::IMPORT_REJECTED, None, detail).await;
-    render_page(
-        &state,
-        &op,
-        Notice::info(op.lang.t("import.rejected").to_string()),
-    )
-    .await
+    Notice::info(op.lang.t("import.rejected").to_string())
+        .redirect(&state.pool, &op, IMPORTS)
+        .await
 }
 // --- END FEATURE: csv-import ---
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn op_lang() -> crate::i18n::Lang {
+        crate::i18n::DEFAULT
+    }
 
     fn table_of(text: &str) -> Table {
         parse(text).expect("dosya çözülmeli")
@@ -2360,11 +2365,15 @@ mod tests {
             text(send("POST", "/imports/preview".into(), encode(one), hr.clone()).await).await;
         assert!(preview.contains("Tek Satır"), "{preview}");
         // esik 1: tek kimlik hemen uygulanir
-        let applied = text(send("POST", "/imports".into(), encode(one), hr.clone()).await).await;
-        assert!(
-            applied.contains("1") && !applied.contains("/imports/1\""),
-            "{applied}"
-        );
+        // ADR-126 madde 1: basari yolu /imports'a yonlendirir, mesaj flash'tan bir kez
+        let r = send("POST", "/imports".into(), encode(one), hr.clone()).await;
+        assert_eq!(r.status(), StatusCode::SEE_OTHER);
+        assert_eq!(r.headers()[header::LOCATION], "/imports");
+        let applied = text(send("GET", "/imports".into(), String::new(), hr.clone()).await).await;
+        let message = op_lang().tn("import.applied", &["1", "0"]);
+        assert!(applied.contains(&message), "{applied}");
+        let again = text(send("GET", "/imports".into(), String::new(), hr.clone()).await).await;
+        assert!(!again.contains(&message), "flash tek kullanımlık");
         let count: i64 =
             sqlx::query_scalar("SELECT count(*) FROM identities WHERE employee_number = '1'")
                 .fetch_one(&pool)
@@ -2399,17 +2408,20 @@ mod tests {
             page.contains("/approve") && page.contains("Üç Satır"),
             "başlatan kendi partisini onaylayabilir: {page}"
         );
-        let page = text(
-            send(
-                "POST",
-                format!("{location}/approve"),
-                String::new(),
-                same_admin.clone(),
-            )
-            .await,
+        let r = send(
+            "POST",
+            format!("{location}/approve"),
+            String::new(),
+            same_admin.clone(),
         )
         .await;
-        assert!(page.contains("2"), "{page}");
+        assert_eq!(r.headers()[header::LOCATION], "/imports");
+        let page =
+            text(send("GET", "/imports".into(), String::new(), same_admin.clone()).await).await;
+        assert!(
+            page.contains(&op_lang().tn("import.applied", &["2", "0"])),
+            "{page}"
+        );
         let created: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM identities WHERE employee_number IN ('2', '3')",
         )

@@ -183,7 +183,8 @@ async fn render_page(
 }
 
 async fn page(OperatorSession(op): OperatorSession, State(state): State<AppState>) -> Response {
-    render_page(&state, &op, Notice::default()).await
+    let notice = Notice::take(&state.pool, &op.username).await;
+    render_page(&state, &op, notice).await
 }
 
 /// Formdaki `link=<kimlik>:<hedef>` alanlari; bicimi bozuk olan atlanir.
@@ -239,8 +240,10 @@ async fn approve_selected(
             return internal("silme işi açılamadı", e);
         }
     }
-    let notice = Notice::info(op.lang.t1("deletions.approved_n", approved.len()));
-    render_page(&state, &op, notice).await
+    // ADR-126 madde 1: basari yolu yonlendirir, mesaj flash'tan bir kez basilir
+    Notice::info(op.lang.t1("deletions.approved_n", approved.len()))
+        .redirect(&state.pool, &op, "/deletions")
+        .await
 }
 // --- END FEATURE: deletion-queue ---
 
@@ -392,8 +395,12 @@ mod tests {
         // Saklamadaki hesabi onaylamaya calismak sessizce atlanir, bekleyen onaylanir
         let body = format!("{link}&link={}:{target}", ids[1]);
         let r = send("POST", body, hr.clone()).await;
-        assert_eq!(r.status(), StatusCode::OK);
-        let page = text(r).await;
+        assert_eq!(
+            r.status(),
+            StatusCode::SEE_OTHER,
+            "ADR-126: başarı yolu yönlendirir"
+        );
+        let page = text(send("GET", String::new(), hr.clone()).await).await;
         assert!(
             page.contains(&crate::i18n::DEFAULT.t1("deletions.approved_n", 1)),
             "{page}"
