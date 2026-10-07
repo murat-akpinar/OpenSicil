@@ -154,7 +154,7 @@ GRANT INSERT (name, kind, former_identity_id) ON used_names TO {worker};
 GRANT UPDATE (released_at, release_reason) ON used_names TO {backend};
 GRANT SELECT ON read_jobs TO {backend}, {worker};
 GRANT INSERT (kind, target_system_id, requested_by) ON read_jobs TO {backend};
-GRANT UPDATE (status, started_at, finished_at, result) ON read_jobs TO {worker};
+GRANT UPDATE (status, started_at, finished_at, result, locked_until) ON read_jobs TO {worker};
 GRANT INSERT (kind, target_system_id) ON read_jobs TO {worker};
 GRANT SELECT ON reconcile_findings TO {backend}, {worker};
 GRANT INSERT, DELETE ON reconcile_findings TO {worker};

@@ -8,7 +8,8 @@
 
 use sqlx::PgPool;
 
-const LEASE_MINUTES: i32 = 5;
+/// Is kirasi (ADR-062 madde 1); okuma seridi de ayni sureyi kullanir.
+pub const LEASE_MINUTES: i32 = 5;
 const MAX_ATTEMPTS: i32 = 5;
 const BACKOFF_BASE_SECONDS: i64 = 60;
 const BACKOFF_MAX_EXPONENT: u32 = 4;

@@ -1875,4 +1875,104 @@ mod tests {
         drop(pool);
         crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
     }
+
+    /// ADR-051/126: "Yeniden tara" okuma seridine istek yazar; acik is varken
+    /// sessizce basari demez. Tikanmis satir (worker yarida olduyse, kira dolana
+    /// kadar) ekranda "zaten acik" olarak gorunur, ikinci tarama yapilmaz.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn rescan_opens_one_job_and_says_already_open_for_the_second() {
+        use axum::body::Body;
+        use axum::http::{header, Request, StatusCode};
+        use tower::ServiceExt;
+
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        let app = crate::web::routes()
+            .with_state(crate::web::test_state(pool.clone(), "https://localhost"));
+        let target: i64 = sqlx::query_scalar("SELECT id FROM target_systems WHERE kind = 'ad'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let session = |authority: &'static str| {
+            let pool = pool.clone();
+            async move {
+                let operator = crate::operator_session::Operator {
+                    subject: format!("sub-{authority}"),
+                    username: format!("{authority}.kullanicisi"),
+                    email: "op@example.org".to_string(),
+                    authorities: vec![authority.to_string()],
+                    auth_source: crate::operator_session::AuthSource::Oidc,
+                    lang: crate::i18n::DEFAULT,
+                };
+                let token = crate::operator_session::create_session(&pool, &operator)
+                    .await
+                    .unwrap();
+                format!("{}={token}", crate::cookie::OPERATOR_SESSION_COOKIE_NAME)
+            }
+        };
+        let send = |method: &'static str, uri: String, cookie: String| {
+            let app = app.clone();
+            async move {
+                app.oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(uri)
+                        .header(header::COOKIE, cookie)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap()
+            }
+        };
+        let body = |r: axum::response::Response| async move {
+            let bytes = axum::body::to_bytes(r.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            String::from_utf8(bytes.to_vec()).unwrap()
+        };
+        let open_jobs = || {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_scalar::<_, i64>(
+                    "SELECT count(*) FROM read_jobs WHERE kind = 'reconcile' \
+                     AND status IN ('queued', 'running')",
+                )
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+            }
+        };
+        let admin = session("admin").await;
+        let scan = format!("/targets/{target}/reconcile/scan");
+        let page = page_path(target);
+
+        let r = send("POST", scan.clone(), admin.clone()).await;
+        assert_eq!(
+            r.status(),
+            StatusCode::SEE_OTHER,
+            "ADR-126: POST yönlendirir"
+        );
+        let shown = body(send("GET", page.clone(), admin.clone()).await).await;
+        assert!(shown.contains("okuma şeridine yazıldı"), "{shown}");
+        assert_eq!(open_jobs().await, 1);
+
+        // Isi yarida kalmis gibi `running` yap: dugme yine sessizce basari demez.
+        sqlx::query("UPDATE read_jobs SET status = 'running', started_at = now()")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let r = send("POST", scan.clone(), admin.clone()).await;
+        assert_eq!(r.status(), StatusCode::SEE_OTHER);
+        let shown = body(send("GET", page.clone(), admin.clone()).await).await;
+        assert!(shown.contains("zaten açık"), "{shown}");
+        assert_eq!(open_jobs().await, 1, "ikinci tarama açılmaz");
+
+        let r = send("POST", scan, session("auditor").await).await;
+        assert_eq!(r.status(), StatusCode::FORBIDDEN, "auditor tarama açamaz");
+
+        drop(app);
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
 }

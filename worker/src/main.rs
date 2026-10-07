@@ -165,12 +165,21 @@ async fn run_read_lane(pool: PgPool, env: Arc<Env>, stop: Arc<AtomicBool>) {
                 continue;
             }
         };
-        let outcome = match job.kind.as_str() {
-            read_lane::CATALOG_REFRESH => refresh_catalog(&pool, &env, job.target_system_id).await,
-            read_lane::RECONCILE => run_reconcile(&pool, &env, job.target_system_id, job.id).await,
-            read_lane::MANAGE_DIFF => run_manage_diff(&pool, &env, job.target_system_id).await,
-            other => Err(format!("bilinmeyen okuma işi türü: {other}")),
+        let work = async {
+            match job.kind.as_str() {
+                read_lane::CATALOG_REFRESH => {
+                    refresh_catalog(&pool, &env, job.target_system_id).await
+                }
+                read_lane::RECONCILE => {
+                    run_reconcile(&pool, &env, job.target_system_id, job.id).await
+                }
+                read_lane::MANAGE_DIFF => run_manage_diff(&pool, &env, job.target_system_id).await,
+                other => Err(format!("bilinmeyen okuma işi türü: {other}")),
+            }
         };
+        // Tarama surerken kira uzar (ADR-062): 5 dakikadan uzun okuma kendi
+        // kirasina dusup geri alinmaz.
+        let outcome = read_lane::with_lease(&pool, job.id, work).await;
         match &outcome {
             Ok(text) => println!("worker: okuma şeridi {} bitti: {text}", job.kind),
             Err(e) => eprintln!("worker: okuma şeridi {} başarısız: {e}", job.kind),
