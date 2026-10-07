@@ -100,7 +100,7 @@ samba ldbsearch -H $SAM_LDB -b "$USER_OU" -s one '(objectClass=user)' sAMAccount
 # ---- 3. backend, Yapılandırma ----
 echo "3) backend (servis rolüyle) ve Yapılandırma: lab AD + lab Keycloak"
 env "${COMMON[@]}" DATABASE_URL="postgres://load_backend:load-backend-pw@$PG_HOST/$DB" \
-  PUBLIC_URL=$BASE METRICS_TOKEN=load CHANGE_SET_THRESHOLD=10 APPROVAL_TIMELOCK_HOURS=0 \
+  PUBLIC_URL=$BASE METRICS_TOKEN=load APPROVAL_TIMELOCK_HOURS=0 \
   "backend/target/$PROFILE/backend" >"$WORK/backend.log" 2>&1 &
 BACKEND_PID=$!
 for _ in $(seq 1 30); do curl -sf "$BASE/api/health" >/dev/null && break; sleep 1; done

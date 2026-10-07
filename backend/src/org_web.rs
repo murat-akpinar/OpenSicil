@@ -932,7 +932,11 @@ async fn stage_or_publish(state: &AppState, sub: Submission<'_>) -> Response {
         edit: &sub.edit,
         with_settings: sub.with_settings,
     };
-    let (impact, info) = impact_notice(state, op.lang, &draft).await;
+    let threshold = match change_set::threshold(&state.pool).await {
+        Ok(t) => t,
+        Err(e) => return internal("değişiklik seti eşiği okunamadı", e),
+    };
+    let (impact, info) = impact_notice(state, op.lang, &draft, threshold).await;
     if let Err(e) = org::validate_definition(&state.pool, owner, id, &sub.edit, sub.parent_id).await
     {
         return match save_error(e, "tanım doğrulanamadı") {
@@ -942,7 +946,7 @@ async fn stage_or_publish(state: &AppState, sub: Submission<'_>) -> Response {
             Err(response) => *response,
         };
     }
-    if impact.exceeds(state.change_set_threshold) {
+    if impact.exceeds(threshold) {
         return stage(state, sub, impact, info).await;
     }
     publish(state, sub, impact, Notice::info(info)).await
@@ -1031,10 +1035,15 @@ async fn render_definition(
 // ADR-031/037/043: etki onizlemesi kayitla birlikte hesaplanir (taslak = gonderilen
 // form, yayimlanmis = veritabanindaki tanim) ve ekranda ozetlenir. Esigi asan setin
 // onaya dusmesi sonraki kutucuktur; burada sayi raporlanir.
-async fn impact_notice(state: &AppState, lang: Lang, draft: &Draft<'_>) -> (Impact, String) {
+async fn impact_notice(
+    state: &AppState,
+    lang: Lang,
+    draft: &Draft<'_>,
+    threshold: usize,
+) -> (Impact, String) {
     match change_set::preview(&state.pool, &state.time_zone, draft).await {
         Ok(impact) => {
-            let text = impact_text(lang, &impact, state.change_set_threshold);
+            let text = impact_text(lang, &impact, threshold);
             (impact, text)
         }
         Err(e) => {
@@ -1857,10 +1866,8 @@ mod tests {
         let ids = crate::test_support::seed_two_identities(&pool).await;
         let catalog = crate::test_support::seed_example_catalog(&pool).await;
         // Esik 0: fark ureten her duzenleme onaya duser.
-        let state = AppState {
-            change_set_threshold: 0,
-            ..crate::web::test_state(pool.clone(), "https://localhost")
-        };
+        crate::test_support::set_threshold(&pool, 0).await;
+        let state = crate::web::test_state(pool.clone(), "https://localhost");
         let app = crate::web::routes().with_state(state);
         let author = cookie_as(&pool, "ayse.yonetici", &["admin"]).await;
         let second = cookie_as(&pool, "ali.yonetici", &["admin"]).await;

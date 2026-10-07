@@ -47,7 +47,7 @@ psql -d postgres -c "CREATE DATABASE $DB" >/dev/null
 
 echo "2) backend (servis rolüyle)"
 env "${COMMON[@]}" DATABASE_URL="postgres://e2e_backend:e2e-backend-pw@$PG_HOST/$DB" \
-  PUBLIC_URL=$BASE METRICS_TOKEN=e2e CHANGE_SET_THRESHOLD=10 APPROVAL_TIMELOCK_HOURS=0 \
+  PUBLIC_URL=$BASE METRICS_TOKEN=e2e APPROVAL_TIMELOCK_HOURS=0 \
   backend/target/debug/backend >"$WORK/backend.log" 2>&1 &
 BACKEND_PID=$!
 for _ in $(seq 1 30); do curl -sf "$BASE/api/health" >/dev/null && break; sleep 1; done

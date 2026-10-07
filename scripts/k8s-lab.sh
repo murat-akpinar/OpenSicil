@@ -75,7 +75,7 @@ k create secret generic nginx-tls --from-file=cert.pem="$WORK/cert.pem" --from-f
 k create configmap common --from-literal=OWNERSHIP_MODE_ENABLED=false --from-literal=HOURLY_DESTRUCTIVE_LIMIT=50 \
   --from-literal=HOURLY_GRANT_LIMIT=500 --from-literal=HOURLY_FIRST_PASSWORD_LIMIT=50 --from-literal=EMERGENCY_QUOTA=5 \
   --from-literal=SENSITIVE_MAPPING_ENABLED=false --from-literal=TZ=Europe/Istanbul >/dev/null
-k create configmap backend-config --from-literal=PUBLIC_URL="$BASE" --from-literal=CHANGE_SET_THRESHOLD=10 \
+k create configmap backend-config --from-literal=PUBLIC_URL="$BASE" \
   --from-literal=APPROVAL_TIMELOCK_HOURS=0 --from-literal=AD_CA_FILE=/etc/opensicil/ad-ca.pem >/dev/null
 k create configmap worker-config --from-literal=DRY_RUN=false --from-literal=FIRST_LOGIN_CHANGE_REQUIRED=true \
   --from-literal=AD_CA_FILE=/etc/opensicil/ad-ca.pem --from-literal=USERNAME_TEMPLATE= --from-literal=EMAIL_LOCAL_TEMPLATE= \

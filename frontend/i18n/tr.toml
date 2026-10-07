@@ -170,6 +170,9 @@ config.stored_badge = "kayıtlı"
 config.save_note = "Boş bırakılan parola alanı kayıtlı değeri değiştirmez."
 config.national_id_attribute = "TC kimlik no özniteliği"
 config.national_id_attribute_hint = "Boş bırakılırsa TC kimlik no AD'den hiç okunmaz. Dolduğunda mutabakat taraması bu özniteliği okur ve şifreli saklar; toplu sahiplenme yalnızca doğrulamadan geçen değeri kimliğe yazar."
+config.limits = "Sınırlar ve onay"
+config.change_set_threshold = "Değişiklik seti eşiği"
+config.change_set_threshold_hint = "Bu sayıdan fazla hesabı etkileyen düzenleme hemen uygulanmaz, onay bekler; 0 her düzenlemeyi onaya düşürür. Değişiklik kaydedildiği anda geçerli olur, yeniden başlatma gerekmez."
 err.ldap_attribute_shape = "Öznitelik adı harfle başlamalı ve yalnızca harf, rakam ve tire içermeli (örn. extensionAttribute5)."
 
 # --- operator ana sayfasi ---

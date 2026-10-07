@@ -4,6 +4,7 @@
 // birebir aynidir (ADR-070: bagimsiz crate'ler, paylasilan crate yok) — birini
 // degistiren digerini de degistirir; backend main.rs testi ikisini karsilastirir.
 
+use std::collections::HashMap;
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,6 +35,17 @@ impl CommonSettings {
             time_zone: parse_time_zone(&lookup)?,
         })
     }
+}
+
+/// ADR-131: isletme ayarlari tablosu `from_lookup` aramasina verilecek esleme
+/// olarak okunur (`|name| map.get(name).cloned()`); onbellek yok, her is/istek okur.
+// Worker bu yolu ADR-131'in ikinci kutucugunda okumaya baslar.
+#[allow(dead_code)]
+pub async fn load_operational(pool: &sqlx::PgPool) -> Result<HashMap<String, String>, sqlx::Error> {
+    let rows: Vec<(String, String)> = sqlx::query_as("SELECT key, value FROM operational_settings")
+        .fetch_all(pool)
+        .await?;
+    Ok(rows.into_iter().collect())
 }
 
 // Acilis log'unda tek satir; iki servisin ciktisi yan yana konunca sapma gorulur.

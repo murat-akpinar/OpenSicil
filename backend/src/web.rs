@@ -11,7 +11,7 @@ use crate::cookie::{
     clear_cookie_header, get_cookie, set_cookie_header, OPERATOR_SESSION_COOKIE_NAME,
 };
 use crate::i18n::Lang;
-use crate::identity_web::{allowed, forbidden, OperatorSession};
+use crate::identity_web::{allowed, forbidden, internal, OperatorSession};
 use crate::operator_session::{AuthSource, Operator};
 use crate::shell::Shell;
 
@@ -26,8 +26,6 @@ pub struct AppState {
     pub public_url: String,
     // kurulum saat dilimi (ADR-039); operator reddi kimlik durumunu bununla turetir
     pub time_zone: String,
-    // degisiklik seti esigi (ADR-031): backend'in kendi ortam degiskeni
-    pub change_set_threshold: usize,
     // metrik ucunun Bearer token'i (ADR-061 madde 8); bos = uc kapali
     pub metrics_token: String,
 }
@@ -111,6 +109,8 @@ struct ConfigTemplate {
     oidc_issuer: String,
     oidc_client_id: String,
     oidc_client_secret_set: bool,
+    /// ADR-131 madde 7: isletme bolumleri; yerel bootstrap hesabina None
+    ops: Option<crate::operational_settings::View>,
 }
 
 pub(crate) fn render<T: Template>(tmpl: &T) -> Response {
@@ -148,6 +148,7 @@ pub fn routes() -> Router<AppState> {
             get(change_password_form).post(change_password_submit),
         )
         .route("/config", get(config_form).post(config_submit))
+        .route("/config/operational", post(operational_submit))
         // Dil secicisi (ADR-089): tercih operator oturumunda saklanir
         .route("/lang", post(set_lang))
         // --- START FEATURE: oidc-login ---
@@ -514,10 +515,34 @@ async fn config_form(
     if !allowed(&operator, CONFIG_AUTHORITIES) {
         return forbidden(operator.lang);
     }
+    let ops = if sees_operational(&operator) {
+        match crate::common_settings::load_operational(&state.pool).await {
+            Ok(values) => Some(crate::operational_settings::View {
+                values,
+                ..Default::default()
+            }),
+            Err(e) => return internal("işletme ayarları okunamadı", e),
+        }
+    } else {
+        None
+    };
+    render_config(&state, &operator, ops).await
+}
+
+/// ADR-131 madde 7: yerel bootstrap hesabi kurulum icindir, isletme ayarlarini gormez.
+fn sees_operational(operator: &Operator) -> bool {
+    operator.auth_source != AuthSource::Local
+}
+
+async fn render_config(
+    state: &AppState,
+    operator: &Operator,
+    ops: Option<crate::operational_settings::View>,
+) -> Response {
     match crate::settings::load(&state.pool).await {
         Ok(s) => render(&ConfigTemplate {
             lang: operator.lang,
-            shell: Shell::of(&operator),
+            shell: Shell::of(operator),
             ad_host: s.ad_host,
             ad_bind_dn: s.ad_bind_dn,
             ad_service_password_set: s.ad_service_password_set,
@@ -527,6 +552,7 @@ async fn config_form(
             oidc_issuer: s.oidc_issuer,
             oidc_client_id: s.oidc_client_id,
             oidc_client_secret_set: s.oidc_client_secret_set,
+            ops,
         }),
         Err(e) => {
             eprintln!("web: ayarlar okunamadı: {e}");
@@ -629,6 +655,48 @@ async fn config_submit(
 
 // --- END FEATURE: bootstrap-admin ---
 
+// --- START FEATURE: operational-settings ---
+/// ADR-131 madde 5/8: bozuk deger hicbir satiri yazmaz ve alanin yaninda doner;
+/// her degisen anahtar denetime eski -> yeni olarak girer.
+async fn operational_submit(
+    OperatorSession(operator): OperatorSession,
+    State(state): State<AppState>,
+    Form(form): Form<std::collections::HashMap<String, String>>,
+) -> Response {
+    if !allowed(&operator, CONFIG_AUTHORITIES) || !sees_operational(&operator) {
+        return forbidden(operator.lang);
+    }
+    let current = match crate::common_settings::load_operational(&state.pool).await {
+        Ok(current) => current,
+        Err(e) => return internal("işletme ayarları okunamadı", e),
+    };
+    let changes = match crate::operational_settings::plan(&current, &form) {
+        Ok(changes) => changes,
+        Err(view) => {
+            let page = render_config(&state, &operator, Some(view)).await;
+            return (StatusCode::BAD_REQUEST, page).into_response();
+        }
+    };
+    if let Err(e) =
+        crate::operational_settings::save(&state.pool, &changes, &operator.username).await
+    {
+        return internal("işletme ayarları kaydedilemedi", e);
+    }
+    for c in &changes {
+        let detail = serde_json::json!({ "key": c.key, "before": c.before, "after": c.after });
+        crate::identity_web::audit_operator(
+            &state,
+            &operator,
+            crate::audit::SETTINGS_CHANGED,
+            None,
+            detail,
+        )
+        .await;
+    }
+    Redirect::to("/config#limits").into_response()
+}
+// --- END FEATURE: operational-settings ---
+
 // --- START FEATURE: ui-i18n ---
 #[derive(Deserialize)]
 struct LangForm {
@@ -700,7 +768,6 @@ pub(crate) fn test_state(pool: PgPool, public_url: &str) -> AppState {
         blind_index_key: [4u8; crate::crypto::KEY_LEN],
         public_url: public_url.to_string(),
         time_zone: "Europe/Istanbul".to_string(),
-        change_set_threshold: crate::change_set::DEFAULT_THRESHOLD,
         metrics_token: "metrics-test-token".to_string(),
     }
 }
@@ -963,6 +1030,92 @@ mod tests {
         String::from_utf8(bytes.to_vec()).unwrap()
     }
 
+    // ADR-131: esik tablodan okunur, ekrandan kaydedilir; bozuk deger hicbir satiri
+    // yazmaz, her degisiklik denetime eski -> yeni olarak girer.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn operational_threshold_is_seeded_saved_validated_and_audited() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        let app = crate::server::build_router(test_state(pool.clone(), "https://localhost"));
+        let operator = Operator {
+            subject: "sub-admin".to_string(),
+            username: "ayse.yonetici".to_string(),
+            email: String::new(),
+            authorities: vec![crate::oidc::ADMIN_AUTHORITY.to_string()],
+            auth_source: AuthSource::Oidc,
+            lang: Lang::Tr,
+        };
+        let token = crate::operator_session::create_session(&pool, &operator)
+            .await
+            .unwrap();
+        let cookie = format!("{OPERATOR_SESSION_COOKIE_NAME}={token}");
+        let post = |body: &'static str| {
+            let app = app.clone();
+            let cookie = cookie.clone();
+            async move {
+                app.oneshot(form_request(
+                    "POST",
+                    "/config/operational",
+                    body,
+                    Some(&cookie),
+                ))
+                .await
+                .unwrap()
+            }
+        };
+
+        // Seed: migration'in varsayilani ekranda ve okuma yolunda
+        let response = app
+            .clone()
+            .oneshot(get_request("/config", Some(&cookie)))
+            .await
+            .unwrap();
+        let body = body_string(response).await;
+        assert!(body.contains(r#"id="limits""#), "{body}");
+        assert!(body.contains(r#"name="CHANGE_SET_THRESHOLD" form="ops-form" value="10""#));
+        assert_eq!(crate::change_set::threshold(&pool).await.unwrap(), 10);
+
+        let response = post("CHANGE_SET_THRESHOLD=3").await;
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert_eq!(crate::change_set::threshold(&pool).await.unwrap(), 3);
+        let by: Option<String> = sqlx::query_scalar(
+            "SELECT updated_by FROM operational_settings WHERE key = 'CHANGE_SET_THRESHOLD'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(by.as_deref(), Some("ayse.yonetici"));
+
+        // Bozuk deger: 400, hata alanin yaninda, tablo degismez, denetim yazilmaz
+        let response = post("CHANGE_SET_THRESHOLD=on").await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = body_string(response).await;
+        assert!(body.contains("CHANGE_SET_THRESHOLD-err"), "{body}");
+        assert!(body.contains(r#"value="on""#));
+        assert_eq!(crate::change_set::threshold(&pool).await.unwrap(), 3);
+
+        // Ayni deger yeniden kaydedilirse degisiklik yok, denetim satiri da yok
+        assert_eq!(
+            post("CHANGE_SET_THRESHOLD=3").await.status(),
+            StatusCode::SEE_OTHER
+        );
+        let audited: Vec<(String, String, String)> = sqlx::query_as(
+            "SELECT detail->>'key', detail->>'before', detail->>'after' FROM audit_log \
+             WHERE event_type = $1 ORDER BY id",
+        )
+        .bind(crate::audit::SETTINGS_CHANGED)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            audited,
+            vec![("CHANGE_SET_THRESHOLD".into(), "10".into(), "3".into())]
+        );
+
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
     #[tokio::test]
     #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
     async fn full_bootstrap_login_and_config_flow() {
@@ -1051,6 +1204,20 @@ mod tests {
         // "kayıtlı" metni yapışkan kaydet çubuğunun notunda da geçiyor (ADR-114 C);
         // aranan şey alanın yanındaki rozet, bu yüzden iddia rozetin işaretine bakar.
         assert!(!body.contains("badge badge-ok"), "{body}");
+        // ADR-131 madde 7: bootstrap hesabi isletme bolumunu gormez, yazamaz da.
+        assert!(!body.contains(r#"id="limits""#), "{body}");
+        let response = app
+            .clone()
+            .oneshot(form_request(
+                "POST",
+                "/config/operational",
+                "CHANGE_SET_THRESHOLD=0",
+                Some(&cookie),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(crate::change_set::threshold(&pool).await.unwrap(), 10);
 
         // Ayarlari sirlarla kaydet.
         let form = "ad_host=dc1.example.org&ad_bind_dn=CN%3Dsvc&ad_service_password=cok-gizli-ad&\

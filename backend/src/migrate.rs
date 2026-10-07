@@ -105,6 +105,9 @@ async fn fill_slugs(pool: &PgPool) -> Result<(), String> {
 //   red nedenini yalnizca worker yazar (ADR-036/085)
 // - worker_status: worker modunu ve son gorulmesini yazar, backend metrik ucu
 //   ve panel icin okur (F-19, ADR-054)
+// - operational_settings: isletme ayarlari (ADR-131); backend Ayarlar ekranindan
+//   yalnizca degeri gunceller (satir eklenmez/silinmez, anahtarlar migration'da),
+//   worker okur
 const SERVICE_GRANTS: &str = "\
 GRANT SELECT ON _sqlx_migrations TO {backend}, {worker};
 GRANT SELECT, INSERT, UPDATE, DELETE ON bootstrap_account, app_settings, \
@@ -160,6 +163,8 @@ GRANT SELECT ON reconcile_findings TO {backend}, {worker};
 GRANT INSERT, DELETE ON reconcile_findings TO {worker};
 GRANT SELECT ON worker_status TO {backend}, {worker};
 GRANT INSERT, UPDATE ON worker_status TO {worker};
+GRANT SELECT ON operational_settings TO {backend}, {worker};
+GRANT UPDATE (value, updated_at, updated_by) ON operational_settings TO {backend};
 ";
 
 const IDENTITY_OPERATOR_COLUMNS: &str = "given_name, surname, employee_number, mobile_phone, \

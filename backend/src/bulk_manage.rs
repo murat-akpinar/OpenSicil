@@ -342,6 +342,10 @@ async fn diff_running(pool: &PgPool, target: i64) -> Result<bool, sqlx::Error> {
 }
 
 async fn render_page(state: &AppState, op: &Operator, target: i64, notice: Notice) -> Response {
+    let threshold = match crate::change_set::threshold(&state.pool).await {
+        Ok(t) => t,
+        Err(e) => return internal("değişiklik seti eşiği okunamadı", e),
+    };
     let loaded = tokio::try_join!(
         target_name(&state.pool, target),
         load(&state.pool, target),
@@ -358,7 +362,7 @@ async fn render_page(state: &AppState, op: &Operator, target: i64, notice: Notic
             rows,
             pending,
             can_manage: allowed(op, AUTHORITIES),
-            threshold: state.change_set_threshold,
+            threshold,
             diff_running,
         }),
         Ok((None, ..)) => StatusCode::NOT_FOUND.into_response(),
@@ -422,8 +426,12 @@ async fn submit(
         Ok(rows) => rows,
         Err(e) => return internal("gözlem bağlantıları okunamadı", e),
     };
+    let threshold = match crate::change_set::threshold(&state.pool).await {
+        Ok(t) => t,
+        Err(e) => return internal("değişiklik seti eşiği okunamadı", e),
+    };
     let affected = affected(&rows, &ids);
-    if affected > state.change_set_threshold {
+    if affected > threshold {
         let by = (op.subject.as_str(), op.username.as_str());
         let id = match stage(&state.pool, target, &ids, affected, by).await {
             Ok(id) => id,
@@ -698,8 +706,8 @@ mod tests {
         assert_eq!(cov.len(), 1, "yalnizca hesabi olan hedef listelenir");
         assert_eq!((cov[0].managed, cov[0].observed, cov[0].total()), (0, 2, 2));
 
-        let mut state = crate::web::test_state(pool.clone(), "https://localhost");
-        state.change_set_threshold = 1;
+        crate::test_support::set_threshold(&pool, 1).await;
+        let state = crate::web::test_state(pool.clone(), "https://localhost");
         let app = crate::web::routes().with_state(state);
         let session = |subject: &'static str, authority: &'static str| {
             let pool = pool.clone();

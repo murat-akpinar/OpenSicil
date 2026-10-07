@@ -37,7 +37,6 @@ struct Config {
     blind_index_key: [u8; crate::crypto::KEY_LEN],
     public_url: String,
     time_zone: String,
-    change_set_threshold: usize,
     metrics_token: String,
 }
 
@@ -61,7 +60,6 @@ fn load_config() -> Result<Config, String> {
         blind_index_key,
         public_url,
         time_zone: common.time_zone,
-        change_set_threshold: crate::change_set::threshold_from_env()?,
         metrics_token,
     })
 }
@@ -80,7 +78,6 @@ async fn startup() -> Result<AppState, String> {
         blind_index_key: c.blind_index_key,
         public_url: c.public_url,
         time_zone: c.time_zone,
-        change_set_threshold: c.change_set_threshold,
         metrics_token: c.metrics_token,
     })
 }
@@ -163,7 +160,6 @@ mod tests {
             blind_index_key: [0u8; crate::crypto::KEY_LEN],
             public_url: "https://localhost".to_string(),
             time_zone: "Europe/Istanbul".to_string(),
-            change_set_threshold: crate::change_set::DEFAULT_THRESHOLD,
             metrics_token: String::new(),
         }
     }

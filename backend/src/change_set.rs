@@ -60,19 +60,25 @@ impl Impact {
 /// docs/09 boyutlandirma: kucuk kurum varsayilani. Orta ve buyuk kurum yukseltir.
 pub const DEFAULT_THRESHOLD: usize = 10;
 
-/// ADR-031: esik backend'in kendi ortam degiskenidir ve mutlak sayidir.
-/// Verilmezse varsayilan; 0 her duzenlemeyi onaya dusurur ve gecerlidir.
-pub fn threshold_from_env() -> Result<usize, String> {
-    env_number("CHANGE_SET_THRESHOLD", DEFAULT_THRESHOLD)
+pub const THRESHOLD_KEY: &str = "CHANGE_SET_THRESHOLD";
+
+/// ADR-031: esik mutlak sayidir; ADR-131: yeri isletme ayarlari tablosu, her
+/// istekte okunur. Satir yoksa varsayilan; 0 her duzenlemeyi onaya dusurur ve gecerlidir.
+pub fn threshold_from_lookup(lookup: impl Fn(&str) -> Option<String>) -> Result<usize, String> {
+    lookup(THRESHOLD_KEY).map_or(Ok(DEFAULT_THRESHOLD), |raw| parse_threshold(&raw))
 }
 
-fn env_number<T: std::str::FromStr>(name: &'static str, default: T) -> Result<T, String> {
-    let Ok(raw) = std::env::var(name) else {
-        return Ok(default);
-    };
+pub fn parse_threshold(raw: &str) -> Result<usize, String> {
     raw.trim()
         .parse()
-        .map_err(|_| format!("{name} tam sayı olmalı, '{raw}' geldi"))
+        .map_err(|_| format!("{THRESHOLD_KEY} tam sayı olmalı, '{raw}' geldi"))
+}
+
+pub async fn threshold(pool: &PgPool) -> Result<usize, String> {
+    let map = crate::common_settings::load_operational(pool)
+        .await
+        .map_err(|e| format!("işletme ayarları okunamadı: {e}"))?;
+    threshold_from_lookup(|name| map.get(name).cloned())
 }
 
 pub async fn preview(

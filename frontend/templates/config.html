@@ -18,6 +18,7 @@
       <a href="#ad">Active Directory</a>
       <a href="#zimbra">Zimbra</a>
       <a href="#oidc">OIDC</a>
+      {% if let Some(ops) = ops %}<a href="#limits">{{ lang.t("config.limits") }}</a>{% endif %}
     </nav>
 
     <div class="stack">
@@ -94,6 +95,29 @@
           </div>
         </div>
       </section>
+
+      {# ADR-131: işletme ayarları ayrı formla kaydedilir (alanlar `form=` ile ona
+         bağlı, bağlantı formuna karışmaz); yerel bootstrap hesabı bu bölümü görmez.
+         Anahtar adı ipucu: eski notlardaki değişken adı aranabilir kalsın. #}
+      {% if let Some(ops) = ops %}
+      <section class="card" id="limits">
+        <div class="card-head">
+          <span class="ico-tile"><i class="ico ico-shield" aria-hidden="true"></i></span>
+          <h2 class="h2">{{ lang.t("config.limits") }}</h2>
+        </div>
+        <div class="field-grid">
+          <div>
+            <label class="label" for="CHANGE_SET_THRESHOLD">{{ lang.t("config.change_set_threshold") }}</label>
+            <input class="input" type="text" inputmode="numeric" id="CHANGE_SET_THRESHOLD" name="CHANGE_SET_THRESHOLD" form="ops-form" value="{{ ops.value("CHANGE_SET_THRESHOLD") }}"{% if !ops.error("CHANGE_SET_THRESHOLD").is_empty() %} aria-invalid="true" aria-describedby="CHANGE_SET_THRESHOLD-err"{% endif %}>
+            {% if !ops.error("CHANGE_SET_THRESHOLD").is_empty() %}<div class="alert alert-err mt-2" id="CHANGE_SET_THRESHOLD-err" role="alert">{{ ops.error("CHANGE_SET_THRESHOLD") }}</div>{% endif %}
+            <span class="hint">{{ lang.t("config.change_set_threshold_hint") }} <code>CHANGE_SET_THRESHOLD</code></span>
+          </div>
+        </div>
+        <div class="mt-4 flex justify-end">
+          <button class="btn btn-primary" type="submit" form="ops-form">{{ lang.t("common.save") }}</button>
+        </div>
+      </section>
+      {% endif %}
     </div>
   </div>
 
@@ -103,4 +127,5 @@
     <button class="btn btn-primary" type="submit">{{ lang.t("common.save") }}</button>
   </div>
 </form>
+{% if let Some(ops) = ops %}<form id="ops-form" method="post" action="/config/operational"></form>{% endif %}
 {% endblock %}

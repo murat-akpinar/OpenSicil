@@ -1512,7 +1512,7 @@ async fn parse_and_plan(
     state: &AppState,
     op: &Operator,
     csv: &str,
-) -> Result<(Table, Plan), Box<Response>> {
+) -> Result<(Table, Plan, usize), Box<Response>> {
     let table = match parse(csv) {
         Ok(table) => table,
         Err(problem) => {
@@ -1521,26 +1521,25 @@ async fn parse_and_plan(
             return Err(Box::new(page));
         }
     };
+    let threshold = crate::change_set::threshold(&state.pool)
+        .await
+        .map_err(|e| Box::new(internal("değişiklik seti eşiği okunamadı", e)))?;
     match plan(&state.pool, &keys_of(state), ownership_enabled(), &table).await {
-        Ok(plan) => Ok((table, plan)),
+        Ok(plan) => Ok((table, plan, threshold)),
         Err(e) => Err(Box::new(internal("içe aktarma planlanamadı", e))),
     }
 }
 
 fn render_preview(
-    state: &AppState,
     op: &Operator,
     csv: String,
-    plan: Plan,
+    (plan, threshold): (Plan, usize),
     notice: Notice,
 ) -> Response {
-    let will_stage = plan.affected() > state.change_set_threshold;
+    let will_stage = plan.affected() > threshold;
     let stage_text = op.lang.tn(
         "import.will_stage",
-        &[
-            &plan.affected().to_string(),
-            &state.change_set_threshold.to_string(),
-        ],
+        &[&plan.affected().to_string(), &threshold.to_string()],
     );
     render(&PreviewTemplate {
         lang: op.lang,
@@ -1566,7 +1565,9 @@ async fn preview(
         return forbidden(op.lang);
     }
     match parse_and_plan(&state, &op, &form.csv).await {
-        Ok((_, plan)) => render_preview(&state, &op, form.csv, plan, Notice::default()),
+        Ok((_, plan, threshold)) => {
+            render_preview(&op, form.csv, (plan, threshold), Notice::default())
+        }
         Err(response) => *response,
     }
 }
@@ -1581,7 +1582,7 @@ async fn upload(
     if !allowed(&op, AUTHORITIES) {
         return forbidden(op.lang);
     }
-    let (table, plan) = match parse_and_plan(&state, &op, &form.csv).await {
+    let (table, plan, threshold) = match parse_and_plan(&state, &op, &form.csv).await {
         Ok(parsed) => parsed,
         Err(response) => return *response,
     };
@@ -1591,9 +1592,9 @@ async fn upload(
     };
     if let Some(key) = blocking_key(&plan, confirmed) {
         let notice = Notice::err(op.lang.t(key).to_string());
-        return render_preview(&state, &op, form.csv, plan, notice);
+        return render_preview(&op, form.csv, (plan, threshold), notice);
     }
-    if plan.affected() > state.change_set_threshold {
+    if plan.affected() > threshold {
         let by = (op.subject.as_str(), op.username.as_str(), confirmed);
         let id = match stage(&state.pool, &state.aead_key, &table, plan.affected(), by).await {
             Ok(id) => id,
@@ -2259,8 +2260,8 @@ mod tests {
 
         let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
         seed(&pool).await;
-        let mut state = crate::web::test_state(pool.clone(), "https://localhost");
-        state.change_set_threshold = 1;
+        crate::test_support::set_threshold(&pool, 1).await;
+        let state = crate::web::test_state(pool.clone(), "https://localhost");
         let app = crate::web::routes().with_state(state);
         let session = |subject: &'static str, authority: &'static str| {
             let pool = pool.clone();

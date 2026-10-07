@@ -191,4 +191,5 @@
 - Yönetici AD'den geri dolar, elle girmek gerekmez
 - Raporlar hesap kapsamını gösterir ve toplu yönetime almaya bağlar
 - Eşiği aşan işi başlatan kendi onaylar, ikinci yönetici şartı kalkar
+- Işletme ayarları tablosu doğar, değişiklik seti eşiği Ayarlar ekranından verilir
 

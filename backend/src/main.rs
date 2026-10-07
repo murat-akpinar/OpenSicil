@@ -36,6 +36,7 @@ mod migrate;
 mod national_id;
 mod normalize;
 mod oidc;
+mod operational_settings;
 mod operator_guard;
 mod operator_session;
 mod org;

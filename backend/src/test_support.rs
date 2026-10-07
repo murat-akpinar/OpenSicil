@@ -217,3 +217,12 @@ pub async fn fresh_migrated_db() -> (PgPool, PgPool, String) {
 
     (admin_pool, pool, db_name)
 }
+
+// ADR-131: esik isletme ayarlari tablosundan okunur; testler satiri gunceller.
+pub async fn set_threshold(pool: &PgPool, value: usize) {
+    sqlx::query("UPDATE operational_settings SET value = $1 WHERE key = 'CHANGE_SET_THRESHOLD'")
+        .bind(value.to_string())
+        .execute(pool)
+        .await
+        .expect("eşik yazılamadı");
+}
