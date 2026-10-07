@@ -21,7 +21,7 @@ flowchart LR
     berat -->|"AD grubuna göre izin"| apps["Uygulamalar"]
 ```
 
-OpenSicil uygulamalara doğrudan dokunmaz. Uygulama erişimi AD grubu üzerinden verilir ([ADR-008](decisions/008-uygulama-yetkileri-ad-gruplari.md)). OpenBerat bu desenin bir örneğidir, ön koşulu değildir.
+OpenSicil uygulamalara doğrudan dokunmaz. Uygulama erişimi AD grubu üzerinden verilir (ADR-008). OpenBerat bu desenin bir örneğidir, ön koşulu değildir.
 
 ## Bileşenler
 
@@ -32,9 +32,9 @@ OpenSicil uygulamalara doğrudan dokunmaz. Uygulama erişimi AD grubu üzerinden
 | **worker** | Olması gereken durumu hesaplar, farkı bulur, connector'larla uygular, zamanlanmış işleri çalıştırır | Gelen bağlantı yok. Sadece veritabanına, AD'ye ve Zimbra'ya giden bağlantı |
 | **db** | PostgreSQL: kimlikler, roller, katalog, iş kuyruğu, denetim kaydı | Sadece backend ve worker |
 
-Stack: Rust (axum + sqlx) ve PostgreSQL ([ADR-003](decisions/003-stack-rust-postgresql.md)). Backend ve worker aynı kod tabanından iki ayrı container olarak çalışır ([ADR-004](decisions/004-mimari-web-ve-worker.md)). Frontend yaklaşımı kurulumda kararlaştırılır.
+Stack: Rust (axum + sqlx) ve PostgreSQL (ADR-003). Backend ve worker aynı kod tabanından iki ayrı container olarak çalışır (ADR-004). Frontend yaklaşımı kurulumda kararlaştırılır.
 
-**Neden iki container:** AD'de hesap açıp gruba ekleyebilen sırlar kurumun en değerli sırlarındandır. İnternete bakan bileşen bunları hiç görmezse, backend ele geçirildiğinde saldırgan en fazla veritabanına "niyet" yazabilir. Hesap bağlantısı ve katalog gibi worker'ın gerçeklerine yazamaz ([ADR-015](decisions/015-veritabani-rolleri.md)). Worker bu niyeti kendi sınırlarıyla kontrol eder ([ADR-014](decisions/014-yonetim-kapsami-ve-toplu-degisiklik-freni.md)).
+**Neden iki container:** AD'de hesap açıp gruba ekleyebilen sırlar kurumun en değerli sırlarındandır. İnternete bakan bileşen bunları hiç görmezse, backend ele geçirildiğinde saldırgan en fazla veritabanına "niyet" yazabilir. Hesap bağlantısı ve katalog gibi worker'ın gerçeklerine yazamaz (ADR-015). Worker bu niyeti kendi sınırlarıyla kontrol eder (ADR-014).
 
 ## Veri akışı
 
@@ -77,37 +77,37 @@ Worker bir kimlik için her çalıştığında aynı üç adımı izler:
 2. Hedef sistemden gerçek durumu oku.
 3. Farkı işlemlere çevir ve uygula.
 
-Olaylar yalnızca girdiyi değiştirir: işe giriş başlangıç tarihini, ayrılış bitiş anını, askı iki tarihi ([ADR-053](decisions/053-tarihli-aski.md)), rol değişikliği rol listesini; durum bunlardan türetilir, saklanmaz ([ADR-038](decisions/038-kimlik-durumu-turetilir.md)). Yeni bir olay türü ya da yeni bir hedef sistem eklemek bu yüzden işi katlamaz. Aynı iş iki kez çalışırsa ikincisi fark bulamaz ve hiçbir şey yapmaz. Mutabakat raporu da aynı hesaplamayı kullanır ([docs/04](04-yasam-dongusu.md)).
+Olaylar yalnızca girdiyi değiştirir: işe giriş başlangıç tarihini, ayrılış bitiş anını, askı iki tarihi (ADR-053), rol değişikliği rol listesini; durum bunlardan türetilir, saklanmaz (ADR-038). Yeni bir olay türü ya da yeni bir hedef sistem eklemek bu yüzden işi katlamaz. Aynı iş iki kez çalışırsa ikincisi fark bulamaz ve hiçbir şey yapmaz. Mutabakat raporu da aynı hesaplamayı kullanır ([docs/04](04-yasam-dongusu.md)).
 
-Tek istisna etkinleştirmedir: motor hesabı yalnızca kimlik durumu geçiş yaptığında açar; hedefte elle pasifleştirilmiş bir hesabı sapma diye geri açmaz ([ADR-032](decisions/032-elle-pasiflestirme-korunur.md)).
+Tek istisna etkinleştirmedir: motor hesabı yalnızca kimlik durumu geçiş yaptığında açar; hedefte elle pasifleştirilmiş bir hesabı sapma diye geri açmaz (ADR-032).
 
-Hesaplanamayan bileşen **belirsiz**dir ve dokunulmaz: rolün "hesap açılsın = hayır" demesi mevcut hesabı silmez, hedefte bulunamayan bağlı hesap yeniden açılmaz, bu hedefte hesabı olmayan yöneticinin `manager` özniteliği temizlenmez. Diğer bileşenler uygulanır, mutabakat bilgi bulgusu yazar ([ADR-040](decisions/040-motor-belirsiz-degere-dokunmaz.md)).
+Hesaplanamayan bileşen **belirsiz**dir ve dokunulmaz: rolün "hesap açılsın = hayır" demesi mevcut hesabı silmez, hedefte bulunamayan bağlı hesap yeniden açılmaz, bu hedefte hesabı olmayan yöneticinin `manager` özniteliği temizlenmez. Diğer bileşenler uygulanır, mutabakat bilgi bulgusu yazar (ADR-040).
 
 ## İş kuyruğu
 
-- Kuyruk ayrı bir servis değildir, PostgreSQL'de bir tablodur. Worker işi satır kilidiyle (`SKIP LOCKED`) ve **5 dakikalık kirayla** alır; iş boyunca transaction açık tutulmaz. Worker iş ortasında ölürse kira dolar, iş deneme hakkı azalmadan yeniden alınır; ikinci bir worker çalışsa bile aynı iş iki kez alınmaz ([ADR-062](decisions/062-is-kirasi-ve-yarida-kalan-is.md)).
+- Kuyruk ayrı bir servis değildir, PostgreSQL'de bir tablodur. Worker işi satır kilidiyle (`SKIP LOCKED`) ve **5 dakikalık kirayla** alır; iş boyunca transaction açık tutulmaz. Worker iş ortasında ölürse kira dolar, iş deneme hakkı azalmadan yeniden alınır; ikinci bir worker çalışsa bile aynı iş iki kez alınmaz (ADR-062).
 - İş, **kimlik bazındadır**: "bu kimliği şu hedef sistemde olması gereken duruma getir". "Şu gruba ekle" gibi tek adımlık işler kuyruğa yazılmaz. Böylece sıra karışsa bile son çalışan iş doğru sonucu üretir.
-- **Tekilleştirme:** Aynı kimlik ve hedef sistem için bekleyen iş varken yenisi açılmaz. Temel rol iki kez düzenlenirse kuyruk iki katına çıkmaz. Onay bekleyen değişiklik seti için iş açılmaz; taslak yayımlanınca açılır ([ADR-031](decisions/031-degisiklik-seti-sahneleme.md)).
+- **Tekilleştirme:** Aynı kimlik ve hedef sistem için bekleyen iş varken yenisi açılmaz. Temel rol iki kez düzenlenirse kuyruk iki katına çıkmaz. Onay bekleyen değişiklik seti için iş açılmaz; taslak yayımlanınca açılır (ADR-031).
 - **Öncelik:** acil ayrılış > tek kimlik işlemi > toplu değişiklik seti > mutabakat. 2.000 kimliklik bir rol değişikliği sürerken o gün işe başlayan kişinin işi beklemez.
-- Worker iki şeritlidir. **Yazma şeridi** kimlik işlerini **tek sırada** çalıştırır; saatlik sayaçlar bu yüzden yarışsızdır. **Okuma şeridi** (mutabakat, katalog yenileme, toplu yönetime almanın fark hesabı) ayrı bir görevde çalışır, hedefe yazmaz, sayaca dokunmaz; 30 dakikalık bir mutabakat acil ayrılışı bekletmez. v1'de eşzamanlılık ayarı yoktur; N-03 ölçümü (2026-10-02, lab Samba'da 20.000 hesap) tek sıranın yettiğini gösterdi — 2.000 kimliklik set 5 dk, mutabakat 8 sn, set sürerken tek kimlik işi 1 sn — ve ayar açılmadı ([ADR-047](decisions/047-worker-tek-sirada.md), [ADR-051](decisions/051-okuma-seridi.md), [ADR-108](decisions/108-n03-olcumu-tek-sira-yetti.md)).
-- **Önce yaz, sonra uygula:** her connector yazma işleminden önce denetim tablosuna niyet satırı eklenir ve kira uzatılır (tek transaction). Satır yazılamıyorsa hedefe dokunulmaz; saatlik sayaçlar niyet satırlarını sayar ([ADR-062](decisions/062-is-kirasi-ve-yarida-kalan-is.md)).
-- Bir iş saatlik sayaçlara karşı **bütündür**: gereken sayaçlardan biri doluysa hiçbir işlem uygulamadan bekler. İş içinde pasifleştirme ilk adımdır; üyeliklerde önce ekleme, sonra çıkarma yapılır ([ADR-050](decisions/050-verme-sayaci-ve-is-butunlugu.md)).
-- Başarısız iş artan aralıklarla tekrar denenir. Deneme hakkı bitince iş "müdahale gerekiyor" durumuna geçer ve operatör "tekrar dene" diyebilir. Farkı uygulayamayan iş (kapsam dışına taşınmış hesap) de müdahaleye düşer; tekilleştirme ve zamanlayıcı müdahaledeki işi **açık** sayar, her tikte yenisini açmaz. Bağlantı düzeyi hata (hedef erişilemiyor) deneme hakkı tüketmez: worker o hedefin işlerini bekletir, bağlantı gelince kaldığı yerden sürdürür ([ADR-052](decisions/052-uygulanamayan-fark.md)).
-- **Kuru çalıştırma:** worker ayarı açıkken connector'ların yazma çağrıları tek noktada kesilir; işler farkı "uygulanacaktı" diye yazar, hedefe ve `applied_state`'e dokunulmaz. İlk kurulum, sürüm yükseltme, yedekten dönüş ve hedef bakım penceresi içindir ([ADR-054](decisions/054-kuru-calistirma-ve-yedekten-donus.md)).
-- Worker kuyruğu 5 saniyede bir yoklar (ayar); ayrı bildirim mekanizması yoktur ([ADR-028](decisions/028-worker-zamanlamasi.md)).
-- Zamanlanmış geçişler (başlangıç ve bitiş tarihleri, ek rol bitişi, saklama süresi, gece mutabakatı) worker içindeki bir zamanlayıcıdan kuyruğa yazılır. Zamanlayıcı olay değil sorgu çalıştırır: her tikte türetilen bilgiyi (durum, süresi dolan ek rol, saklama ve parola pencereleri) hesap bağlantısındaki uygulanan bilgiyle karşılaştırır ve fark için iş açar; worker kapalı kaldıysa kaçırılanlar bir sonraki tikte hepsi birden yakalanır ([ADR-028](decisions/028-worker-zamanlamasi.md), [ADR-038](decisions/038-kimlik-durumu-turetilir.md)).
-- Kuyruk tablosunda düz metin parola ya da kimlik numarası **hiç bulunmaz**; ilk parola şifreli olarak en fazla 10 dakika durur ([ADR-009](decisions/009-parola-yonetimi.md), [ADR-010](decisions/010-kisisel-veri-kimlik-no-telefon.md), [ADR-036](decisions/036-ilk-parola-aead.md)).
+- Worker iki şeritlidir. **Yazma şeridi** kimlik işlerini **tek sırada** çalıştırır; saatlik sayaçlar bu yüzden yarışsızdır. **Okuma şeridi** (mutabakat, katalog yenileme, toplu yönetime almanın fark hesabı) ayrı bir görevde çalışır, hedefe yazmaz, sayaca dokunmaz; 30 dakikalık bir mutabakat acil ayrılışı bekletmez. Okuma işi de aynı 5 dakikalık kirayla alınır ve tarama sürerken kira uzar; worker iş ortasında ölürse satır sonsuza dek "çalışıyor" kalmaz, geri alınır ("yarıda kaldı") ve o tür + hedef için yeni iş açılabilir — yoksa kısmi tekil indeks gece mutabakatını sessizce düşürürdü (ADR-062). v1'de eşzamanlılık ayarı yoktur; N-03 ölçümü (2026-10-02, lab Samba'da 20.000 hesap) tek sıranın yettiğini gösterdi — 2.000 kimliklik set 5 dk, mutabakat 8 sn, set sürerken tek kimlik işi 1 sn — ve ayar açılmadı (ADR-047, ADR-051, ADR-108).
+- **Önce yaz, sonra uygula:** her connector yazma işleminden önce denetim tablosuna niyet satırı eklenir ve kira uzatılır (tek transaction). Satır yazılamıyorsa hedefe dokunulmaz; saatlik sayaçlar niyet satırlarını sayar (ADR-062).
+- Bir iş saatlik sayaçlara karşı **bütündür**: gereken sayaçlardan biri doluysa hiçbir işlem uygulamadan bekler. İş içinde pasifleştirme ilk adımdır; üyeliklerde önce ekleme, sonra çıkarma yapılır (ADR-050).
+- Başarısız iş artan aralıklarla tekrar denenir. Deneme hakkı bitince iş "müdahale gerekiyor" durumuna geçer ve operatör "tekrar dene" diyebilir. Farkı uygulayamayan iş (kapsam dışına taşınmış hesap) de müdahaleye düşer; tekilleştirme ve zamanlayıcı müdahaledeki işi **açık** sayar, her tikte yenisini açmaz. Bağlantı düzeyi hata (hedef erişilemiyor) deneme hakkı tüketmez: worker o hedefin işlerini bekletir, bağlantı gelince kaldığı yerden sürdürür (ADR-052).
+- **Kuru çalıştırma:** worker ayarı açıkken connector'ların yazma çağrıları tek noktada kesilir; işler farkı "uygulanacaktı" diye yazar, hedefe ve `applied_state`'e dokunulmaz. İlk kurulum, sürüm yükseltme, yedekten dönüş ve hedef bakım penceresi içindir (ADR-054).
+- Worker kuyruğu 5 saniyede bir yoklar (ayar); ayrı bildirim mekanizması yoktur (ADR-028).
+- Zamanlanmış geçişler (başlangıç ve bitiş tarihleri, ek rol bitişi, saklama süresi, gece mutabakatı) worker içindeki bir zamanlayıcıdan kuyruğa yazılır. Zamanlayıcı olay değil sorgu çalıştırır: her tikte türetilen bilgiyi (durum, süresi dolan ek rol, saklama ve parola pencereleri) hesap bağlantısındaki uygulanan bilgiyle karşılaştırır ve fark için iş açar; worker kapalı kaldıysa kaçırılanlar bir sonraki tikte hepsi birden yakalanır (ADR-028, ADR-038).
+- Kuyruk tablosunda düz metin parola ya da kimlik numarası **hiç bulunmaz**; ilk parola şifreli olarak en fazla 10 dakika durur (ADR-009, ADR-010, ADR-036).
 
 ## Ölçek ve dağıtım
 
-Hedef ölçek ve gerekçeler: [ADR-016](decisions/016-hedef-olcek-ve-olcekte-calisma.md).
+Hedef ölçek ve gerekçeler: ADR-016.
 
 - Backend ve worker'ın ortak noktası yalnızca PostgreSQL'dir. Ayrı host'larda ve ağ bölgelerinde çalışabilirler: backend kullanıcıya yakın bölgede, worker DC'lere ve Zimbra admin portuna erişen yönetim bölgesinde. PostgreSQL kurumun mevcut kümesi olabilir.
-- **Dağıtım:** tek host `docker compose` referanstır; iki sunuculu düzenler (uygulama + veritabanı; ön yüz + worker) ve Kubernetes aynı imajlarla desteklenir. Ürün chart ya da manifest yayımlamaz; ortamdan bağımsız bir süreç sözleşmesi verir (SIGTERM'de elindeki işi bitirme, portsuz worker için `worker-health` komutu, sıra varsaymayan başlangıç, tek seferlik migration container'ı, süreç içinde durum olmaması, tek `compose.yaml`'dan servis alt kümesi, uzak PostgreSQL'e TLS, token'lı metrik ucu) ve [docs/09](09-kurulum.md#dağıtım-biçimleri) compose → Kubernetes eşlemesini yazar ([ADR-061](decisions/061-dagitim-sozlesmesi-compose-ve-kubernetes.md)).
-- v1 tek worker ile teslim edilir (Kubernetes'te `replicas: 1`, `strategy: Recreate`). İkinci worker'ı güvenli kılan kurallar baştan uygulanır: işler kirayla alınır, zamanlayıcı PostgreSQL advisory lock (transaction düzeyi) ile tekildir, fren sayaçları veritabanından hesaplanır. İki worker kısa süre birlikte çalışırsa tek kayıp saatlik sayacın en fazla bir iş aşılmasıdır ([ADR-062](decisions/062-is-kirasi-ve-yarida-kalan-is.md)). **Worker'ı çoğaltmak hız kazandırmaz:** hızın sınırı tek sıra ve saatlik sayaçlardır, ikisi de bilerek konmuştur.
-- Backend v1'de tek kopyayla test edilir (N-05); çoğaltılmasını engelleyen bir durum yoktur: ilk parola bellekte durmaz ([ADR-036](decisions/036-ilk-parola-aead.md)), oturum ve OIDC `state` de durmaz ([ADR-061](decisions/061-dagitim-sozlesmesi-compose-ve-kubernetes.md)).
-- Toplu yönetime almada ve mutabakatta gerçek durum kimlik kimlik değil, yönetilen kapsamın tek sayfalı aramasıyla okunur. Değişiklik seti eşiği hedef sistemi okumaz; model farkından hesaplanır ([ADR-031](decisions/031-degisiklik-seti-sahneleme.md)).
-- Backend bir metrik ucu sunar (**ayrılmış ama kapatılamamış bağlantı sayısı** — alarm önce buna kurulur, [ADR-052](decisions/052-uygulanamayan-fark.md); bekleyen ve müdahale gereken işler, fren doluluğu, son mutabakat, kuru çalıştırma bayrağı, hedef sistem başına son başarılı bağlantı zamanı; süresi dolan servis hesabı parolası ya da CA sertifikası worker'ı sessizce durdurur, alarm buradan kurulur). Alarmı kurumun kendi izleme sistemi üretir; bildirim altyapısı v2'dedir.
+- **Dağıtım:** tek host `docker compose` referanstır; iki sunuculu düzenler (uygulama + veritabanı; ön yüz + worker) ve Kubernetes aynı imajlarla desteklenir. Ürün chart ya da manifest yayımlamaz; ortamdan bağımsız bir süreç sözleşmesi verir (SIGTERM'de elindeki işi bitirme, portsuz worker için `worker-health` komutu, sıra varsaymayan başlangıç, tek seferlik migration container'ı, süreç içinde durum olmaması, tek `compose.yaml`'dan servis alt kümesi, uzak PostgreSQL'e TLS, token'lı metrik ucu) ve [docs/09](09-kurulum.md#dağıtım-biçimleri) compose → Kubernetes eşlemesini yazar (ADR-061).
+- v1 tek worker ile teslim edilir (Kubernetes'te `replicas: 1`, `strategy: Recreate`). İkinci worker'ı güvenli kılan kurallar baştan uygulanır: işler kirayla alınır, zamanlayıcı PostgreSQL advisory lock (transaction düzeyi) ile tekildir, fren sayaçları veritabanından hesaplanır. İki worker kısa süre birlikte çalışırsa tek kayıp saatlik sayacın en fazla bir iş aşılmasıdır (ADR-062). **Worker'ı çoğaltmak hız kazandırmaz:** hızın sınırı tek sıra ve saatlik sayaçlardır, ikisi de bilerek konmuştur.
+- Backend v1'de tek kopyayla test edilir (N-05); çoğaltılmasını engelleyen bir durum yoktur: ilk parola bellekte durmaz (ADR-036), oturum ve OIDC `state` de durmaz (ADR-061).
+- Toplu yönetime almada ve mutabakatta gerçek durum kimlik kimlik değil, yönetilen kapsamın tek sayfalı aramasıyla okunur. Değişiklik seti eşiği hedef sistemi okumaz; model farkından hesaplanır (ADR-031).
+- Backend bir metrik ucu sunar (**ayrılmış ama kapatılamamış bağlantı sayısı** — alarm önce buna kurulur, ADR-052; bekleyen ve müdahale gereken işler, fren doluluğu, son mutabakat, kuru çalıştırma bayrağı, hedef sistem başına son başarılı bağlantı zamanı; süresi dolan servis hesabı parolası ya da CA sertifikası worker'ı sessizce durdurur, alarm buradan kurulur). Alarmı kurumun kendi izleme sistemi üretir; bildirim altyapısı v2'dedir.
 
 ## Connector sözleşmesi
 
@@ -157,6 +157,6 @@ Bunlar ihtiyaç kanıtlanınca eklenir. Önceden yazılırsa sadece bakım yük�
 
 - Ayrı bir mesaj kuyruğu servisi (RabbitMQ, Kafka). Kuyruk PostgreSQL'de.
 - Eklenti yükleme altyapısı. Connector'lar kodun içinde.
-- Genel amaçlı kural/ifade dili veya betik çalıştırma. Öznitelik eşleme sabit dönüşümlerle yapılır ([ADR-012](decisions/012-oznitelik-esleme.md)).
+- Genel amaçlı kural/ifade dili veya betik çalıştırma. Öznitelik eşleme sabit dönüşümlerle yapılır (ADR-012).
 - İş akışı (BPMN) motoru. v1'deki tek onay adımı toplu değişiklik frenidir.
 - Kendi IdP'miz veya parola kasası.

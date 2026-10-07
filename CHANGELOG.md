@@ -37,6 +37,7 @@
 - Todo.md sıraya girdi, açık kutucuklar yapılış sırasında
 - Iki kutucuğun doğrulaması çalışan yığında gerçek sahiplenmeyle tamamlandı
 - Işletme ayarları yapılandırma ekranına taşınır kararı ve kutucukları
+- ADR bağlantıları düz metne iner, depoda olmayan dosyaya link kalmaz
 
 ### Düzeltmeler
 

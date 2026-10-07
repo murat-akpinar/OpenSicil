@@ -18,7 +18,7 @@ OpenSicil bir **IGA** ürünüdür: kişinin kurumdaki yaşam döngüsünü (iş
 |---|---|
 | **JML** (Joiner–Mover–Leaver) | İşe giriş, görev/departman değişikliği ve ayrılış süreçlerinin toplu adı |
 | **Identity Lifecycle Management** | JML'in kimlik kaydı üzerinden, tarih ve duruma bağlı olarak yönetilmesi |
-| **Authoritative source** | Kimlik verisinin doğru kabul edildiği kaynak. Büyük şirketlerde İK sistemi; OpenSicil v1'de kendi kişi kaydı, CSV ile beslenebilir ([ADR-018](decisions/018-ice-aktarma-ve-sahiplenme.md)) |
+| **Authoritative source** | Kimlik verisinin doğru kabul edildiği kaynak. Büyük şirketlerde İK sistemi; OpenSicil v1'de kendi kişi kaydı, CSV ile beslenebilir (ADR-018) |
 | **Provisioning** | Hedef sistemde hesap açmak ve yetki vermek |
 | **Deprovisioning** | Hesabı kapatmak ve yetkiyi almak. En çok atlanan ve güvenlik açısından en kritik kısım |
 | **Birthright access** | Kişinin sadece işe girdiği ve rolü nedeniyle otomatik aldığı yetkiler |
@@ -30,7 +30,7 @@ OpenSicil bir **IGA** ürünüdür: kişinin kurumdaki yaşam döngüsünü (iş
 
 | Terim | Anlamı | OpenSicil'de |
 |---|---|---|
-| **RBAC** | Yetkilerin kişiye değil role bağlanması | Çekirdek model ([ADR-007](decisions/007-rol-modeli.md)) |
+| **RBAC** | Yetkilerin kişiye değil role bağlanması | Çekirdek model (ADR-007) |
 | **ABAC** | Departman, lokasyon, sözleşme tipi gibi özniteliklere göre yetki | Departman bazlı yetkiler bu fikrin sade hali |
 | **Business role** (iş rolü) | İş dilindeki görev: "Sistem Uzmanı" | Birincil ve ek roller |
 | **Entitlement** (yetki öğesi) | Hedef sistemdeki tek ve somut izin: bir AD grubu, bir mail listesi | Katalogdaki her kayıt |
@@ -59,7 +59,7 @@ OpenSicil bir **IGA** ürünüdür: kişinin kurumdaki yaşam döngüsünü (iş
 | Terim | Anlamı |
 |---|---|
 | **IdP** | Kimliği doğrulayan taraf (Keycloak, Entra ID) |
-| **OIDC** | OAuth2 üzerine kurulu kimlik protokolü. OpenSicil'in yönetim ekranı bununla giriş yapar ([ADR-005](decisions/005-yonetim-girisi-oidc.md)) |
+| **OIDC** | OAuth2 üzerine kurulu kimlik protokolü. OpenSicil'in yönetim ekranı bununla giriş yapar (ADR-005) |
 | **Groups claim** | IdP'nin token içine koyduğu grup listesi. OpenSicil yönetim yetkilerini buradan okur |
 | **LDAPS** | TLS üzerinden LDAP (port 636). AD connector sadece bununla konuşur |
 
