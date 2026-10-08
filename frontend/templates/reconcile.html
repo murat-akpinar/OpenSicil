@@ -97,6 +97,21 @@
 </section>
 {% endif %}
 
+{# ADR-112 madde 5: TC kimlik no gece kendiliğinden dolmaz (AEAD + blind index
+   backend'in işi); AD'de olup kimlikte boş olan varsa tek düğmeyle dolar. #}
+{% if national_id_pending > 0 && can_take %}
+<section class="card mb-6">
+  <div class="card-head">
+    <i class="ico ico-key card-icon" aria-hidden="true"></i>
+    <h2 class="h2">{{ lang.t("nid.title") }}</h2>
+  </div>
+  <p class="sub mt-0 mb-4">{{ lang.t1("nid.hint", national_id_pending) }}</p>
+  <form method="post" action="/targets/{{ target_id }}/reconcile/national-ids">
+    <button class="btn btn-primary" type="submit"><i class="ico ico-sign-in" aria-hidden="true"></i>{{ lang.t("nid.submit") }}</button>
+  </form>
+</section>
+{% endif %}
+
 {# Toplu sahiplenme: yonetilmeyen hesaplar secilip kimlige cevrilir.
    Hedefe yazma yok — baglantiyi worker `observed` modunda kurar. #}
 {% if can_adopt && !candidates.is_empty() %}

@@ -197,4 +197,5 @@
 - Ortak yedi ayar Ayarlar ekranından okunur, .env açılış kablolamasına iner
 - Mutabakat taraması saatleri Ayarlar ekranından virgüllü liste olarak verilir
 - Rol, departman, silme ve içe aktarma POST'ları sonucu yönlendirir, mesaj flash'tan basılır
+- TC kimlik no mutabakat ekranından AD'den toplu doldurulur, değer denetime girmez
 

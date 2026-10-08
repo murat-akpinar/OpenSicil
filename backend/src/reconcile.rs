@@ -192,7 +192,11 @@ pub fn routes() -> Router<AppState> {
         // --- END FEATURE: bulk-adoption ---
         // --- START FEATURE: ad-field-diff ---
         .route("/targets/{id}/reconcile/take-ad", post(take_ad))
-    // --- END FEATURE: ad-field-diff ---
+        // --- END FEATURE: ad-field-diff ---
+        .route(
+            "/targets/{id}/reconcile/national-ids",
+            post(fill_national_ids),
+        )
 }
 
 #[derive(Template)]
@@ -219,6 +223,8 @@ struct ReconcileTemplate {
     /// ADR-112 madde 2: "AD'de farkli" listesi; `auditor` gorur, alamaz
     ad_diffs: Vec<crate::ad_diff::Diff>,
     can_take: bool,
+    /// ADR-112 madde 5: TC kimlik no'su AD'de olup kimlikte bos kisi sayisi
+    national_id_pending: i64,
 }
 
 // --- START FEATURE: reconcile-hub ---
@@ -305,26 +311,30 @@ async fn render_page(
         crate::identity::today(&state.pool, &time_zone),
         crate::identity::placeholder_role_id(&state.pool),
         crate::ad_diff::list(&state.pool, target),
+        crate::national_id_fill::pending(&state.pool, target),
     );
     match loaded {
-        Ok((v, candidates, options, today, placeholder, ad_diffs)) => render(&ReconcileTemplate {
-            lang: op.lang,
-            shell: Shell::of(op),
-            target_id: target,
-            v,
-            notice,
-            can_scan: allowed(op, &SCAN_AUTHORITIES),
-            can_reapply: allowed(op, &REAPPLY_AUTHORITIES),
-            can_unlink: allowed(op, UNLINK_AUTHORITIES),
-            can_adopt: allowed(op, crate::bulk_adopt::AUTHORITIES),
-            candidates,
-            departments: options.departments,
-            roles: options.roles,
-            default_role: placeholder.map(|id| id.to_string()).unwrap_or_default(),
-            today,
-            ad_diffs,
-            can_take: allowed(op, crate::ad_diff::AUTHORITIES),
-        }),
+        Ok((v, candidates, options, today, placeholder, ad_diffs, national_id_pending)) => {
+            render(&ReconcileTemplate {
+                lang: op.lang,
+                shell: Shell::of(op),
+                target_id: target,
+                v,
+                notice,
+                can_scan: allowed(op, &SCAN_AUTHORITIES),
+                can_reapply: allowed(op, &REAPPLY_AUTHORITIES),
+                can_unlink: allowed(op, UNLINK_AUTHORITIES),
+                can_adopt: allowed(op, crate::bulk_adopt::AUTHORITIES),
+                candidates,
+                departments: options.departments,
+                roles: options.roles,
+                default_role: placeholder.map(|id| id.to_string()).unwrap_or_default(),
+                today,
+                ad_diffs,
+                can_take: allowed(op, crate::ad_diff::AUTHORITIES),
+                national_id_pending,
+            })
+        }
         Err(e) => internal("mutabakat bulguları okunamadı", e),
     }
 }
@@ -651,6 +661,48 @@ async fn take_ad(
         .redirect(&state.pool, &op, &page_path(id))
         .await
 }
+
+// --- START FEATURE: national-id-fill ---
+/// ADR-112 madde 5: AD'deki TC kimlik no bos kimliklere backend'de (AEAD + blind
+/// index) yazilir; denetime deger degil "dolduruldu" girer.
+async fn fill_national_ids(
+    OperatorSession(op): OperatorSession,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Response {
+    if !allowed(&op, crate::ad_diff::AUTHORITIES) {
+        return forbidden(op.lang);
+    }
+    let keys = crate::national_id::Keys {
+        aead: &state.aead_key,
+        blind_index: &state.blind_index_key,
+    };
+    let out = match crate::national_id_fill::fill(&state.pool, &keys, id).await {
+        Ok(out) => out,
+        Err(e) => return internal("TC kimlik no doldurulamadı", e),
+    };
+    for identity_id in &out.filled {
+        let detail = serde_json::json!({
+            "source": "ad", "target_system_id": id, "field": "national_id", "filled": true,
+        });
+        audit_operator(
+            &state,
+            &op,
+            crate::audit::IDENTITY_FIELD_TAKEN,
+            Some(*identity_id),
+            detail,
+        )
+        .await;
+    }
+    let counts = [out.filled.len(), out.invalid, out.duplicate].map(|n| n.to_string());
+    let text = op
+        .lang
+        .tn("nid.filled", &[&counts[0], &counts[1], &counts[2]]);
+    Notice::info(text)
+        .redirect(&state.pool, &op, &page_path(id))
+        .await
+}
+// --- END FEATURE: national-id-fill ---
 
 fn take_notice(lang: Lang, outcome: &crate::ad_diff::Outcome) -> Notice {
     let info = lang.t1("addiff.taken", outcome.taken.len());

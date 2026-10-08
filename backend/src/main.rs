@@ -34,6 +34,7 @@ mod mapping_web;
 mod metrics;
 mod migrate;
 mod national_id;
+mod national_id_fill;
 mod normalize;
 mod oidc;
 mod operational_settings;
