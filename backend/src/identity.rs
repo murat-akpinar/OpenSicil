@@ -1742,10 +1742,12 @@ fn first_rdn(dn: &str) -> String {
     head.split_once('=').map_or(head, |(_, value)| value).into()
 }
 
-fn outcome_kind(outcome: &str) -> &'static str {
+pub(crate) fn outcome_kind(outcome: &str) -> &'static str {
     match outcome {
         "succeeded" => "ok",
         "failed" => "err",
+        // Etkinlik gecmisi: sonuc satiri olmayan niyet (ADR-062)
+        "unknown" => "warn",
         _ => "",
     }
 }

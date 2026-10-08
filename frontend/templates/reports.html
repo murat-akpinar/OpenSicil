@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ lang.t("nav.reports") }} — OpenSicil{% endblock %}
 {% block content %}
+{% include "tabs.html" %}
 {# Kendi verisi olmayan kapak sayfa: var olan rapor ekranlarina giden kartlar.
    ADR-117 D: ustte ozet, her satirda bekleyen kayit rozeti. Rozet sifirsa soluk —
    "yapacak is yok" da bir bilgi, ama goze batmasin.

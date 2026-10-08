@@ -230,4 +230,5 @@
 - Menü yedi maddeye indi, Organizasyon sekme şeridiyle açılıyor
 - Personel altı sayfayı tek sekme şeridinde topluyor, Raporlar'dan Listeler kartı kalktı
 - Hedefin dört sayfası tek başlık ve sekme şeridinde
+- Raporlar'a filtreli etkinlik geçmişi girdi (kişi, yapan, tarih, işlem, hedef, sonuç)
 

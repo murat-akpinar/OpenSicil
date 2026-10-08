@@ -21,7 +21,7 @@ use axum::Router;
 
 use crate::i18n::Lang;
 use crate::identity_web::{internal, OperatorSession};
-use crate::shell::Shell;
+use crate::shell::{Shell, Tabs};
 use crate::web::{render, AppState};
 
 /// Kapak sayfasinin ozet kutulari ve satir rozetleri. Hepsi var olan
@@ -59,6 +59,7 @@ pub struct CoverageRow {
 struct ReportsTemplate {
     lang: Lang,
     shell: Shell,
+    tabs: Tabs,
     summary: Summary,
 }
 
@@ -87,6 +88,12 @@ async fn page(OperatorSession(op): OperatorSession, State(state): State<AppState
     render(&ReportsTemplate {
         lang: op.lang,
         shell: Shell::of(&op),
+        tabs: Tabs::new(
+            op.lang,
+            "nav.reports",
+            &crate::activity::REPORT_TABS,
+            "/reports",
+        ),
         summary: Summary {
             pending: interventions + deletions + unadopted,
             pending_foot: op.lang.tn(
@@ -147,6 +154,12 @@ mod tests {
         ReportsTemplate {
             lang: crate::i18n::DEFAULT,
             shell: Shell::from_parts("admin", &["admin".to_string()]),
+            tabs: Tabs::new(
+                crate::i18n::DEFAULT,
+                "nav.reports",
+                &crate::activity::REPORT_TABS,
+                "/reports",
+            ),
             summary,
         }
         .render()
@@ -167,6 +180,10 @@ mod tests {
         assert!(
             before.rfind("<div class=\"sum-box") > before.rfind("<a class=\"sum-box"),
             "toplam kutusu baglanti olmamali"
+        );
+        assert!(
+            page.contains(r#"href="/reports/activity""#),
+            "etkinlik geçmişi sekmesi yok"
         );
         for list in ["/interventions", "/deletions", "/used-names"] {
             // Menunun `data-match` oneki sayfada; aranan kartin baglantisi

@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block title %}{{ lang.t("nav.activity") }} — OpenSicil{% endblock %}
+{% block content %}
+{% include "tabs.html" %}
+{# ADR-134 madde 4: denetim kaydinin filtreli gorunumu. Filtreler tek GET formu;
+   adres paylasilabilir. Sayfada yazma eylemi yok. #}
+<div class="page-head">
+  <div>
+    <h1 class="h1">{{ lang.t("nav.activity") }}</h1>
+    <p class="sub">{{ lang.t("activity.sub") }}</p>
+  </div>
+</div>
+
+<form class="mb-4 flex flex-wrap items-end gap-3" method="get" action="/reports/activity" role="search">
+  <span class="min-w-0">
+    <label class="label" for="f-person">{{ lang.t("activity.person") }}</label>
+    {% if person_name.is_empty() %}
+    <input class="input sm:w-56" id="f-person" type="search" name="person" value="{{ person_text }}" placeholder="{{ lang.t("activity.person_hint") }}">
+    {% else %}
+    {# Kisi filtresi acik: id gizli alanda, ad cip olarak; arama kutusu yerine kaldirma baglantisi #}
+    <input type="hidden" name="identity" value="{% match f.identity %}{% when Some with (id) %}{{ id }}{% when None %}{% endmatch %}">
+    <span class="flex items-center gap-2" id="f-person">
+      <span class="badge badge-info">{{ person_name }}</span>
+      <a class="link text-sm" href="{{ remove_person }}">{{ lang.t("activity.remove_person") }}</a>
+    </span>
+    {% endif %}
+  </span>
+  <span class="min-w-0">
+    <label class="label" for="f-actor">{{ lang.t("activity.actor") }}</label>
+    <input class="input sm:w-44" id="f-actor" type="text" name="actor" value="{{ f.actor }}" placeholder="{{ lang.t("activity.actor_hint") }}">
+  </span>
+  <span class="min-w-0">
+    <label class="label" for="f-from">{{ lang.t("activity.from") }}</label>
+    <input class="input" id="f-from" type="date" name="from" value="{{ f.from }}">
+  </span>
+  <span class="min-w-0">
+    <label class="label" for="f-to">{{ lang.t("activity.to") }}</label>
+    <input class="input" id="f-to" type="date" name="to" value="{{ f.to }}">
+  </span>
+  <span class="min-w-0">
+    <label class="label" for="f-event">{{ lang.t("activity.event") }}</label>
+    <select class="input sm:w-56" id="f-event" name="event">
+      <option value="">{{ lang.t("identities.filter_all") }}</option>
+      {% for g in groups %}
+      <optgroup label="{{ lang.key("activitycat", g.category) }}">
+        <option value="{{ g.category }}"{% if g.selected %} selected{% endif %}>{{ lang.t1("activity.category_all", lang.key("activitycat", g.category)) }}</option>
+        {% for (t, sel) in g.events %}<option value="{{ t }}"{% if sel %} selected{% endif %}>{{ lang.key("event", t) }}</option>{% endfor %}
+      </optgroup>
+      {% endfor %}
+    </select>
+  </span>
+  <span class="min-w-0">
+    <label class="label" for="f-target">{{ lang.t("activity.target") }}</label>
+    <select class="input sm:w-44" id="f-target" name="target">
+      <option value="">{{ lang.t("identities.filter_all") }}</option>
+      {% for t in targets %}<option value="{{ t.id }}"{% if t.selected %} selected{% endif %}>{{ t.label }}</option>{% endfor %}
+    </select>
+  </span>
+  <span class="min-w-0">
+    <label class="label" for="f-outcome">{{ lang.t("activity.outcome") }}</label>
+    <select class="input sm:w-40" id="f-outcome" name="outcome">
+      <option value="">{{ lang.t("identities.filter_all") }}</option>
+      {% for (o, sel) in outcomes %}<option value="{{ o }}"{% if sel %} selected{% endif %}>{{ lang.key("outcome", o) }}</option>{% endfor %}
+    </select>
+  </span>
+  <button class="btn" type="submit"><i class="ico ico-search" aria-hidden="true"></i>{{ lang.t("identities.filter_apply") }}</button>
+  <a class="btn btn-ghost" href="/reports/activity">{{ lang.t("identities.unassigned_clear") }}</a>
+</form>
+
+{% for w in warnings %}
+<p class="alert alert-warn"><span class="alert-text">{{ w }}</span></p>
+{% endfor %}
+{% if !matches.is_empty() %}
+<p class="mb-4 flex flex-wrap gap-2">
+  {% for (href, name) in matches %}<a class="btn btn-sm" href="{{ href }}">{{ name }}</a>{% endfor %}
+</p>
+{% endif %}
+
+{% if rows.is_empty() %}
+<div class="empty">
+  <span class="ico-tile ico-tile-lg"><i class="ico ico-clock" aria-hidden="true"></i></span>
+  <p class="empty-title">{{ lang.t("activity.empty") }}</p>
+  <p class="empty-hint">{{ lang.t("activity.empty_hint") }}</p>
+</div>
+{% else %}
+<div class="card tbl-scroll p-0">
+  <table class="tbl">
+    <thead>
+      <tr>
+        <th>{{ lang.t("activity.when") }}</th>
+        <th>{{ lang.t("activity.person") }}</th>
+        <th>{{ lang.t("activity.event") }}</th>
+        <th>{{ lang.t("activity.actor") }}</th>
+        <th>{{ lang.t("activity.target") }}</th>
+        <th>{{ lang.t("activity.outcome") }}</th>
+        <th>{{ lang.t("activity.detail") }}</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td class="whitespace-nowrap"><span class="code">{{ r.at }}</span></td>
+        <td>{% match r.identity_id %}{% when Some with (id) %}<a class="link" href="/identities/{{ id }}">{{ r.person }}</a>{% when None %}<span class="muted">—</span>{% endmatch %}</td>
+        <td>
+          <span class="flex items-center gap-2">
+            <span class="ico-solid feed-ico feed-ico--{{ r.category }}"><i class="ico {{ r.icon }}" aria-hidden="true"></i></span>
+            <span>{{ lang.key("event", r.event_type) }}</span>
+          </span>
+        </td>
+        {# Yapan baglantisi ayni filtrelerle yalnizca onun satirlarini acar #}
+        <td><a class="link" href="{{ r.actor_href }}">{% if r.actor.is_empty() %}{{ lang.t("person.by_system") }}{% else %}{{ r.actor }}{% endif %}</a></td>
+        <td class="muted">{% if r.target.is_empty() %}—{% else %}{{ r.target }}{% endif %}</td>
+        <td>{% if !r.outcome.is_empty() %}<span class="badge badge-{{ r.outcome_kind }}">{{ lang.key("outcome", r.outcome) }}</span>{% endif %}</td>
+        <td>{% if !r.detail.is_empty() %}<details><summary class="link text-sm">{{ lang.t("activity.detail") }}</summary><pre class="mono text-xs">{{ r.detail }}</pre></details>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="pager">
+  <p class="pager-range">{{ range }}</p>
+  <div class="flex items-center gap-2">
+    {% match prev %}{% when Some with (href) %}<a class="btn btn-sm" href="{{ href }}">{{ lang.t("identities.prev") }}</a>{% when None %}{% endmatch %}
+    {% match next %}{% when Some with (href) %}<a class="btn btn-sm" href="{{ href }}">{{ lang.t("identities.next") }}</a>{% when None %}{% endmatch %}
+  </div>
+</div>
+{% endif %}
+{% endblock %}

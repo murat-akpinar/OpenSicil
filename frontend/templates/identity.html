@@ -283,6 +283,8 @@
   <div class="card-head">
     <span class="ico-tile"><i class="ico ico-clock" aria-hidden="true"></i></span>
     <h2 class="h2">{{ lang.t("person.events") }}</h2>
+    {# ADR-134 madde 4: kisinin butun gecmisi, tarih siniri olmadan #}
+    <a class="link ml-auto text-sm" href="/reports/activity?identity={{ page.person.id }}&amp;from=&amp;to=">{{ lang.t("dash.see_all") }}</a>
   </div>
   {% if page.events.is_empty() %}
   <p class="text-sm muted">{{ lang.t("person.no_events") }}</p>

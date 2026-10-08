@@ -931,9 +931,72 @@ pub(crate) fn glyph_for(event_type: &str) -> (&'static str, &'static str) {
         "ad.account.disable" => ("ico-logout", "danger"),
         "ad.account.delete" => ("ico-trash", "danger"),
         "ad.cancellation.rejected" => ("ico-bolt", "danger"),
+        // ADR-024: saklama sonu kisisel veri temizligi (worker)
+        "identity.deleted" => ("ico-trash", "danger"),
         _ => ("ico-inbox", "other"),
     }
 }
+
+/// `glyph_for`un tanidigi butun olay turleri, ekrandaki sirasiyla. Etkinlik
+/// gecmisinin "islem" listesi ve kategori filtresi buradan kurulur (ADR-134
+/// madde 4); kategori yine `glyph_for`dan okunur, ikinci bir eslemesi yok.
+/// Listede olmayan tur `other` sayilir. Test her iki yonu de tarar.
+pub(crate) const EVENT_TYPES: &[&str] = &[
+    audit::OPERATOR_LOGIN,
+    audit::OPERATOR_REJECTED,
+    audit::TARGET_CHANGED,
+    audit::MAPPING_CHANGED,
+    audit::SETTINGS_CHANGED,
+    audit::BOOTSTRAP_PASSWORD_CHANGED,
+    audit::ROLE_CHANGED,
+    audit::DEPARTMENT_CHANGED,
+    audit::IMPORT_STAGED,
+    audit::IMPORT_APPROVED,
+    audit::IMPORT_REJECTED,
+    audit::MANAGE_STAGED,
+    audit::MANAGE_APPROVED,
+    audit::MANAGE_REJECTED,
+    audit::IDENTITY_CREATED,
+    audit::IDENTITY_CHANGED,
+    audit::IDENTITY_ROLE_ASSIGNED,
+    audit::IDENTITY_ROLE_REMOVED,
+    "identity.role_expired",
+    audit::IDENTITY_SUSPENDED,
+    audit::IDENTITY_SUSPENSION_LIFTED,
+    audit::FIRST_PASSWORD_REQUESTED,
+    audit::FIRST_PASSWORD_SHOWN,
+    audit::USED_NAME_RELEASED,
+    audit::IDENTITY_NAME_REQUESTED,
+    audit::JOB_RETRY_REQUESTED,
+    audit::RECONCILE_REAPPLY,
+    audit::ACCOUNT_MANAGE_REQUESTED,
+    audit::IDENTITY_FIELD_TAKEN,
+    "identity.fields_filled",
+    audit::IDENTITY_IMPORTED,
+    audit::IMPORT_APPLIED,
+    audit::ACCOUNT_UNLINK_REQUESTED,
+    "ad.account.unlinked",
+    "ad.account.create",
+    "ad.account.adopted",
+    "ad.account.managed",
+    "ad.account.enable",
+    "ad.account.move",
+    "ad.account.attributes",
+    "ad.group.add_member",
+    "ad.group.remove_member",
+    "ad.account.first_password",
+    "ad.account.password_reset",
+    "ad.cancellation.verified",
+    audit::IDENTITY_DEPARTURE_SET,
+    audit::IDENTITY_EMERGENCY_DEPARTURE,
+    audit::IDENTITY_DEPARTURE_REVERTED,
+    audit::IDENTITY_CANCELLED,
+    audit::ACCOUNT_DELETION_APPROVED,
+    "ad.account.disable",
+    "ad.account.delete",
+    "ad.cancellation.rejected",
+    "identity.deleted",
+];
 // --- END FEATURE: dashboard ---
 
 #[cfg(test)]
@@ -943,6 +1006,39 @@ mod tests {
     /// Etkinlik akisinin kategorileri (ADR-117 B). `glyph_for` bunlardan birini
     /// dondurur; her birinin app.css'te kendi rengi olmali.
     const FEED_CATEGORIES: [&str; 5] = ["auth", "config", "account", "danger", "other"];
+
+    /// `EVENT_TYPES` `glyph_for`un tanidigi turlerin tamami: `audit.rs`teki her
+    /// sabit ve `glyph_for` govdesindeki her duz metin listede; listedeki her tur
+    /// `other`a dusmez ve iki dilde etiketi var. Liste elle tutuluyor, kaynak
+    /// taranarak sinaniyor — yeni olay unutulursa filtre onu "diger"e atardi.
+    #[test]
+    fn event_types_cover_glyph_for_and_every_audit_constant() {
+        let audit_src = include_str!("audit.rs");
+        let declared = audit_src
+            .lines()
+            .filter(|l| l.starts_with("pub const "))
+            .filter_map(|l| l.split('"').nth(1));
+        let own = include_str!("dashboard.rs");
+        let body = own
+            .split_once("fn glyph_for(")
+            .and_then(|(_, rest)| rest.split_once("\n}\n"))
+            .expect("glyph_for gövdesi bulunamadı")
+            .0;
+        let literals = body
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .flat_map(|l| l.split('"').skip(1).step_by(2))
+            .filter(|lit| lit.contains('.'));
+        for event in declared.chain(literals) {
+            assert!(EVENT_TYPES.contains(&event), "{event} EVENT_TYPES'ta yok");
+        }
+        for event in EVENT_TYPES {
+            assert_ne!(glyph_for(event).1, "other", "{event} kategorisiz");
+            for lang in [crate::i18n::Lang::Tr, crate::i18n::Lang::En] {
+                assert_ne!(lang.key("event", event), "?", "event.{event} eksik");
+            }
+        }
+    }
 
     #[test]
     fn percent_rounds_to_five_and_keeps_small_values_visible() {

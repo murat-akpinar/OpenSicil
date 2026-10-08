@@ -183,6 +183,7 @@ pub fn routes() -> Router<AppState> {
         .merge(crate::upcoming::routes())
         .merge(crate::reconcile::routes())
         .merge(crate::reports::routes())
+        .merge(crate::activity::routes())
         .merge(crate::interventions::routes())
         .merge(crate::deletions::routes())
         .merge(crate::csv_import::routes())

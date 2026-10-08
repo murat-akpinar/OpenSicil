@@ -11,7 +11,7 @@ use crate::operator_session::Operator;
 /// Cipte yazilacak yetki, en genisten en dara. Operatorde birden fazlasi varsa
 /// listedeki ilki gosterilir: "Sistem yoneticisi" olan birine "Denetci" yazmak
 /// yanlis olurdu.
-const AUTHORITY_ORDER: [&str; 6] = [
+pub(crate) const AUTHORITY_ORDER: [&str; 6] = [
     "admin",
     "role_admin",
     "hr",

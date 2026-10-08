@@ -328,7 +328,7 @@ fn q_string(listing: &identity::Listing<'_>) -> String {
 }
 
 /// Sorgu dizesine giden deger icin yuzde kacisi; sablonda filtre yok, burada.
-fn urlencode(value: &str) -> String {
+pub(crate) fn urlencode(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for byte in value.as_bytes() {
         match byte {
