@@ -40,6 +40,7 @@
 - ADR bağlantıları düz metne iner, depoda olmayan dosyaya link kalmaz
 - Proje taraması — ADR-055 parola yeniden üretimi, güvenlik listesi kanıtı, tek sinyalli doğrulama ve ölçek kutucukları
 - AD'den geri dolum kuralı docs/03 ve docs/09'a yazılır
+- Denetim kaydının stdout kopyası todo'da kapanır
 
 ### Düzeltmeler
 
