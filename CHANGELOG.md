@@ -69,6 +69,7 @@
 - Devir yöneticisi ayrılınca ona devredilmiş ayrılmış kimliklerin işi de açılır
 - Veritabanı imajı gosu'suz ve postgres kullanıcısıyla başlıyor, imaj taraması temiz
 - Worker AD CA sertifikasını okuyabiliyor (ad_ca_pem kolon yetkisi eksikti)
+- Raporlardaki bekleyen iş kutusu dolu olan ilk listeye gider
 
 ### Geri alınanlar
 

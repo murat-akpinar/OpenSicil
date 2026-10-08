@@ -33,6 +33,8 @@ pub struct Summary {
     pub pending: i64,
     /// Kuyrugun kirilimi, hazir cumle: sablon uc sayiyi tek tek dizmesin
     pub pending_foot: String,
+    /// Kutunun gittigi liste: dolu olan ilki (`pending_target`)
+    pub pending_href: &'static str,
     /// Yaklasan bitisler ve pencerenin gun sayisi
     pub upcoming: i64,
     pub upcoming_days: i32,
@@ -96,6 +98,7 @@ async fn page(OperatorSession(op): OperatorSession, State(state): State<AppState
         ),
         summary: Summary {
             pending: interventions + deletions + unadopted,
+            pending_href: pending_target(interventions, deletions, unadopted),
             pending_foot: op.lang.tn(
                 "reports.pending_foot",
                 &[
@@ -126,6 +129,17 @@ fn row(lang: &Lang, c: crate::bulk_manage::Coverage) -> CoverageRow {
     }
 }
 
+/// Toplamin tek bir sayfasi yok: kutu dolu olan ilk listeye gider, hepsi bossa
+/// mudahale listesine. Eskiden hep `/interventions`e gidiyordu ve "26" diyen
+/// kutu (26'si sahiplenme) bos liste aciyordu.
+pub fn pending_target(interventions: i64, deletions: i64, unadopted: i64) -> &'static str {
+    match (interventions, deletions, unadopted) {
+        (0, d, _) if d > 0 => "/deletions",
+        (0, 0, u) if u > 0 => "/reconcile",
+        _ => "/interventions",
+    }
+}
+
 // --- END FEATURE: reports ---
 
 #[cfg(test)]
@@ -136,6 +150,7 @@ mod tests {
         Summary {
             pending: 26,
             pending_foot: String::new(),
+            pending_href: "/reconcile",
             upcoming: 0,
             upcoming_days: 30,
             managed: 12,
@@ -166,27 +181,29 @@ mod tests {
         .unwrap()
     }
 
-    /// Ozet kutusundaki sayi uc ayri listenin toplami; tek bir sayfasi yok, bu
-    /// yuzden kutu baglanti olmamali. Eskiden `/interventions`e gidiyordu:
-    /// "26 bekleyen is" diyen kutu bir mudahale varken bos liste aciyordu.
-    /// Listeler Personel seridinde, kendi rozetleriyle (ADR-134 madde 3).
+    /// Ozet kutusu dolu olan ilk listeye gider; liste kartlari Personel
+    /// seridinde kaldi (ADR-134 madde 3).
     #[test]
-    fn the_pending_box_is_not_a_link_and_the_lists_card_is_gone() {
+    fn the_pending_box_links_to_the_first_list_with_work() {
+        assert_eq!(pending_target(2, 5, 19), "/interventions");
+        assert_eq!(pending_target(0, 5, 19), "/deletions");
+        assert_eq!(pending_target(0, 0, 19), "/reconcile");
+        assert_eq!(pending_target(0, 0, 0), "/interventions");
+
         let page = page(summary());
         let before = page
             .split_once(crate::i18n::DEFAULT.t("reports.pending"))
             .expect("bekleyen is kutusu yok")
             .0;
-        assert!(
-            before.rfind("<div class=\"sum-box") > before.rfind("<a class=\"sum-box"),
-            "toplam kutusu baglanti olmamali"
-        );
+        let open = before
+            .rfind("<a class=\"sum-box")
+            .expect("kutu bağlantı değil");
+        assert!(before[open..].contains(r#"href="/reconcile""#));
         assert!(
             page.contains(r#"href="/reports/activity""#),
             "etkinlik geçmişi sekmesi yok"
         );
-        for list in ["/interventions", "/deletions", "/used-names"] {
-            // Menunun `data-match` oneki sayfada; aranan kartin baglantisi
+        for list in ["/deletions", "/used-names"] {
             let link = format!("href=\"{list}\"");
             assert!(!page.contains(&link), "{list} Personel seridinde olmali");
         }

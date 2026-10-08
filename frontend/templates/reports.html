@@ -16,17 +16,16 @@
 </div>
 
 <div class="sum-row">
-  {# Sayi uc ayri listenin toplami (mudahale + silme onayi + sahiplenme), tek bir
-     sayfasi yok: kutu baglanti degil. Eskiden `/interventions`e gidiyordu ve
-     "26" diyen kutu bos liste aciyordu. Her bilesenin kendi satiri asagida. #}
-  <div class="sum-box tone-dim">
+  {# Sayi uc ayri listenin toplami (mudahale + silme onayi + sahiplenme); kutu
+     dolu olan ilk listeye gider (`reports::pending_target`). #}
+  <a class="sum-box tone-dim" href="{{ summary.pending_href }}">
     <span class="ico-tile tile-tone"><i class="ico ico-inbox" aria-hidden="true"></i></span>
     <span class="min-w-0 flex-1">
       <span class="sum-t">{{ lang.t("reports.pending") }}</span>
       <span class="sum-h">{{ summary.pending_foot }}</span>
     </span>
     <span class="sum-n">{{ summary.pending }}</span>
-  </div>
+  </a>
   <a class="sum-box tone-info" href="/upcoming">
     <span class="ico-tile tile-tone"><i class="ico ico-calendar" aria-hidden="true"></i></span>
     <span class="min-w-0 flex-1">
