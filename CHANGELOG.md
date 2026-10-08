@@ -67,6 +67,7 @@
 - Kayıp katalog devri hazır sorgu önbelleğine fazla parametre bağlamaz, okuma transaction içinde
 - Devir yöneticisi ayrılınca ona devredilmiş ayrılmış kimliklerin işi de açılır
 - Veritabanı imajı gosu'suz ve postgres kullanıcısıyla başlıyor, imaj taraması temiz
+- Worker AD CA sertifikasını okuyabiliyor (ad_ca_pem kolon yetkisi eksikti)
 
 ### Geri alınanlar
 

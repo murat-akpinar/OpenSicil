@@ -81,7 +81,8 @@ async fn fill_slugs(pool: &PgPool) -> Result<(), String> {
 // acan her migration buraya satir ekler; GRANT idempotent, her migrate'te yenilenir.
 // - _sqlx_migrations: acilis sema kontrolu (ADR-061 madde 3, db::check_schema_ready)
 // - app_settings: worker yalnizca hedef sistem baglanti kolonlarini okur (AD/Zimbra
-//   host, bind DN, sifreli parola); OIDC istemci sirri backend'de kalir (ADR-068)
+//   host, bind DN, sifreli parola, CA sertifikasi — ADR-136); OIDC istemci sirri
+//   backend'de kalir (ADR-068)
 // - audit_log: yalnizca ekleme, performed_by ve id kolonlarina deger verilemez,
 //   UPDATE/DELETE yok; niyet sinifi (operation_class) ve sonuc yalnizca worker,
 //   aktor yalnizca backend (ADR-016/050/062: sayac worker niyetlerini sayar)
@@ -113,7 +114,7 @@ const SERVICE_GRANTS: &str = "\
 GRANT SELECT ON _sqlx_migrations TO {backend}, {worker};
 GRANT SELECT, INSERT, UPDATE, DELETE ON bootstrap_account, app_settings, \
 oidc_auth_requests, operator_sessions TO {backend};
-GRANT SELECT (id, ad_host, ad_bind_dn, ad_service_password_enc, ad_national_id_attribute, \
+GRANT SELECT (id, ad_host, ad_bind_dn, ad_service_password_enc, ad_ca_pem, ad_national_id_attribute, \
 zimbra_url, zimbra_admin_password_enc) ON app_settings TO {worker};
 GRANT SELECT ON audit_log, hourly_counter_usage TO {backend}, {worker};
 GRANT INSERT (event_type, detail, actor_subject, actor_username, identity_id, target_system_id) \
@@ -845,10 +846,14 @@ mod tests {
         .await;
 
         // Worker hedef baglanti ayarlarini okur, OIDC sirrini okuyamaz (ADR-068).
-        sqlx::query("SELECT ad_host, ad_bind_dn, ad_service_password_enc FROM app_settings")
-            .execute(worker_pool)
-            .await
-            .expect("worker AD bağlantı ayarlarını okuyabilmeli");
+        // Kolon listesi worker/src/ad.rs load_config ile ayni (ADR-136: ad_ca_pem).
+        sqlx::query(
+            "SELECT ad_host, ad_bind_dn, ad_service_password_enc, ad_ca_pem, \
+             ad_national_id_attribute FROM app_settings",
+        )
+        .execute(worker_pool)
+        .await
+        .expect("worker AD bağlantı ayarlarını okuyabilmeli");
         assert_rejected(
             worker_pool,
             "SELECT oidc_client_secret_enc FROM app_settings WHERE $1 = $1",
