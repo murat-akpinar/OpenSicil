@@ -278,5 +278,17 @@
     </tbody>
   </table>
 </div>
+{# Personel listesinin sayfalama deseni; sayaç kutuları sayfadan bağımsız #}
+<div class="pager">
+  <p class="pager-range">{{ range }}</p>
+  <form method="get" action="/targets/{{ target_id }}/reconcile" class="flex items-center gap-2">
+    {% match prev_offset %}{% when Some with (o) %}
+    <button class="btn btn-sm" type="submit" name="offset" value="{{ o }}">{{ lang.t("identities.prev") }}</button>
+    {% when None %}{% endmatch %}
+    {% match next_offset %}{% when Some with (o) %}
+    <button class="btn btn-sm" type="submit" name="offset" value="{{ o }}">{{ lang.t("identities.next") }}</button>
+    {% when None %}{% endmatch %}
+  </form>
+</div>
 {% endif %}
 {% endblock %}

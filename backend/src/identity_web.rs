@@ -85,7 +85,7 @@ pub fn routes() -> Router<AppState> {
 
 /// Personel listesinin sayfa boyu. Ust bardaki arama kutusu hizli bir onizleme;
 /// tam liste burada ve sayfali (N-03: 20.000 kimlik tek sayfaya basilamaz).
-const PAGE_SIZE: i64 = 50;
+pub(crate) const PAGE_SIZE: i64 = 50;
 
 /// Sorgu dizesindeki sayisal parametre. Formdaki "Tumu" secenegi `role=` diye
 /// bos gelir ve serde `Option<i64>`u 400 ile reddeder; ayristirilamayan deger
@@ -343,7 +343,7 @@ fn sort_heads(carry: &str, sort: Option<&str>, descending: bool) -> Vec<SortHead
 }
 
 /// "1–50 / 312" metni ve onceki/sonraki sayfa ofsetleri; sablon aritmetik yapmaz.
-fn pagination(
+pub(crate) fn pagination(
     lang: Lang,
     offset: i64,
     shown: i64,

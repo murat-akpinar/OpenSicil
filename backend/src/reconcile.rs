@@ -49,6 +49,15 @@ pub struct View {
     /// Hedefin yazma seridinde (`jobs`) acik is var mi: sahiplenme ve "yeniden
     /// uygula" oraya yazar, ekran sonucu ancak isten sonra gorur (ADR-126)
     pub writing: bool,
+    /// Sayfadaki ilk satirin sirasi; sayaclar sayfadan bagimsiz (20.000 bulgu tek
+    /// sayfada tarayiciyi yoruyordu)
+    pub offset: i64,
+}
+
+impl View {
+    pub fn total(&self) -> i64 {
+        self.managed + self.observed + self.unmanaged + self.missing
+    }
 }
 
 pub struct Box {
@@ -102,7 +111,10 @@ const ROWS_SQL: &str = "SELECT kind, account_name, COALESCE(display_name, ''), \
     COALESCE(container, ''), enabled, identity_id FROM reconcile_findings \
     WHERE target_system_id = $1 \
     ORDER BY CASE kind WHEN 'missing' THEN 0 WHEN 'unmanaged' THEN 1 \
-    WHEN 'observed' THEN 2 ELSE 3 END, account_name";
+    WHEN 'observed' THEN 2 ELSE 3 END, account_name, id LIMIT $2 OFFSET $3";
+
+const COUNTS_SQL: &str = "SELECT kind, count(*) FROM reconcile_findings \
+    WHERE target_system_id = $1 GROUP BY kind";
 
 // Son tarama isi: ekran "ne zaman tarandi" ve "suruyor mu" der (ADR-094 kalibi).
 const LAST_SQL: &str = "SELECT status, \
@@ -118,8 +130,19 @@ const WRITING_SQL: &str = "SELECT EXISTS (SELECT 1 FROM jobs \
 /// kind, account_name, display_name, container, enabled, identity_id
 type FindingRow = (String, String, String, String, Option<bool>, Option<i64>);
 
-pub async fn load(pool: &PgPool, target: i64, time_zone: &str) -> Result<View, sqlx::Error> {
+pub async fn load(
+    pool: &PgPool,
+    target: i64,
+    time_zone: &str,
+    offset: i64,
+) -> Result<View, sqlx::Error> {
     let rows: Vec<FindingRow> = sqlx::query_as(ROWS_SQL)
+        .bind(target)
+        .bind(crate::identity_web::PAGE_SIZE)
+        .bind(offset)
+        .fetch_all(pool)
+        .await?;
+    let counts: Vec<(String, i64)> = sqlx::query_as(COUNTS_SQL)
         .bind(target)
         .fetch_all(pool)
         .await?;
@@ -133,7 +156,7 @@ pub async fn load(pool: &PgPool, target: i64, time_zone: &str) -> Result<View, s
         .fetch_one(pool)
         .await?;
 
-    let count = |want: &str| rows.iter().filter(|r| r.0 == want).count() as i64;
+    let count = |want: &str| counts.iter().find(|c| c.0 == want).map_or(0, |c| c.1);
     let view = View {
         managed: count("managed"),
         observed: count("observed"),
@@ -143,6 +166,7 @@ pub async fn load(pool: &PgPool, target: i64, time_zone: &str) -> Result<View, s
         scanned_at: last.as_ref().map(|l| l.1.clone()).unwrap_or_default(),
         result: last.map(|l| l.2).unwrap_or_default(),
         writing,
+        offset,
         rows: rows
             .into_iter()
             .map(
@@ -223,6 +247,10 @@ struct ReconcileTemplate {
     /// ADR-112 madde 2: "AD'de farkli" listesi; `auditor` gorur, alamaz
     ad_diffs: Vec<crate::ad_diff::Diff>,
     can_take: bool,
+    /// Bulgu listesinin sayfasi (personel listesinin deseni)
+    range: String,
+    prev_offset: Option<i64>,
+    next_offset: Option<i64>,
     /// ADR-112 madde 5: TC kimlik no'su AD'de olup kimlikte bos kisi sayisi
     national_id_pending: i64,
 }
@@ -297,7 +325,7 @@ async fn hub(OperatorSession(op): OperatorSession, State(state): State<AppState>
 async fn render_page(
     state: &AppState,
     op: &crate::operator_session::Operator,
-    target: i64,
+    (target, offset): (i64, i64),
     notice: Notice,
 ) -> Response {
     let time_zone = match state.time_zone().await {
@@ -305,7 +333,7 @@ async fn render_page(
         Err(response) => return *response,
     };
     let loaded = tokio::try_join!(
-        load(&state.pool, target, &time_zone),
+        load(&state.pool, target, &time_zone, offset),
         crate::bulk_adopt::candidates(&state.pool, &state.aead_key, target),
         crate::identity::form_options(&state.pool),
         crate::identity::today(&state.pool, &time_zone),
@@ -315,7 +343,13 @@ async fn render_page(
     );
     match loaded {
         Ok((v, candidates, options, today, placeholder, ad_diffs, national_id_pending)) => {
+            let shown = v.rows.len() as i64;
+            let (range, prev_offset, next_offset) =
+                crate::identity_web::pagination(op.lang, v.offset, shown, v.total());
             render(&ReconcileTemplate {
+                range,
+                prev_offset,
+                next_offset,
                 lang: op.lang,
                 shell: Shell::of(op),
                 target_id: target,
@@ -339,14 +373,21 @@ async fn render_page(
     }
 }
 
+#[derive(serde::Deserialize, Default)]
+struct PageQuery {
+    offset: Option<i64>,
+}
+
 async fn page(
     OperatorSession(op): OperatorSession,
     State(state): State<AppState>,
     Path(id): Path<i64>,
+    axum::extract::Query(q): axum::extract::Query<PageQuery>,
 ) -> Response {
     // ADR-126: POST'lar buraya yonlendirir, mesaji oturumdan alir
     let notice = Notice::take(&state.pool, &op.username).await;
-    render_page(&state, &op, id, notice).await
+    let offset = q.offset.unwrap_or(0).max(0);
+    render_page(&state, &op, (id, offset), notice).await
 }
 
 /// POST'larin dondugu adres (ADR-126): eylem hangi ekranda yapildiysa orasi
@@ -726,6 +767,39 @@ fn take_notice(lang: Lang, outcome: &crate::ad_diff::Outcome) -> Notice {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // 20.000 bulgu tek sayfada tarayiciyi yoruyordu: liste sayfalanir, sayaclar degil.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn the_findings_list_pages_and_the_counters_do_not() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        let target: i64 = sqlx::query_scalar("SELECT id FROM target_systems WHERE kind = 'ad'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "WITH j AS (INSERT INTO read_jobs (kind, target_system_id, requested_by) \
+             VALUES ('reconcile', $1, 'test') RETURNING id) \
+             INSERT INTO reconcile_findings (target_system_id, read_job_id, kind, external_id, \
+             account_name) SELECT $1, j.id, 'unmanaged', 'g' || g, 'hesap' || lpad(g::text, 3, '0') \
+             FROM j, generate_series(1, 60) g",
+        )
+        .bind(target)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let first = load(&pool, target, "Europe/Istanbul", 0).await.unwrap();
+        assert_eq!(
+            (first.rows.len(), first.unmanaged, first.total()),
+            (50, 60, 60)
+        );
+        assert_eq!(first.rows[0].account_name, "hesap001");
+        let second = load(&pool, target, "Europe/Istanbul", 50).await.unwrap();
+        assert_eq!((second.rows.len(), second.unmanaged), (10, 60));
+        assert_eq!(second.rows[0].account_name, "hesap051");
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
 
     #[tokio::test]
     #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
@@ -1842,7 +1916,7 @@ mod tests {
             .unwrap();
 
         // Hic taranmamis hedef: bos ekran, sayac sifir, "son tarama" bos.
-        let empty = load(&pool, target, "Europe/Istanbul").await.unwrap();
+        let empty = load(&pool, target, "Europe/Istanbul", 0).await.unwrap();
         assert!(empty.rows.is_empty());
         assert_eq!(empty.scanned_at, "");
 
@@ -1851,7 +1925,7 @@ mod tests {
         assert!(!request_scan(&pool, target, "test-admin").await.unwrap());
 
         // ADR-126: is kuyrukta — ekran "calisiyor" der ve kendini tazeler
-        let queued = load(&pool, target, "Europe/Istanbul").await.unwrap();
+        let queued = load(&pool, target, "Europe/Istanbul", 0).await.unwrap();
         assert_eq!(queued.status, "queued");
         assert!(queued.running(), "kuyruktaki iş çalışıyor sayılmalı");
 
@@ -1888,7 +1962,7 @@ mod tests {
             .unwrap();
         }
 
-        let v = load(&pool, target, "Europe/Istanbul").await.unwrap();
+        let v = load(&pool, target, "Europe/Istanbul", 0).await.unwrap();
         assert_eq!(v.unmanaged, 2);
         assert_eq!(v.missing, 1);
         assert_eq!(v.managed, 0);
@@ -1908,7 +1982,7 @@ mod tests {
         crate::jobs::enqueue(&pool, identity, target, crate::jobs::Priority::Single)
             .await
             .unwrap();
-        let writing = load(&pool, target, "Europe/Istanbul").await.unwrap();
+        let writing = load(&pool, target, "Europe/Istanbul", 0).await.unwrap();
         assert!(!writing.running(), "tarama bitmis durumda");
         assert!(writing.writing, "hedefin acik yazma isi var");
         assert!(writing.busy(), "açık yazma işi sayfayı tazeletir");
@@ -1917,7 +1991,7 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        let done = load(&pool, target, "Europe/Istanbul").await.unwrap();
+        let done = load(&pool, target, "Europe/Istanbul", 0).await.unwrap();
         assert!(!done.busy(), "iş bitince tazeleme durur");
 
         // ADR-103 madde 3: yonlendirme yalnizca "yonetilmeyen" bulguyu sayar;
