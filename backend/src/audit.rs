@@ -49,6 +49,8 @@ pub const IDENTITY_IMPORTED: &str = "identity.imported";
 pub const MANAGE_STAGED: &str = "manage.staged";
 pub const MANAGE_APPROVED: &str = "manage.approved";
 pub const MANAGE_REJECTED: &str = "manage.rejected";
+/// ADR-134 madde 4: etkinlik gecmisi CSV olarak indirildi (filtre ve satir sayisi detayda)
+pub const ACTIVITY_EXPORTED: &str = "activity.exported";
 
 pub struct Actor<'a> {
     pub subject: Option<&'a str>,

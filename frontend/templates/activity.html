@@ -9,6 +9,7 @@
     <h1 class="h1">{{ lang.t("nav.activity") }}</h1>
     <p class="sub">{{ lang.t("activity.sub") }}</p>
   </div>
+  <a class="btn" href="/reports/activity?{{ f.query() }}&format=csv"><i class="ico ico-chart" aria-hidden="true"></i>{{ lang.t("activity.export_csv") }}</a>
 </div>
 
 <form class="mb-4 flex flex-wrap items-end gap-3" method="get" action="/reports/activity" role="search">

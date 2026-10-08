@@ -13,7 +13,8 @@
 
 use askama::Template;
 use axum::extract::{Query, State};
-use axum::response::Response;
+use axum::http::header;
+use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
 use serde::Deserialize;
@@ -24,8 +25,8 @@ use sqlx::{PgPool, Postgres};
 use crate::dashboard::{glyph_for, EVENT_TYPES};
 use crate::i18n::Lang;
 use crate::identity_web::{
-    allowed, empty_as_none, forbidden, internal, pagination, urlencode, Choice, OperatorSession,
-    PAGE_SIZE,
+    allowed, audit_operator, empty_as_none, forbidden, internal, pagination, urlencode, Choice,
+    OperatorSession, PAGE_SIZE,
 };
 use crate::shell::{Shell, Tabs};
 use crate::web::{render, AppState};
@@ -36,6 +37,9 @@ const CATEGORIES: [&str; 5] = ["auth", "config", "account", "danger", "other"];
 const OUTCOMES: [&str; 3] = ["succeeded", "failed", "unknown"];
 /// `actor=system`: worker'in satirlari (operator adi tasimaz)
 const SYSTEM: &str = "system";
+/// CSV'nin satir tavani: tek istekte bellege alinan satir sayisi.
+// ponytail: tavan ustu kesilir (denetimde `total` ile gorunur); gerekirse akisli yanit
+const CSV_LIMIT: i64 = 100_000;
 
 /// Raporlar calisma alaninin sekmeleri (ADR-134 madde 2); yetki dokumu ve
 /// ayrilmis ama acik raporlari kendi kutucuklarinda eklenir.
@@ -60,6 +64,8 @@ pub struct Params {
     outcome: Option<String>,
     #[serde(default, deserialize_with = "empty_as_none")]
     offset: Option<i64>,
+    /// `csv` = ayni filtrelerle dosya (ADR-134 madde 4)
+    format: Option<String>,
 }
 
 /// Dogrulanmis filtreler: SQL'e giden ve forma geri basilan degerler. Bos metin
@@ -296,9 +302,19 @@ pub async fn load(
     f: &Filters,
     offset: i64,
 ) -> Result<(i64, Vec<Row>), sqlx::Error> {
+    load_rows(pool, tz, f, PAGE_SIZE, offset).await
+}
+
+async fn load_rows(
+    pool: &PgPool,
+    tz: &str,
+    f: &Filters,
+    limit: i64,
+    offset: i64,
+) -> Result<(i64, Vec<Row>), sqlx::Error> {
     let count = bind(sqlx::query_as::<_, (i64,)>(COUNT_SQL), tz, f).fetch_one(pool);
     let page = bind(sqlx::query_as::<_, PageRow>(PAGE_SQL), tz, f)
-        .bind(PAGE_SIZE)
+        .bind(limit)
         .bind(offset)
         .fetch_all(pool);
     let ((total,), rows) = tokio::try_join!(count, page)?;
@@ -347,6 +363,51 @@ fn pretty(detail: &str) -> String {
         Ok(value) => serde_json::to_string_pretty(&value).unwrap_or_else(|_| detail.to_string()),
         Err(_) => detail.to_string(),
     }
+}
+
+/// CSV hucresi. `= + - @` (ve sekme/satir basi) ile baslayan deger tablo
+/// programinda formul olarak calisir; basina tek tirnak konur (CSV enjeksiyonu).
+/// Ayirici, tirnak ya da satir sonu iceren deger tirnaklanir.
+fn csv_cell(value: &str) -> String {
+    let value = match value.starts_with(['=', '+', '-', '@', '\t', '\r']) {
+        true => format!("'{value}"),
+        false => value.to_string(),
+    };
+    match value.contains([',', '"', '\n', '\r']) {
+        true => format!("\"{}\"", value.replace('"', "\"\"")),
+        false => value,
+    }
+}
+
+/// Ekrandaki kolonlar ve sira; etiketler operatorun dilinde. BOM, tablo
+/// programinin UTF-8'i (Turkce harfleri) dogru acmasi icin.
+fn to_csv(lang: Lang, rows: &[Row]) -> String {
+    let line = |cells: [&str; 7]| {
+        let cells: Vec<String> = cells.iter().map(|c| csv_cell(c)).collect();
+        cells.join(",") + "\r\n"
+    };
+    let mut out = String::from("\u{feff}");
+    out.push_str(&line(
+        [
+            "when", "person", "event", "actor", "target", "outcome", "detail",
+        ]
+        .map(|k| lang.key("activity", k)),
+    ));
+    for r in rows {
+        let event = lang.key("event", &r.event_type);
+        let actor = match r.actor.is_empty() {
+            true => lang.t("person.by_system"),
+            false => &r.actor,
+        };
+        let outcome = match r.outcome.is_empty() {
+            true => "",
+            false => lang.key("outcome", &r.outcome),
+        };
+        out.push_str(&line([
+            &r.at, &r.person, event, actor, &r.target, outcome, &r.detail,
+        ]));
+    }
+    out
 }
 
 /// Islem secicisinin bir grubu: kategori secenegi + o kategorinin turleri.
@@ -488,6 +549,9 @@ async fn page(
         .map(|label| lang.t1("activity.bad_filter", lang.t(label)))
         .chain(person_warnings)
         .collect();
+    if p.format.as_deref() == Some("csv") {
+        return export(&state, &op, &tz, &f).await;
+    }
     let offset = p.offset.unwrap_or(0).max(0);
     let loaded = tokio::try_join!(
         load(&state.pool, &tz, &f, offset),
@@ -528,6 +592,38 @@ async fn page(
         range,
         f,
     })
+}
+/// Dosya ekrandaki sirayla; disa aktarmanin kendisi denetime girer (kim, hangi
+/// filtreyle, kac satir).
+async fn export(
+    state: &AppState,
+    op: &crate::operator_session::Operator,
+    tz: &str,
+    f: &Filters,
+) -> Response {
+    let (total, rows) = match load_rows(&state.pool, tz, f, CSV_LIMIT, 0).await {
+        Ok(loaded) => loaded,
+        Err(e) => return internal("etkinlik geçmişi dışa aktarılamadı", e),
+    };
+    audit_operator(
+        state,
+        op,
+        crate::audit::ACTIVITY_EXPORTED,
+        None,
+        serde_json::json!({"filters": f.query(), "rows": rows.len(), "total": total}),
+    )
+    .await;
+    (
+        [
+            (header::CONTENT_TYPE, "text/csv; charset=utf-8"),
+            (
+                header::CONTENT_DISPOSITION,
+                "attachment; filename=\"opensicil-etkinlik.csv\"",
+            ),
+        ],
+        to_csv(op.lang, &rows),
+    )
+        .into_response()
 }
 // --- END FEATURE: activity-history ---
 
@@ -632,6 +728,57 @@ mod tests {
     fn empty_detail_is_hidden_and_objects_are_indented() {
         assert_eq!(pretty("{}"), "");
         assert_eq!(pretty(r#"{"a":1}"#), "{\n  \"a\": 1\n}");
+    }
+
+    /// Formulle baslayan hucre etkisizlesir; ayirici/tirnak/satir sonu tirnaklanir.
+    #[test]
+    fn csv_cells_defuse_formulas_and_quote_separators() {
+        for (raw, cell) in [
+            ("=HYPERLINK(\"x\")", "\"'=HYPERLINK(\"\"x\"\")\""),
+            ("+1", "'+1"),
+            ("-2+3", "'-2+3"),
+            ("@SUM(A1)", "'@SUM(A1)"),
+            ("\tx", "'\tx"),
+            ("a,b", "\"a,b\""),
+            ("{\n  \"a\": 1\n}", "\"{\n  \"\"a\"\": 1\n}\""),
+            ("2026-10-08 09:00", "2026-10-08 09:00"),
+            ("", ""),
+        ] {
+            assert_eq!(csv_cell(raw), cell, "{raw}");
+        }
+    }
+
+    #[test]
+    fn csv_has_the_screen_columns_in_the_operators_language() {
+        let lang = crate::i18n::Lang::Tr;
+        let row = Row {
+            at: "2026-10-08 09:00".into(),
+            event_type: "ad.account.disable".into(),
+            icon: "",
+            category: "",
+            actor: String::new(),
+            actor_href: String::new(),
+            identity_id: Some(1),
+            person: "=Ali".into(),
+            target: "Active Directory".into(),
+            outcome: "failed".into(),
+            outcome_kind: "err",
+            detail: String::new(),
+        };
+        let csv = to_csv(lang, &[row]);
+        let mut lines = csv.strip_prefix('\u{feff}').expect("BOM").split("\r\n");
+        assert_eq!(
+            lines.next().unwrap(),
+            "Zaman,Kişi,İşlem,İşlemi yapan,Hedef sistem,Sonuç,Ayrıntı"
+        );
+        assert_eq!(
+            lines.next().unwrap(),
+            format!(
+                "2026-10-08 09:00,'=Ali,{},{},Active Directory,başarısız,",
+                lang.key("event", "ad.account.disable"),
+                lang.t("person.by_system")
+            )
+        );
     }
 
     async fn cookie(pool: &PgPool, authorities: &[&str]) -> String {
@@ -889,6 +1036,30 @@ mod tests {
             get("/reports/activity".into(), none).await.0,
             StatusCode::FORBIDDEN
         );
+
+        // CSV: ayni filtreler, tum satirlar (sayfa siniri yok), disa aktarma denetimde
+        let (status, csv) = get(
+            "/reports/activity?from=&to=&actor=yuk&format=csv".into(),
+            auditor.clone(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            csv.lines().count() as i64,
+            PAGE_SIZE + 3 + 1,
+            "başlık + bütün satırlar"
+        );
+        let exported: (String, String) = sqlx::query_as(
+            "SELECT actor_username, detail::text FROM audit_log WHERE event_type = $1",
+        )
+        .bind(crate::audit::ACTIVITY_EXPORTED)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let detail: serde_json::Value = serde_json::from_str(&exported.1).unwrap();
+        assert_eq!(exported.0, "denetci");
+        assert_eq!(detail["rows"], PAGE_SIZE + 3);
+        assert_eq!(detail["filters"], "from=&to=&actor=yuk");
 
         crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
     }
