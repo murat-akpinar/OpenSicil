@@ -127,6 +127,8 @@ pub async fn record_intent(
         return Err(IntentError::LeaseLost);
     }
     tx.commit().await.map_err(IntentError::Db)?;
+    let (identity, target) = (Some(job.identity_id), Some(job.target_system_id));
+    crate::log::audit(intent.event_type, None, identity, target, Some("intent"));
     Ok(intent_id)
 }
 
@@ -139,6 +141,7 @@ pub async fn record_outcome(
     succeeded: bool,
     event_type: &str,
 ) -> Result<(), sqlx::Error> {
+    let outcome = if succeeded { "succeeded" } else { "failed" };
     sqlx::query(
         "INSERT INTO audit_log (event_type, identity_id, target_system_id, intent_id, outcome) \
          VALUES ($1, $2, $3, $4, $5)",
@@ -147,9 +150,11 @@ pub async fn record_outcome(
     .bind(job.identity_id)
     .bind(job.target_system_id)
     .bind(intent_id)
-    .bind(if succeeded { "succeeded" } else { "failed" })
+    .bind(outcome)
     .execute(pool)
     .await?;
+    let (identity, target) = (Some(job.identity_id), Some(job.target_system_id));
+    crate::log::audit(event_type, None, identity, target, Some(outcome));
     Ok(())
 }
 

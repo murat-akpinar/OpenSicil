@@ -74,6 +74,7 @@ pub async fn record(
     .bind(detail.to_string())
     .execute(pool)
     .await?;
+    crate::log::audit(event_type, Some(actor.username), identity_id, None, None);
     Ok(())
 }
 

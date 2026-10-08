@@ -202,4 +202,5 @@
 - TC kimlik no mutabakat ekranından AD'den toplu doldurulur, değer denetime girmez
 - Kayıp katalog öğesi canlı ikizine devredilir ya da katalogdan kaldırılır
 - Iki servisin log satırları OpenTelemetry alan adlarıyla tek satır JSON olur
+- Denetim kaydı stdout'a iam olayı olarak da basılır, docs/09'a SIEM bölümü girer
 

@@ -82,6 +82,38 @@ pub fn emit(severity: &str, body: &str, fields: &[(&str, String)]) {
     }
 }
 
+/// Denetim satirinin SIEM kopyasi (ADR-113 madde 4). DB satiri yetkili kayittir;
+/// buraya detay (deger alanlari) girmez — kim, ne, hangi kimlik/hedef, sonuc.
+/// Kimlik ic numarasiyla gider, ad ya da kisisel veri tasimaz (docs/07).
+pub fn audit_fields(
+    event: &str,
+    actor: Option<&str>,
+    identity: Option<i64>,
+    target: Option<i64>,
+    outcome: Option<&str>,
+) -> Vec<(&'static str, String)> {
+    let mut fields = vec![
+        ("event.category", quote("iam")),
+        ("event.name", quote(event)),
+    ];
+    fields.extend(actor.map(|a| ("user.name", quote(a))));
+    fields.extend(identity.map(|i| ("opensicil.identity.id", i.to_string())));
+    fields.extend(target.map(|t| ("opensicil.target_system.id", t.to_string())));
+    fields.extend(outcome.map(|o| ("event.outcome", quote(o))));
+    fields
+}
+
+pub fn audit(
+    event: &str,
+    actor: Option<&str>,
+    identity: Option<i64>,
+    target: Option<i64>,
+    outcome: Option<&str>,
+) {
+    let fields = audit_fields(event, actor, identity, target, outcome);
+    emit("INFO", &format!("denetim: {event}"), &fields);
+}
+
 /// `println!` yerine: govde `format!` ile, satir JSON.
 macro_rules! log_info {
     ($($arg:tt)*) => { $crate::log::emit("INFO", &format!($($arg)*), &[]) };
@@ -118,6 +150,25 @@ mod tests {
             "{text}"
         );
         assert!(text.ends_with(",\"http.response.status_code\":200,\"url.path\":\"/a\"}"));
+    }
+
+    #[test]
+    fn audit_line_carries_who_what_and_no_detail() {
+        let fields = audit_fields("identity.changed", Some("ayse"), Some(7), None, None);
+        let text = line("t", "INFO", "denetim: identity.changed", &fields);
+        assert!(text.contains("\"event.category\":\"iam\""), "{text}");
+        assert!(text.contains("\"event.name\":\"identity.changed\""));
+        assert!(text.contains("\"user.name\":\"ayse\""));
+        assert!(text.contains("\"opensicil.identity.id\":7"));
+        assert!(!text.contains("opensicil.target_system.id") && !text.contains("event.outcome"));
+        let worker = audit_fields(
+            "ad.account.created",
+            None,
+            Some(1),
+            Some(2),
+            Some("succeeded"),
+        );
+        assert_eq!(worker.len(), 5);
     }
 
     #[test]

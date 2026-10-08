@@ -295,7 +295,7 @@ pub async fn fill_linked_identities(pool: &PgPool, target: i64) -> Result<usize,
     // Ayni sicil iki bulguda duruyorsa ikincisini SQL'in tekillik kontrolu
     // zaten atlar; denetim satiri "doldu" demesin diye burada da atlanir.
     let mut taken: HashSet<String> = HashSet::new();
-    let mut filled = 0;
+    let mut filled_ids: Vec<i64> = Vec::new();
     for row in &rows {
         let identity: i64 = row.get("identity_id");
         let account_name: String = row.get("account_name");
@@ -345,10 +345,13 @@ pub async fn fill_linked_identities(pool: &PgPool, target: i64) -> Result<usize,
         .execute(&mut *tx)
         .await
         .map_err(|e| format!("dolum denetim satırı yazılamadı: {e}"))?;
-        filled += 1;
+        filled_ids.push(identity);
     }
     tx.commit().await.map_err(|e| e.to_string())?;
-    Ok(filled)
+    for identity in &filled_ids {
+        crate::log::audit(FILLED_EVENT, None, Some(*identity), Some(target), None);
+    }
+    Ok(filled_ids.len())
 }
 
 // Yer tutucu rolun dolumu (ADR-120 madde 5): AD'nin `title` degeri agacta bir
@@ -360,20 +363,23 @@ pub async fn fill_linked_identities(pool: &PgPool, target: i64) -> Result<usize,
 // `fill_linked_identities` ile ayni seritte (ADR-051): hedefe yazilmaz, is
 // acilmaz. Dolan rol yer tutucunun yerine gectigi icin AD'deki `title` ile
 // zaten uyumludur; hak seti farki ilk isin hesabina girer.
-const FILL_ROLE_SQL: &str = "WITH filled AS (     UPDATE identities i SET primary_role_id = m.role_id FROM (         SELECT f.identity_id,                (SELECT max(r.id) FROM roles r                   WHERE r.kind = 'primary' AND NOT r.placeholder                     AND lower(btrim(r.title)) = lower(btrim(f.title))                   HAVING count(*) = 1) AS role_id           FROM reconcile_findings f          WHERE f.target_system_id = $1 AND btrim(coalesce(f.title, '')) <> ''     ) m     WHERE i.id = m.identity_id AND m.role_id IS NOT NULL AND i.deleted_at IS NULL       AND EXISTS (SELECT 1 FROM roles p WHERE p.id = i.primary_role_id AND p.placeholder)     RETURNING i.id)     INSERT INTO audit_log (event_type, identity_id, target_system_id, detail)     SELECT $2, id, $1, '{\"fields\":[\"primary_role\"]}'::jsonb FROM filled";
+const FILL_ROLE_SQL: &str = "WITH filled AS (     UPDATE identities i SET primary_role_id = m.role_id FROM (         SELECT f.identity_id,                (SELECT max(r.id) FROM roles r                   WHERE r.kind = 'primary' AND NOT r.placeholder                     AND lower(btrim(r.title)) = lower(btrim(f.title))                   HAVING count(*) = 1) AS role_id           FROM reconcile_findings f          WHERE f.target_system_id = $1 AND btrim(coalesce(f.title, '')) <> ''     ) m     WHERE i.id = m.identity_id AND m.role_id IS NOT NULL AND i.deleted_at IS NULL       AND EXISTS (SELECT 1 FROM roles p WHERE p.id = i.primary_role_id AND p.placeholder)     RETURNING i.id)     INSERT INTO audit_log (event_type, identity_id, target_system_id, detail)     SELECT $2, id, $1, '{\"fields\":[\"primary_role\"]}'::jsonb FROM filled RETURNING identity_id";
 
 /// Birincil rolu yer tutucu (`Tanimsiz`) olan bagli kimliklerin rolu, AD'deki
 /// unvanin agactaki karsiligiyla dolar. Yer tutucu "bos" sayilir (ADR-112
 /// madde 1); gercek bir rol duruyorsa dokunulmaz — ikisi de doluysa karar
 /// operatorun, satir fark listesine girer. Doner: rolu dolan kimlik sayisi.
 pub async fn fill_placeholder_roles(pool: &PgPool, target: i64) -> Result<u64, String> {
-    Ok(sqlx::query(FILL_ROLE_SQL)
+    let filled: Vec<i64> = sqlx::query_scalar(FILL_ROLE_SQL)
         .bind(target)
         .bind(FILLED_EVENT)
-        .execute(pool)
+        .fetch_all(pool)
         .await
-        .map_err(|e| format!("rol dolumu yapılamadı: {e}"))?
-        .rows_affected())
+        .map_err(|e| format!("rol dolumu yapılamadı: {e}"))?;
+    for identity in &filled {
+        crate::log::audit(FILLED_EVENT, None, Some(*identity), Some(target), None);
+    }
+    Ok(filled.len() as u64)
 }
 // --- END FEATURE: reconcile ---
 

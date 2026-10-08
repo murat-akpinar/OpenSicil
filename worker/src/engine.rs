@@ -1124,6 +1124,8 @@ async fn verify_cancellation(
     .execute(c.pool)
     .await
     .map_err(|e| JobError::Failed(format!("denetim satırı yazılamadı: {e}")))?;
+    let (identity, target) = (Some(c.job.identity_id), Some(c.job.target_system_id));
+    crate::log::audit(event, None, identity, target, None);
     Ok(note.to_string())
 }
 
@@ -1210,6 +1212,8 @@ async fn finalize_if_last_account(c: &AdJob<'_>) -> Result<bool, JobError> {
     .execute(c.pool)
     .await
     .map_err(db)?;
+    let (identity, target) = (Some(c.job.identity_id), Some(c.job.target_system_id));
+    crate::log::audit("identity.deleted", None, identity, target, None);
     Ok(true)
 }
 

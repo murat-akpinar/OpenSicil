@@ -28,7 +28,7 @@ pub async fn log_requests(req: Request, next: Next) -> Response {
     response
 }
 
-/// OTel semantic conventions (ADR-113); `event.duration` nanosaniye.
+/// OTel semantic conventions (ADR-113); `event.duration` milisaniye (ADR-113 madde 1).
 fn request_fields(
     method: &str,
     path: &str,
@@ -42,7 +42,7 @@ fn request_fields(
         ("url.path", quote(path)),
         ("http.response.status_code", status.to_string()),
         ("client.address", quote(client)),
-        ("event.duration", elapsed.as_nanos().to_string()),
+        ("event.duration", elapsed.as_millis().to_string()),
     ]
 }
 
@@ -94,7 +94,7 @@ mod tests {
             "\"url.path\":\"/identities\"",
             "\"http.response.status_code\":200",
             "\"client.address\":\"203.0.113.5\"",
-            "\"event.duration\":3000000",
+            "\"event.duration\":3",
         ] {
             assert!(text.contains(expected), "{expected}: {text}");
         }

@@ -46,7 +46,9 @@ pub async fn remove_link(
     .execute(&mut *tx)
     .await
     .map_err(|e| format!("denetim satırı yazılamadı: {e}"))?;
-    tx.commit().await.map_err(|e| e.to_string())
+    tx.commit().await.map_err(|e| e.to_string())?;
+    crate::log::audit(UNLINKED_EVENT, None, Some(identity_id), Some(target), None);
+    Ok(())
 }
 
 /// ADR-122: hesap dizinde duruyormus — istek dusurulur, baglanti korunur.
@@ -240,7 +242,9 @@ pub async fn link_observed(
     .execute(&mut *tx)
     .await
     .map_err(|e| format!("denetim satırı yazılamadı: {e}"))?;
-    tx.commit().await.map_err(|e| e.to_string())
+    tx.commit().await.map_err(|e| e.to_string())?;
+    crate::log::audit(ADOPTED_EVENT, None, Some(identity_id), Some(target), None);
+    Ok(())
 }
 
 /// Kimlige yazilabilecek kisi alanlari. `None` = bu alan icin degerimiz yok.
@@ -332,6 +336,7 @@ pub async fn take_over(pool: &PgPool, identity_id: i64, target: i64) -> Result<b
     .await
     .map_err(|e| format!("denetim satırı yazılamadı: {e}"))?;
     tx.commit().await.map_err(|e| e.to_string())?;
+    crate::log::audit(MANAGED_EVENT, None, Some(identity_id), Some(target), None);
     Ok(true)
 }
 // --- END FEATURE: adoption ---

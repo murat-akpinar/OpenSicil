@@ -224,6 +224,55 @@ Motor, kapatılmış hesabı geri açmaz ve silinmiş hesabı yeniden açmaz (AD
 
 **Git geçmişi yeniden yazılmaz** (ADR-104): `git push --force` proje kuralıyla yasak ve GitHub silinen blob'u kendi çöp toplamasına kadar sunmaya devam eder, yani yeniden yazma tek başına sırrı geri almaz. Rotasyon geçmişte duran değeri değersizleştirir; asıl düzeltme budur.
 
+## Merkezi log / SIEM
+
+İki servis de stdout/stderr'e **satır başına bir JSON nesnesi** yazar (ADR-113); alan adları OpenTelemetry semantic conventions. Uygulama OTLP konuşmaz, log hedefi ayarı yoktur: satırları kurumun toplayıcısı alır (Docker/Kubernetes log driver, OTel Collector, Vector, Fluent Bit). OTLP isteyen kurumda çeviriyi collector yapar.
+
+| Alan | Her satırda | Açıklama |
+|---|---|---|
+| `timestamp` | ✓ | UTC, RFC 3339, milisaniye (`2026-10-08T01:02:03.456Z`) — kurumun saat dilimi (`TZ`) loglara uygulanmaz |
+| `severity` | ✓ | `INFO` (stdout) ya da `ERROR` (stderr) |
+| `service.name` | ✓ | `opensicil-backend` / `opensicil-worker` |
+| `body` | ✓ | Operatörün okuyacağı Türkçe metin |
+| `http.request.method`, `url.path`, `http.response.status_code`, `client.address`, `event.duration` | istek satırı | Backend'in her isteği; `client.address` nginx'in `X-Forwarded-For`'undan, `event.duration` milisaniye. `/api/health` loglanmaz |
+| `event.category` = `iam`, `event.name`, `user.name`, `opensicil.identity.id`, `opensicil.target_system.id`, `event.outcome` | denetim satırı | `audit_log`'a yazılan her satırın kopyası: kim (operatör; worker olaylarında yok), ne, hangi iç kimlik numarası ve hedef, sonuç (`intent`/`succeeded`/`failed`). **Detay alanı (eski/yeni değerler) log'a girmez**, kişisel veri taşımaz; yetkili kayıt veritabanındaki satırdır |
+
+Satırın tamamı `jq -c .` ile ayrıştırılır; doğrulama: `docker compose logs --no-log-prefix backend worker | jq -c 'select(.["event.category"] == "iam")'`.
+
+**compose log driver örneği** (`compose.override.yaml` ya da kurumun kendi dosyası; satırlar zaten JSON olduğu için ayrıştırıcı gerekmez):
+```yaml
+services:
+  backend:
+    logging:
+      driver: json-file
+      options: { max-size: "50m", max-file: "5", tag: "opensicil-backend" }
+  worker:
+    logging:
+      driver: json-file
+      options: { max-size: "50m", max-file: "5", tag: "opensicil-worker" }
+```
+Docker'ın `syslog`/`gelf`/`fluentd` sürücüleri de aynı satırı taşır.
+
+**OTel Collector `filelog` örneği** (container log dosyalarını okur, JSON'u ayrıştırır, `timestamp`'ı olay zamanı yapar):
+```yaml
+receivers:
+  filelog:
+    include: [/var/lib/docker/containers/*/*-json.log]
+    operators:
+      - type: json_parser          # Docker'ın sarmalayıcısı: {"log": "...", "stream": ...}
+      - type: json_parser          # OpenSicil'in satırı
+        parse_from: body
+        timestamp: { parse_from: attributes.timestamp, layout_type: gotime, layout: "2006-01-02T15:04:05.000Z" }
+        severity: { parse_from: attributes.severity }
+exporters:
+  otlp:
+    endpoint: siem-collector.kurum.local:4317
+service:
+  pipelines:
+    logs: { receivers: [filelog], exporters: [otlp] }
+```
+Kubernetes'te aynı alıcı `/var/log/pods/*/*/*.log` okur; `container` operatörü sarmalayıcıyı çözer.
+
 ## İzleme (metrik ucu)
 
 Backend `GET /metrics` ile Prometheus metin biçiminde sayaç sunar (F-19; paket yok, birkaç satır metin). Erişim `METRICS_TOKEN` ile `Authorization: Bearer …` (ADR-061 madde 8); nginx `/metrics`i dışarıya **kapatır** (404), Prometheus backend'e doğrudan gider — compose'da `backend:8000`, Kubernetes'te pod/Service. Değerler kişisel veri içermez; tek etiket hedef sistem adıdır.

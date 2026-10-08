@@ -61,7 +61,7 @@ pub async fn tick(pool: &PgPool, time_zone: &str) -> Result<usize, String> {
     .fetch_all(&mut *tx)
     .await
     .map_err(|e| format!("bağlantılar okunamadı: {e}"))?;
-    let mut opened = expire_additional_roles(&mut tx, time_zone).await?;
+    let (mut opened, expired) = expire_additional_roles(&mut tx, time_zone).await?;
     opened += open_password_reset_jobs(&mut tx).await?;
     opened += open_retention_jobs(&mut tx).await?;
     expire_first_passwords(&mut tx).await?;
@@ -84,17 +84,21 @@ pub async fn tick(pool: &PgPool, time_zone: &str) -> Result<usize, String> {
         opened += inserted.rows_affected() as usize;
     }
     tx.commit().await.map_err(|e| e.to_string())?;
+    for identity in expired {
+        crate::log::audit("identity.role_expired", None, Some(identity), None, None);
+    }
     Ok(opened)
 }
 
 // ADR-020/038: bitisi gecmis ek rol atamasi kaldirilir, denetim kaydina "suresi doldu"
 // yazilir ve kimlik icin her hedefe is acilir (gruplar sonraki iste duser). Tek
-// ifade: veri degistiren CTE'ler bir kez calisir, sonuc acilan is sayisidir.
+// ifade: veri degistiren CTE'ler bir kez calisir. Doner: acilan is sayisi ve
+// denetime yazilan kimlikler (log satiri commit'ten sonra basilir, ADR-113).
 async fn expire_additional_roles(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     time_zone: &str,
-) -> Result<usize, String> {
-    let opened = sqlx::query(
+) -> Result<(usize, Vec<i64>), String> {
+    let (opened, logged): (i64, Vec<i64>) = sqlx::query_as(
         "WITH expired AS ( \
            DELETE FROM identity_additional_roles \
            WHERE ends_on < (now() AT TIME ZONE $1)::date RETURNING identity_id, role_id), \
@@ -102,17 +106,20 @@ async fn expire_additional_roles(
            INSERT INTO audit_log (event_type, identity_id, detail) \
            SELECT 'identity.role_expired', identity_id, \
                   jsonb_build_object('role_id', role_id, 'reason', 'süresi doldu') \
-           FROM expired RETURNING identity_id) \
-         INSERT INTO jobs (identity_id, target_system_id, priority) \
-         SELECT DISTINCT e.identity_id, t.id, $2 FROM expired e CROSS JOIN target_systems t \
-         ON CONFLICT (identity_id, target_system_id) WHERE status <> 'succeeded' DO NOTHING",
+           FROM expired RETURNING identity_id), \
+         opened AS ( \
+           INSERT INTO jobs (identity_id, target_system_id, priority) \
+           SELECT DISTINCT e.identity_id, t.id, $2 FROM expired e CROSS JOIN target_systems t \
+           ON CONFLICT (identity_id, target_system_id) WHERE status <> 'succeeded' DO NOTHING \
+           RETURNING 1) \
+         SELECT (SELECT count(*) FROM opened), ARRAY(SELECT identity_id FROM logged)",
     )
     .bind(time_zone)
     .bind(TRANSITION_PRIORITY)
-    .execute(&mut **tx)
+    .fetch_one(&mut **tx)
     .await
     .map_err(|e| format!("süresi dolan ek roller işlenemedi: {e}"))?;
-    Ok(opened.rows_affected() as usize)
+    Ok((opened as usize, logged))
 }
 
 // --- START FEATURE: first-password ---
