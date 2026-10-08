@@ -212,4 +212,5 @@
 - AD'nin politika gereği reddettiği parola en çok üç kez yeniden üretilir
 - Worker yazmadan önce hesabın ve grubun yönetilen kapsamda olduğunu AD'den denetler
 - Operatör kendi kimlik kaydında rol değiştiremez
+- Yazıcı GUID'i yazma hedefi olarak reddeder, sadece-boşsa-yaz kuralı teste bağlanır
 

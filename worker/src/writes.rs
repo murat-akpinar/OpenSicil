@@ -83,6 +83,30 @@ pub enum WriteOp {
 }
 
 impl WriteOp {
+    /// Islemin dokundugu DN'ler (ADR-057 madde 4: yazma hedefi her zaman gercek DN,
+    /// `<GUID=…>` yalnizca arama tabanidir).
+    pub fn target_dns(&self) -> Vec<&str> {
+        match self {
+            WriteOp::AddMember {
+                group_dn,
+                member_dn,
+            }
+            | WriteOp::RemoveMember {
+                group_dn,
+                member_dn,
+            } => vec![group_dn, member_dn],
+            WriteOp::MoveAccount { dn, new_parent, .. } => vec![dn, new_parent],
+            WriteOp::CreateAccount { dn, .. }
+            | WriteOp::SetEnabled { dn, .. }
+            | WriteOp::SetAttributes { dn, .. }
+            | WriteOp::DeleteAccount { dn }
+            | WriteOp::ResetPassword { dn }
+            | WriteOp::SetFirstPassword { dn, .. } => vec![dn],
+        }
+    }
+}
+
+impl WriteOp {
     pub fn event_type(&self) -> &'static str {
         match self {
             WriteOp::CreateAccount { .. } => "ad.account.create",

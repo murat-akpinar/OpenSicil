@@ -72,6 +72,13 @@ pub fn random_password() -> String {
 /// uretilip en cok bu kadar denenir; sonra ADR-009'un anlasilir hatasiyla durulur.
 pub const PASSWORD_ATTEMPTS: usize = 3;
 
+/// ADR-057 madde 4: `<GUID=…>` arama tabanidir, yazma hedefi olamaz.
+pub fn guid_target(op: &WriteOp) -> Option<&str> {
+    op.target_dns()
+        .into_iter()
+        .find(|dn| dn.trim_start().to_ascii_uppercase().starts_with("<GUID="))
+}
+
 /// AD'nin parola politikasi reddi: hata kodu `0000052D` (ERROR_PASSWORD_RESTRICTION)
 /// ile LDAP sonuc kodu 19 (constraintViolation, parola degisimi) ya da 53
 /// (unwillingToPerform, `add` — lab Samba'da olculdu 2026-10-08). Ayni sonuc
@@ -249,6 +256,11 @@ pub struct AdWriter<'a> {
 
 impl TargetWriter for AdWriter<'_> {
     async fn write(&mut self, op: &WriteOp) -> Result<(), WriteError> {
+        if let Some(dn) = guid_target(op) {
+            return Err(WriteError::Failed(format!(
+                "yazma hedefi gerçek DN olmalı, GUID değil (ADR-057): {dn}"
+            )));
+        }
         match op {
             WriteOp::CreateAccount {
                 dn,
@@ -544,6 +556,29 @@ mod tests {
             message
         );
         (result, calls)
+    }
+
+    #[test]
+    fn a_guid_is_never_a_write_target() {
+        let real = WriteOp::SetEnabled {
+            dn: "CN=a,OU=Personel,DC=x".into(),
+            enabled: true,
+        };
+        assert_eq!(guid_target(&real), None);
+        let by_guid = WriteOp::AddMember {
+            group_dn: "CN=GG,OU=Gruplar,DC=x".into(),
+            member_dn: "<guid=0f0e0d0c-0b0a-0908-0706-050403020100>".into(),
+        };
+        assert!(
+            guid_target(&by_guid).is_some(),
+            "küçük harfli yazım da yakalanır"
+        );
+        let moved = WriteOp::MoveAccount {
+            dn: "CN=a,OU=Personel,DC=x".into(),
+            new_rdn: "CN=a".into(),
+            new_parent: "<GUID=1>".into(),
+        };
+        assert!(guid_target(&moved).is_some());
     }
 
     #[tokio::test]

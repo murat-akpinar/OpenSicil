@@ -288,6 +288,14 @@ mod tests {
             ],
             "yönetici belirsiz: dokunulmaz; ofis dolu + sadece boşsa yaz: korunur"
         );
+        // ADR-034: "sadece bossa yaz" bos degeri doldurur; doluyken fark listesine hic
+        // girmez — gozlem farki ve yazma ayni listeden, sapma raporlanmaz
+        let mut empty_office = current.clone();
+        empty_office.remove("physicalDeliveryOfficeName");
+        assert!(changes(&rows, &s, &empty_office).contains(&(
+            "physicalDeliveryOfficeName".to_string(),
+            Some("Ankara".to_string())
+        )));
         assert_eq!(
             initial_attributes(&rows, &s),
             vec![
