@@ -1588,6 +1588,40 @@ async fn sync_attributes(c: &AdJob<'_>, ldap: &mut Ldap, dn: &str) -> Result<Str
 mod tests {
     use super::*;
 
+    // ADR-030: `ayrildi`dan donusun etkinlestirmesi yikicidir; baska gecis oznitelik.
+    // ADR-059 bilinen acik: `ayrildi → bekliyor` yazma uretmez, sonraki `bekliyor →
+    // aktif` oznitelik sayilir (docs/todo "Yikici sinifin iki yolu").
+    #[test]
+    fn undoing_a_departure_is_destructive_other_enables_are_attributes() {
+        let link = |applied: Option<&str>| LinkRow {
+            external_id: "g".into(),
+            applied_state: applied.map(str::to_string),
+            password_reset_at_departure: false,
+            first_password_pwd_last_set: None,
+            observed: false,
+            manage_requested: false,
+            unlink_requested: false,
+        };
+        let account = |enabled: bool| ad_account::DirectoryAccount {
+            dn: "CN=a,OU=Personel,DC=x".into(),
+            guid: "g".into(),
+            enabled,
+            member_of: Vec::new(),
+            last_logon_timestamp: None,
+            pwd_last_set: None,
+        };
+        let class = |p: EnabledPlan| p.op.map(|(_, class)| class);
+        let back = plan_enabled(&link(Some("departed")), &account(false), true, true);
+        assert_eq!(class(back), Some(OperationClass::Destructive));
+        let start = plan_enabled(&link(Some("pending")), &account(false), true, true);
+        assert_eq!(class(start), Some(OperationClass::Attribute));
+        let leave = plan_enabled(&link(Some("active")), &account(true), false, true);
+        assert_eq!(class(leave), Some(OperationClass::Destructive));
+        // departed → pending: hesap pasif kalir, yazma yok, niyet satiri dogmaz (ADR-059 acigi)
+        let to_pending = plan_enabled(&link(Some("departed")), &account(false), false, true);
+        assert_eq!(class(to_pending), None);
+    }
+
     #[test]
     fn writes_stay_inside_the_managed_scope() {
         let scope = ad::ManagedScope {

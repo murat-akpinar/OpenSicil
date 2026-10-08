@@ -92,6 +92,7 @@
 - Yönetilen bağlantıda yer tutucu rol olamaz kuralı teste bağlanır, kayıt ve düzenleme kapısı eklenir
 - Log bölümü kapanışı — testler, kapsam, imaj ve sır taraması
 - Lab koşusunda veritabanının bütün tabloları düz parola ve kimlik numarasına karşı taranır
+- Ayrılışı geri almanın yıkıcı sınıfı teste bağlanır, ADR-059 açığı ölçülür
 
 ### Yeniden düzenleme
 
