@@ -75,11 +75,30 @@ fn utc(secs: u64, millis: u32) -> String {
 
 pub fn emit(severity: &str, body: &str, fields: &[(&str, String)]) {
     let text = line(&now(), severity, body, fields);
+    #[cfg(test)]
+    captured().push(text.clone());
     if severity == "ERROR" {
         eprintln!("{text}");
     } else {
         println!("{text}");
     }
+}
+
+// N-09: libtest stdout'u yuttugu icin testler basilan satiri okuyamaz; test
+// derlemesinde her satir burada da birikir ve testler duz metin parola ya da
+// kimlik no arar. Uretim binary'sinde bu kod yok.
+#[cfg(test)]
+static CAPTURED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+#[cfg(test)]
+fn captured() -> std::sync::MutexGuard<'static, Vec<String>> {
+    CAPTURED.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Test: su ana kadar basilan satirlardan `needle`'i icerenlerin sayisi.
+#[cfg(test)]
+pub fn printed_lines_containing(needle: &str) -> usize {
+    captured().iter().filter(|l| l.contains(needle)).count()
 }
 
 /// Denetim satirinin SIEM kopyasi (ADR-113 madde 4). DB satiri yetkili kayittir;

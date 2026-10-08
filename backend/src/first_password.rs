@@ -374,6 +374,9 @@ mod tests {
         .await
         .unwrap();
         assert!(enc_left.is_none() && shown.is_some());
+        // N-09: gosterilen parola log satirina dusmez; yakalayici calisiyor
+        assert_eq!(crate::log::printed_lines_containing("Kf7m-Rq2x"), 0);
+        assert!(crate::log::printed_lines_containing(crate::audit::FIRST_PASSWORD_SHOWN) > 0);
         let audited: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM audit_log WHERE event_type IN ($1, $2) AND identity_id = $3",
         )

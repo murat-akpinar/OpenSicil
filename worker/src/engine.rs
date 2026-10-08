@@ -2504,6 +2504,11 @@ mod tests {
         for needle in [password.as_str(), national_id] {
             let hits = test_support::plain_text_hits(&pool, needle).await;
             assert!(hits.is_empty(), "düz metin bulundu: {hits:?}");
+            assert_eq!(
+                crate::log::printed_lines_containing(needle),
+                0,
+                "log satırında"
+            );
         }
         // Tarayicinin kendisi calisiyor: bilinen duz deger bulunuyor
         assert!(test_support::plain_text_hits(&pool, "parola.test")

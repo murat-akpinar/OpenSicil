@@ -103,6 +103,7 @@
 - Ayrılışı geri almanın yıkıcı sınıfı teste bağlanır, ADR-059 açığı ölçülür
 - ADR-062 kesinti senaryoları — add sonrası ölüm, kapalı veritabanı, iki worker
 - Ölçek bölümü kapanışı — testler, kapsam, imaj ve sır taraması
+- N-09 — log satırları da düz metin parola ve kimlik no için taranır
 
 ### Yeniden düzenleme
 

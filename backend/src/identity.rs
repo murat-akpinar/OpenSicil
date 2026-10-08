@@ -2233,6 +2233,8 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(count, 3, "başarısız kayıt satır bırakmaz");
+        // N-09: kayıt ve mükerrer reddi kimlik numarasını log satırına yazmaz
+        assert_eq!(crate::log::printed_lines_containing("10000000146"), 0);
         assert!(similar_name_exists(&pool, "ayşe", "YILMAZ").await.unwrap());
         assert!(!similar_name_exists(&pool, "Yok", "Kimse").await.unwrap());
 
