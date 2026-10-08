@@ -1030,8 +1030,14 @@ Kurallar:
 - [x] `docs/03` ve `docs/09`'a "AD'den geri dolum" bölümü (ADR-112 Sonuçları)
   - Not (2026-10-08): `docs/03` "Kimlik şeması" altına "AD'den geri dolum" alt bölümü (dört durumlu tablo: boş alan gece dolar — yönetici dahil, yer tutucu rol unvandan, dolu-farklı listesi ve alınan alanlar, TC kimlik no toplu eylemi; dolmayanlar UPN ve ad/e-posta farkı), `docs/09`'a aynı adlı işletme bölümü (önce dolum sonra eşleme değişikliği uyarısı — ADR-034'ün "boş kaynak siler" tuzağı, TC özniteliğinin nereye yazıldığı, iki denetim olayı). Kod değişmedi
   - Kabul: hangi alan kendiliğinden dolar, hangisi karar bekler, denetimde ne görünür — iki ekran da anlatılır
-- [ ] Kapanış: güvenlik ve test
+- [x] Kapanış: güvenlik ve test
   - (1a'daki kapanış şablonunun aynısı)
+  - Doğrulama (2026-10-08, vaultscan): `scripts/test-all.sh` → backend **276/277**, worker **127/127** (gerçek Postgres `--include-ignored` + lab Samba); kırmızı yalnızca `oidc_login_flow_against_lab_keycloak` (vaultscan'de lab Keycloak yok, ADR-133). `windows_ad_answers_open_questions` bu koşuda **geçti** — Hogwarts DC açık. fmt + clippy `-D warnings` + `cargo audit` iki crate'te ok
+  - **Kapsam** (`/root/opensicil-cov.sh`, iki ortam testi `--skip`): backend satır **%94,00**, worker satır **%93,97**
+  - **İmaj taraması** (trivy CRITICAL,HIGH, imajlar HEAD'den yeniden derlendi): `Status: fixed` yok — backend 53, worker 51 (önceki kapanışla aynı), nginx 0 (ADR-071)
+  - **Sır taraması** (`06c5bca~1..HEAD`, CHANGELOG hariç): eşleşmelerin hepsi kod bağlamı (`let token = create_session(…)`, `aead_key: &key`, `national_id_bidx = $3`) ya da betiklerdeki sahte `METRICS_TOKEN=hw|e2e|load` — değer yok
+  - **Güvenlik listesi:** TC kimlik dolumu `ad_diff::AUTHORITIES` ile serviste kapılı (auditor 403, testli), değer yalnızca AEAD + blind index ile yazılıyor, denetime `filled: true` giriyor; tekillik SQL'de `NOT EXISTS`. Ayrılış notu sunucuda ≤ 200 karakter ve kontrol karakteri yok (`identity::departure_note`), AD'ye öznitelik değeri olarak gidiyor (DN/filtreye girmiyor). Flash mesajları şablon kaçışından geçiyor, `app.js`'te `innerHTML` yok. Yeni SQL'in hepsi bağlı parametre. `docs/MAP.md` ve `.env.example` güncel
+  - Not: bölümde iki kutu açık ve ertelenmiş kalıyor (eşleme düzeltmesi, dönen iş göstergesinin tarayıcı ölçümü) — ikisi de kod değil, çalışan yığında ölçüm; kapanış onları beklemez
 
 ---
 
