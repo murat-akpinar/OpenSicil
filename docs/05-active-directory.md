@@ -161,7 +161,7 @@ Kaynak kodundan doğrulanan diğer davranışlar ([docs/11](11-dogrulama-notlari
 | `LDAP_MATCHING_RULE_IN_CHAIN` | 4.4.0'dan beri; her adımda tam arama yapar; 4.18'de boş sonuç raporu var | Seçilen sürümde lab'da doğrulanır |
 | `<GUID=…>` | Arama, modify, delete ve rename hedefi olarak çözülür | Worker yine gerçek DN ile yazar (Windows için belgeli değil) |
 | Silinen hesabı geri alma | Recycle Bin **yok**; tombstone reanimation elle LDAP işlemidir. GUID ve SID korunur, `memberOf` ve parola silinir | "Geri alınırsa bağlantı canlanır" Samba'da da doğrudur; üyelikleri sonraki iş geri yazar, parola için ilk parola yolu gerekir |
-| Parola karmaşıklık kuralı | Yalnızca karakter sınıfı sayar; **ad parçasına bakmaz** | "Reddedilen parolayı yeniden üret" (ADR-055) Samba'da sınanamaz: üreteç birim testiyle ve bir kez Windows VM'de doğrulanır |
+| Parola karmaşıklık kuralı | Yalnızca karakter sınıfı ve uzunluk sayar; **ad parçasına bakmaz** (2026-10-08'de yeniden ölçüldü: `sAMAccountName`'i içeren parola kabul edildi) | "Reddedilen parolayı yeniden üret" (ADR-055) Samba'da **zayıf parolayla** sınanır: `add` reddi `rc=53 unwillingToPerform` + `0000052D` (Windows parola değişiminde `rc=19` + `0000052D`); tanıma ikisini de kabul eder. Ad parçası reddi bir kez Windows'ta doğrulanır |
 | 1.000 nesne ve 1.500 değer sınırı | Ayrıştırılır ama **uygulanmaz** | Sayfalı arama kodu Samba'da sınır görmeden geçer; sınır testi Windows VM ister |
 | ModifyDN | Taşıma ve yeniden adlandırma tek işlemde; `deleteoldrdn = false` reddedilir | Worker her zaman `true` gönderir |
 

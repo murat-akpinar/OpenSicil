@@ -584,13 +584,22 @@ async fn provision(c: &AdJob<'_>, ldap: &mut Ldap, enabled: bool) -> Result<Stri
         &counters::needed_classes(true, false, first_request.is_some()),
     )
     .await?;
-    let create = WriteOp::CreateAccount {
-        dn: dn.clone(),
-        attributes,
-        password: ad_account::random_password(),
-        account_expires: c.desired.account_expires,
-    };
-    if apply(c, ldap, create, OperationClass::Grant).await? == Applied::DryRun {
+    // ADR-055 madde 5: reddedilen `add` hesap acmaz (ADR-057), yeni deneme ayni DN'e yeni `add`
+    let created = crate::with_fresh_password!(
+        ad_account::random_password,
+        |password| {
+            let create = WriteOp::CreateAccount {
+                dn: dn.clone(),
+                attributes: attributes.clone(),
+                password: password.clone(),
+                account_expires: c.desired.account_expires,
+            };
+            apply(c, ldap, create, OperationClass::Grant).await
+        },
+        job_message
+    );
+    let (_, applied) = created.map_err(password_exhausted)?;
+    if applied == Applied::DryRun {
         return Ok(format!(
             "kuru çalıştırma, uygulanacaktı: hesap {dn}, {} grup, {}",
             c.desired.memberships.len(),
@@ -1030,13 +1039,21 @@ async fn issue_first_password(
     if !account_unused(ldap, dn, link).await? {
         return reject(first_password::REJECT_USED).await;
     }
-    let password = ad_account::readable_password();
-    let op = WriteOp::SetFirstPassword {
-        dn: dn.to_string(),
-        password: password.clone(),
-        change_required: c.env.first_login_change_required,
-    };
-    if apply(c, ldap, op, OperationClass::FirstPassword).await? == Applied::DryRun {
+    // ADR-055 madde 5: yalnizca AD'nin kabul ettigi deger saklanir ve gosterilir
+    let issued = crate::with_fresh_password!(
+        ad_account::readable_password,
+        |password| {
+            let op = WriteOp::SetFirstPassword {
+                dn: dn.to_string(),
+                password: password.clone(),
+                change_required: c.env.first_login_change_required,
+            };
+            apply(c, ldap, op, OperationClass::FirstPassword).await
+        },
+        job_message
+    );
+    let (password, applied) = issued.map_err(password_exhausted)?;
+    if applied == Applied::DryRun {
         // Gozlem modu yazma noktasini kuru gecer; red nedeni operatorun gordugu sebeptir
         return reject(if link.observed {
             first_password::REJECT_OBSERVED
@@ -1056,6 +1073,20 @@ async fn issue_first_password(
         .await
         .map_err(JobError::Failed)?;
     Ok(", ilk parola verildi".to_string())
+}
+
+fn job_message(e: &JobError) -> String {
+    e.to_string()
+}
+
+/// Uc ret sonrasi ADR-009'un anlasilir hatasi; baska hata aynen doner.
+fn password_exhausted(e: JobError) -> JobError {
+    match e {
+        JobError::Failed(m) if ad_account::is_password_rejection(&m) => {
+            JobError::Failed(ad_account::exhausted(&m))
+        }
+        other => other,
+    }
 }
 
 fn first_value(attrs: &HashMap<String, Vec<String>>, name: &str) -> Option<String> {

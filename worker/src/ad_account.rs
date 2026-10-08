@@ -68,6 +68,52 @@ pub fn random_password() -> String {
         .collect()
 }
 
+/// ADR-055 madde 5: AD uretilen parolayi politika ihlaliyle reddederse yeni parola
+/// uretilip en cok bu kadar denenir; sonra ADR-009'un anlasilir hatasiyla durulur.
+pub const PASSWORD_ATTEMPTS: usize = 3;
+
+/// AD'nin parola politikasi reddi: hata kodu `0000052D` (ERROR_PASSWORD_RESTRICTION)
+/// ile LDAP sonuc kodu 19 (constraintViolation, parola degisimi) ya da 53
+/// (unwillingToPerform, `add` — lab Samba'da olculdu 2026-10-08). Ayni sonuc
+/// kodlarinin diger ihlalleri (tekil oznitelik vb.) parola sorunu degildir.
+pub fn is_password_rejection(message: &str) -> bool {
+    (message.contains("rc=19") || message.contains("rc=53"))
+        && message.to_ascii_uppercase().contains("0000052D")
+}
+
+/// Uretec ve yazici enjekte edilir: govde `$password` ile yazar (gerekirse klonlar),
+/// AD politika reddinde (`$message` hatanin metni) yeni parola uretilip en cok
+/// `PASSWORD_ATTEMPTS` kez denenir. Doner: `Ok((kabul edilen parola, sonuc))` ya da
+/// son hata. Reddedilen parola hicbir yerde kalmaz. Fonksiyon degil makro: jenerik
+/// async closure'in gelecegi `Send` kanitlanamiyor, yazici gelecegi ise `Send`.
+#[macro_export]
+macro_rules! with_fresh_password {
+    ($generate:expr, |$password:ident| $write:expr, $message:expr) => {{
+        let mut attempt = 1;
+        loop {
+            let $password = $generate();
+            match $write {
+                Ok(done) => break Ok(($password, done)),
+                Err(e)
+                    if attempt < $crate::ad_account::PASSWORD_ATTEMPTS
+                        && $crate::ad_account::is_password_rejection(&$message(&e)) =>
+                {
+                    attempt += 1
+                }
+                Err(e) => break Err(e),
+            }
+        }
+    }};
+}
+
+/// Uc ret sonrasi operatorun okuyacagi metin (ADR-009).
+pub fn exhausted(message: &str) -> String {
+    format!(
+        "AD parola politikası üretilen parolayı {PASSWORD_ATTEMPTS} kez reddetti; uzunluk, \
+         karmaşıklık ve ad parçası kuralını kontrol edin (ADR-009/055): {message}"
+    )
+}
+
 // --- START FEATURE: first-password ---
 // ADR-056/085: okunabilir ilk parola `Kf7m-Rq2x-Wn8d-Tz4p` — 16 karakter, dort dortlu;
 // 0/O/o/1/l/I yok; her siniftan (buyuk, kucuk, rakam) en az bir karakter.
@@ -240,10 +286,9 @@ impl TargetWriter for AdWriter<'_> {
                 .success()
                 .map(|_| ())
                 .map_err(ad::classify),
-            // ADR-033: kimsenin bilmedigi rastgele parola + pwdLastSet 0; parola hic saklanmaz
-            WriteOp::ResetPassword { dn } => {
-                set_password(self.ldap, dn, &random_password(), true).await
-            }
+            // ADR-033: kimsenin bilmedigi rastgele parola + pwdLastSet 0; parola hic
+            // saklanmaz. AD reddederse yenisi uretilir (ADR-055 madde 5).
+            WriteOp::ResetPassword { dn } => reset_password(self.ldap, dn).await,
             WriteOp::SetFirstPassword {
                 dn,
                 password,
@@ -251,6 +296,23 @@ impl TargetWriter for AdWriter<'_> {
             } => set_password(self.ldap, dn, password, *change_required).await,
         }
     }
+}
+
+// ADR-033: kimsenin bilmedigi rastgele parola + pwdLastSet 0; parola hic saklanmaz.
+// AD reddederse yenisi uretilir (ADR-055 madde 5).
+async fn reset_password(ldap: &mut Ldap, dn: &str) -> Result<(), WriteError> {
+    let message = |e: &WriteError| e.to_string();
+    let written: Result<(String, ()), WriteError> = crate::with_fresh_password!(
+        random_password,
+        |password| set_password(ldap, dn, &password, true).await,
+        message
+    );
+    written
+        .map(|_| ())
+        .map_err(|e| match is_password_rejection(&e.to_string()) {
+            true => WriteError::Failed(exhausted(&e.to_string())),
+            false => e,
+        })
 }
 
 // Parola yazilir; `change_required` ise pwdLastSet 0 (ilk giriste degistir, ADR-009/019),
@@ -448,6 +510,69 @@ async fn change_member(
 mod tests {
     use super::*;
 
+    const REJECTED: &str = "LDAP operation result: rc=19 (constraintViolation), dn: \"\", \
+        text: \"0000052D: Constraint violation - check_password_restrictions\"";
+    const UNIQUE: &str = "LDAP operation result: rc=19 (constraintViolation), dn: \"\", \
+        text: \"00002082: unique attribute\"";
+    // lab Samba'nin `add` reddi, birebir (2026-10-08)
+    const SAMBA_ADD: &str = "LDAP operation result: rc=53 (unwillingToPerform), dn: \"\", \
+        text: \"0000052D: Unwilling to perform - check_password_restrictions: the password is too short.\"";
+
+    // ADR-055 madde 5: uretec ve yazici enjekte; ret sayisi ve son hata.
+    async fn run(answers: &[&'static str]) -> (Result<(String, ()), WriteError>, usize) {
+        let mut calls = 0;
+        let mut n = 0;
+        let message = |e: &WriteError| e.to_string();
+        let result: Result<(String, ()), WriteError> = crate::with_fresh_password!(
+            || {
+                n += 1;
+                format!("parola-{n}")
+            },
+            |password| {
+                let answer = answers[calls];
+                calls += 1;
+                let _ = &password;
+                async {
+                    if answer.is_empty() {
+                        Ok(())
+                    } else {
+                        Err(WriteError::Failed(answer.into()))
+                    }
+                }
+                .await
+            },
+            message
+        );
+        (result, calls)
+    }
+
+    #[tokio::test]
+    async fn rejected_password_is_regenerated_at_most_three_times() {
+        let (ok, calls) = run(&[REJECTED, REJECTED, ""]).await;
+        assert_eq!(
+            ok.unwrap().0,
+            "parola-3",
+            "yalnızca kabul edilen parola döner"
+        );
+        assert_eq!(calls, 3);
+        let (err, calls) = run(&[REJECTED, REJECTED, REJECTED, ""]).await;
+        assert_eq!(calls, 3, "dördüncü deneme yok");
+        let message = err.unwrap_err().to_string();
+        assert!(is_password_rejection(&message));
+        assert!(exhausted(&message).contains("3 kez reddetti"));
+        let (ok, calls) = run(&[SAMBA_ADD, ""]).await;
+        assert!(
+            ok.is_ok() && calls == 2,
+            "add reddi (53) de yeniden üretilir"
+        );
+        assert!(!is_password_rejection(
+            "rc=53 (unwillingToPerform), text: \"00002077\""
+        ));
+        let (other, calls) = run(&[UNIQUE, ""]).await;
+        assert_eq!(calls, 1, "başka kısıt ihlalinde yeni parola üretilmez");
+        assert!(!is_password_rejection(&other.unwrap_err().to_string()));
+    }
+
     #[test]
     fn readable_password_is_four_groups_without_confusable_chars() {
         for _ in 0..50 {
@@ -524,6 +649,65 @@ mod tests {
 
     // Lab Samba AD: tek add ile hesap acilir (pasif), etkinlestirilir, gruba
     // eklenir/cikarilir, GUID ile bulunur, silinir; reddedilen parola hesap olusturmaz.
+    // ADR-055 madde 5, lab: Samba politika ihlalini (zayif parola) 19 + 0000052D ile
+    // reddeder; yeniden uretim hesabi acar ve kabul edilen deger doner. Not (olcum
+    // 2026-10-08): Samba 4.24 sAMAccountName'i iceren parolayi REDDETMIYOR — ad parcasi
+    // kurali Windows'ta; o ret `windows_ad_answers_open_questions`ta olculur.
+    #[tokio::test]
+    #[ignore = "lab Samba AD gerektirir: AD_LAB_URL, AD_LAB_BIND_DN, AD_LAB_PASSWORD, AD_CA_FILE ile çalıştır"]
+    async fn lab_rejects_a_weak_password_and_regeneration_opens_the_account() {
+        let var = |n: &str| std::env::var(n).unwrap_or_else(|_| panic!("{n} ayarlanmalı"));
+        let cfg = ad::AdConfig {
+            urls: ad::parse_urls(&var("AD_LAB_URL")),
+            bind_dn: var("AD_LAB_BIND_DN"),
+            password: var("AD_LAB_PASSWORD"),
+            ca_file: var("AD_CA_FILE"),
+        };
+        let mut ldap = ad::connect(&cfg).await.expect("lab AD");
+        let username = format!("yeniden{}", std::process::id() % 100_000);
+        let dn = account_dn(
+            &cn_for("Yeniden", "Uretim", None),
+            "OU=Personel,DC=opensicil,DC=lab",
+        );
+        let _ = ldap.delete(&dn).await; // onceki calismadan kalan
+        let attributes = vec![
+            ("sAMAccountName".to_string(), username.clone()),
+            ("givenName".to_string(), "Yeniden".to_string()),
+            ("sn".to_string(), "Uretim".to_string()),
+        ];
+        let mut writer = AdWriter { ldap: &mut ldap };
+        let mut first = true;
+        let mut generate = || match std::mem::take(&mut first) {
+            true => "zayif".to_string(),
+            false => random_password(),
+        };
+        let mut rejected = Vec::new();
+        let message = |e: &WriteError| e.to_string();
+        let created: Result<(String, ()), WriteError> = crate::with_fresh_password!(
+            generate,
+            |password| {
+                let op = WriteOp::CreateAccount {
+                    dn: dn.clone(),
+                    attributes: attributes.clone(),
+                    password: password.clone(),
+                    account_expires: None,
+                };
+                let result = writer.write(&op).await;
+                if let Err(e) = &result {
+                    rejected.push(e.to_string());
+                }
+                result
+            },
+            message
+        );
+        let (password, ()) = created.expect("ikinci denemede hesap açılır");
+        assert_eq!(rejected.len(), 1, "{rejected:?}");
+        assert!(is_password_rejection(&rejected[0]), "{}", rejected[0]);
+        assert_ne!(password, "zayif");
+        assert!(guid_by_dn(writer.ldap, &dn).await.is_ok());
+        writer.ldap.delete(&dn).await.unwrap().success().unwrap();
+    }
+
     #[tokio::test]
     #[ignore = "lab Samba AD gerektirir: AD_LAB_URL, AD_LAB_BIND_DN, AD_LAB_PASSWORD, AD_CA_FILE ile çalıştır"]
     async fn creates_enables_and_deletes_account_in_lab() {
