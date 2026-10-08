@@ -887,6 +887,7 @@ pub(crate) fn glyph_for(event_type: &str) -> (&'static str, &'static str) {
         audit::OPERATOR_LOGIN => ("ico-sign-in", "auth"),
         audit::OPERATOR_REJECTED => ("ico-sign-in", "danger"),
         audit::ACTIVITY_EXPORTED => ("ico-chart", "auth"),
+        audit::ACCESS_EXPORTED => ("ico-chart", "auth"),
         // --- config ---
         audit::TARGET_CHANGED => ("ico-cog", "config"),
         audit::MAPPING_CHANGED => ("ico-link", "config"),
@@ -946,6 +947,7 @@ pub(crate) const EVENT_TYPES: &[&str] = &[
     audit::OPERATOR_LOGIN,
     audit::OPERATOR_REJECTED,
     audit::ACTIVITY_EXPORTED,
+    audit::ACCESS_EXPORTED,
     audit::TARGET_CHANGED,
     audit::MAPPING_CHANGED,
     audit::SETTINGS_CHANGED,

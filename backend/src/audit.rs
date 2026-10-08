@@ -51,6 +51,8 @@ pub const MANAGE_APPROVED: &str = "manage.approved";
 pub const MANAGE_REJECTED: &str = "manage.rejected";
 /// ADR-134 madde 4: etkinlik gecmisi CSV olarak indirildi (filtre ve satir sayisi detayda)
 pub const ACTIVITY_EXPORTED: &str = "activity.exported";
+/// ADR-134 madde 6: yetki dokumu CSV olarak indirildi (satir sayisi detayda)
+pub const ACCESS_EXPORTED: &str = "access.exported";
 
 pub struct Actor<'a> {
     pub subject: Option<&'a str>,

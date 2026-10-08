@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}{{ lang.t("nav.access") }} — OpenSicil{% endblock %}
+{% block content %}
+{% include "tabs.html" %}
+{# ADR-134 madde 6: rol → kisiler ve uyelik ogesi → kisiler. Uyelik "olmasi
+   gereken"dir (onizlemenin hesabi), hedef sistem okunmaz. Yazma eylemi yok. #}
+<div class="page-head">
+  <div>
+    <h1 class="h1">{{ lang.t("nav.access") }}</h1>
+    <p class="sub">{{ lang.t("access.sub") }}</p>
+  </div>
+  <a class="btn" href="/reports/access?format=csv"><i class="ico ico-chart" aria-hidden="true"></i>{{ lang.t("activity.export_csv") }}</a>
+</div>
+
+{% for s in sections %}
+<section class="card mb-5">
+  <div class="card-head">
+    <span class="ico-tile ico-tile-ok"><i class="ico ico-shield" aria-hidden="true"></i></span>
+    <h2 class="h2">{{ lang.t(s.title) }}</h2>
+  </div>
+  <p class="sub mt-0 mb-3">{{ lang.t(s.hint) }}</p>
+  {% if s.grants.is_empty() %}
+  <p class="empty-hint">{{ lang.t("access.empty") }}</p>
+  {% else %}
+  <div class="tbl-scroll">
+  <table class="tbl">
+    <thead>
+      <tr>
+        <th>{{ lang.t("access.name") }}</th>
+        <th>{{ lang.t("access.scope") }}</th>
+        <th>{{ lang.t("access.person") }}</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for g in s.grants %}
+      <tr>
+        <td>{{ g.name }}</td>
+        <td class="muted">{% if s.is_role %}{{ lang.key("rolekind", g.scope) }}{% else %}{{ g.scope }}{% endif %}</td>
+        <td>
+          <details>
+            <summary class="link text-sm">{{ lang.t1("access.people_n", g.holders.len()) }}</summary>
+            <ul class="mt-2">
+            {% for h in g.holders %}
+              <li><a class="link" href="/identities/{{ h.id }}">{{ h.name }}</a>{% if !h.employee_number.is_empty() %} <span class="code">{{ h.employee_number }}</span>{% endif %}</li>
+            {% endfor %}
+            </ul>
+          </details>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
+</section>
+{% endfor %}
+{% endblock %}

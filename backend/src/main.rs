@@ -1,5 +1,6 @@
 #[macro_use]
 mod log;
+mod access_report;
 mod activity;
 mod ad_auth;
 mod ad_diff;

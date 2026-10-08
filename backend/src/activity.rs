@@ -41,10 +41,11 @@ const SYSTEM: &str = "system";
 // ponytail: tavan ustu kesilir (denetimde `total` ile gorunur); gerekirse akisli yanit
 const CSV_LIMIT: i64 = 100_000;
 
-/// Raporlar calisma alaninin sekmeleri (ADR-134 madde 2); yetki dokumu ve
-/// ayrilmis ama acik raporlari kendi kutucuklarinda eklenir.
-pub(crate) const REPORT_TABS: [(&str, &str); 2] = [
+/// Raporlar calisma alaninin sekmeleri (ADR-134 madde 2); ayrilmis ama acik
+/// raporu kendi kutucugunda eklenir.
+pub(crate) const REPORT_TABS: [(&str, &str); 3] = [
     ("/reports/activity", "nav.activity"),
+    ("/reports/access", "nav.access"),
     ("/reports", "reports.coverage"),
 ];
 
@@ -368,7 +369,7 @@ fn pretty(detail: &str) -> String {
 /// CSV hucresi. `= + - @` (ve sekme/satir basi) ile baslayan deger tablo
 /// programinda formul olarak calisir; basina tek tirnak konur (CSV enjeksiyonu).
 /// Ayirici, tirnak ya da satir sonu iceren deger tirnaklanir.
-fn csv_cell(value: &str) -> String {
+pub(crate) fn csv_cell(value: &str) -> String {
     let value = match value.starts_with(['=', '+', '-', '@', '\t', '\r']) {
         true => format!("'{value}"),
         false => value.to_string(),
@@ -781,21 +782,6 @@ mod tests {
         );
     }
 
-    async fn cookie(pool: &PgPool, authorities: &[&str]) -> String {
-        let operator = crate::operator_session::Operator {
-            subject: "sub-a".to_string(),
-            username: "denetci".to_string(),
-            email: "d@example.org".to_string(),
-            authorities: authorities.iter().map(|a| a.to_string()).collect(),
-            auth_source: crate::operator_session::AuthSource::Oidc,
-            lang: crate::i18n::DEFAULT,
-        };
-        let token = crate::operator_session::create_session(pool, &operator)
-            .await
-            .unwrap();
-        format!("{}={token}", crate::cookie::OPERATOR_SESSION_COOKIE_NAME)
-    }
-
     // Gercek Postgres gerektirir (ADR-070).
     #[tokio::test]
     #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
@@ -1002,7 +988,7 @@ mod tests {
                 (status, String::from_utf8(body.to_vec()).unwrap())
             }
         };
-        let auditor = cookie(&pool, &["auditor"]).await;
+        let auditor = crate::test_support::operator_cookie(&pool, "denetci", &["auditor"]).await;
         let (status, page) = get(
             format!("/reports/activity?identity={ali}&from=&to=2026-02-30"),
             auditor.clone(),
@@ -1031,7 +1017,7 @@ mod tests {
         .await;
         assert!(page.contains("Ali Kaya"), "tek eşleşme kişiye çözülür");
         assert!(page.contains(r#"aria-current="page""#));
-        let none = cookie(&pool, &[]).await;
+        let none = crate::test_support::operator_cookie(&pool, "denetci", &[]).await;
         assert_eq!(
             get("/reports/activity".into(), none).await.0,
             StatusCode::FORBIDDEN

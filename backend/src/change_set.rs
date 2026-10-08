@@ -17,8 +17,8 @@ use std::collections::HashMap;
 use sqlx::PgPool;
 
 use crate::desired_state::{
-    desired_state, AccountLink, AccountPresence, AdditionalRole, Clock, Date, Model, Origin,
-    SingleValued, Source, TargetDefaults, Timeline,
+    desired_state, lifecycle_state, AccountLink, AccountPresence, AdditionalRole, Clock, Date,
+    LifecycleState, Model, Origin, SingleValued, Source, TargetDefaults, Timeline,
 };
 use crate::org::{DefinitionEdit, Owner, MAX_DEPTH};
 
@@ -721,6 +721,56 @@ pub async fn clear(pool: &PgPool, owner: Owner, id: i64) -> Result<(), sqlx::Err
         .execute(pool)
         .await
         .map(|_| ())
+}
+
+// ---- yetki dokumu (ADR-134 madde 6) ----
+
+/// Kim hangi rolu tasiyor, hangi uyelik ogesinde olmali. Uyelik onizlemenin
+/// `desired_state`inden gelir, ikinci bir kural yazilmaz; ayrilmis kimlik iki
+/// listede de yoktur (uyelikleri zaten bos).
+#[derive(Debug, Default, PartialEq)]
+pub struct Holdings {
+    /// (kimlik, rol): temel rol herkeste, ek rol suresi dolmadikca
+    pub roles: Vec<(i64, i64)>,
+    /// (kimlik, katalog ogesi)
+    pub items: Vec<(i64, i64)>,
+}
+
+pub async fn holdings(pool: &PgPool, time_zone: &str) -> Result<Holdings, sqlx::Error> {
+    let ids: Vec<i64> = sqlx::query_scalar("SELECT id FROM identities WHERE deleted_at IS NULL")
+        .fetch_all(pool)
+        .await?;
+    Ok(Data::load(pool, &ids, time_zone).await?.holdings())
+}
+
+impl Data {
+    fn holdings(&self) -> Holdings {
+        let mut out = Holdings::default();
+        for (id, person) in &self.people {
+            let state = lifecycle_state(&person.timeline, &self.clock);
+            if matches!(state, LifecycleState::Departed | LifecycleState::Deleted) {
+                continue;
+            }
+            let additional = self
+                .additional
+                .get(id)
+                .into_iter()
+                .flatten()
+                .filter(|(_, ends_on)| ends_on.is_none_or(|end| self.clock.today <= end))
+                .map(|(role, _)| *role);
+            let roles = self.base_roles.iter().copied().chain([person.primary_role]);
+            out.roles
+                .extend(roles.chain(additional).map(|role| (*id, role)));
+            for target in &self.targets {
+                let link = self.links.get(&(*id, target.0)).map(|(l, _)| l);
+                let model = self.model(*id, person, target, None);
+                let desired = desired_state(&person.timeline, &model, link, &self.clock);
+                out.items
+                    .extend(desired.memberships.into_iter().map(|item| (*id, item)));
+            }
+        }
+        out
+    }
 }
 
 // --- END FEATURE: change-set ---

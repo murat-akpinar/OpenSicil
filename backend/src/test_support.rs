@@ -226,3 +226,19 @@ pub async fn set_threshold(pool: &PgPool, value: usize) {
         .await
         .expect("eşik yazılamadı");
 }
+
+// Verilen yetkilerle acilmis operator oturumunun cerezi (HTTP testleri).
+pub async fn operator_cookie(pool: &PgPool, username: &str, authorities: &[&str]) -> String {
+    let operator = crate::operator_session::Operator {
+        subject: format!("sub-{username}"),
+        username: username.to_string(),
+        email: format!("{username}@example.org"),
+        authorities: authorities.iter().map(|a| a.to_string()).collect(),
+        auth_source: crate::operator_session::AuthSource::Oidc,
+        lang: crate::i18n::DEFAULT,
+    };
+    let token = crate::operator_session::create_session(pool, &operator)
+        .await
+        .expect("operatör oturumu açılamadı");
+    format!("{}={token}", crate::cookie::OPERATOR_SESSION_COOKIE_NAME)
+}
