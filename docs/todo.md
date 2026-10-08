@@ -870,6 +870,8 @@ Kurallar:
   - Kabul: dolum kutucuğu bittikten **sonra** Eşlemeler ekranında satır silinip `employeeNumber` ile eklenir; iki öznitelik de izinli listede (`worker/src/mapping_rules.rs:19-20`)
   - Kabul: değişiklikten sonra Hogwarts hesaplarında sicil değeri silinmiyor (yönetime almadan önce `manage_diff` ile doğrulanır)
   - Not: varsayılan eşleme (`0011_attribute_mappings.sql`) değişmez — hangi özniteliğin sicil tuttuğu kurum kararıdır
+  - Not (2026-10-08, ölçülmüş veriden): Hogwarts'ta 29 hesabın 29'unda `employeeNumber` dolu, 0'ında `employeeID` (ADR-106 ölçümü). Bugünkü `employeeID` satırıyla yönetime alma **yıkıcı değil** — boş `employeeID`'ye sicil ekler, `employeeNumber`'a dokunmaz; yanlış olan veri değil eşleme. Satır çevrildikten sonra tek bilinen fark Draco: OpenSicil `9` ↔ AD `00000000009` — motor değeri baştaki sıfırsız yazar (`employee_number_matches` yalnızca sahiplenmede kullanılıyor, eşleme farkında değil). Yönetime almadan önce ya kimlikte `00000000009` girilir ya da bu fark kabul edilir
+  - **Ertelenen (Windows AD açılınca):** ekrandaki değişiklik ve `manage_diff` ölçümü gerçek Hogwarts'ta yapılır; kutu o zamana kadar açık kalır, sıradaki kutulara geçilir
 - [x] "AD'de farklı" listesi + toplu "AD'dekini al" (ADR-112 madde 2)
   - Kabul: mutabakat ekranında kişi · alan · AD'deki değer · OpenSicil'deki değer satırları; yalnızca ikisi de dolu ve farklı olanlar listelenir
   - Kabul: satırlar seçilip tek eylemle alınır; seçilmeyen satır değişmez, otomatik yazma hiç yok
@@ -951,6 +953,7 @@ Kurallar:
   - Kabul: JS kapalıyken sayfa çalışmaya devam eder: rozet durur, tazeleme olmaz, düğme sıradan düğmedir
   - Kabul: yeni uç nokta, yeni sorgu ve yeni i18n anahtarı yok — durum zaten şablonda
   - Not (2026-10-03): bu kutucuğun kodu önceki kutucukla aynı ağaçta yazıldı ve onunla birlikte commit'lendi (`View::running`/`refreshing`, şablonlardaki `data-reload`, `app.js`'teki `autoReload` + `submitBusy`). Sunucu tarafı çalışan yığında ölçüldü: iş sürerken `badge badge-info" data-reload="5"` + `ico-spin`, iş bitince `data-reload` yok ve sonuç metni basılıyor. Kalan doğrulama tarayıcıda: dönen düğme ikonu, odak/alan koruması ve JS kapalı davranış
+  - **Ertelenen (2026-10-08):** tarayıcı ölçümü oturum istiyor; vaultscan veritabanına geçici oturum yazmak ve e2e kimliğini betiğe vermek izin engeline takıldı. Windows AD açılınca kullanıcının oturumuyla ölçülür (dönen ikon + çift tık, işaretli kutuda tazelemenin atlanması, JS kapalı)
 - [x] Sahiplenme sonrası durum kendiliğinden güncellenir (yazma şeridi de izlenir)
   - Kullanıcı bildirimi (2026-10-03): "sahiplenme mevzuu F5 atmadan yazı değişmiyor, yapınca otomatik durum kısmı güncellense"
   - Ölçüm (çalışan yığın, aynı gün): sahiplenme POST'u 303 dönüyor ve mesaj basılıyor, ama dönen sayfada `data-reload` **yok**; öznitelik yalnızca okuma işine konuyor (`reconcile.html:33`, `targets.html:44`). Sahiplenmenin işleri yazma şeridinde (`jobs` 49/50, POST'tan ~5 sn sonra "sahiplenildi (gözlem modu)") ve sayfa o şeride hiç bakmıyor

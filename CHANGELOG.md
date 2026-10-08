@@ -43,6 +43,7 @@
 - AD'den geri dolum kuralı docs/03 ve docs/09'a yazılır
 - Denetim kaydının stdout kopyası todo'da kapanır
 - Güvenlik kontrol listesi teste bağlanır, kanıtı olmayan maddeler kutucuğa döner
+- Eşleme düzeltmesi ve iş göstergesi kutuları Windows AD'ye ertelendi
 
 ### Düzeltmeler
 
