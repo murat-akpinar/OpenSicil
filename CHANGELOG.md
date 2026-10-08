@@ -12,6 +12,7 @@
 - Faz 3d kapanışı — güvenlik ve test
 - Lab dosyaları git'ten çıkarıldı, geliştirici makinesinde kalır
 - Tek sinyal test betiği, kabul edilen rsa bulgusu audit.toml'a girer, .lab-env git dışı
+- Hogwarts bağlama betiği test sunucusunda çalışıyor, model unvanları AD ile eşleşiyor
 
 ### Dokümantasyon
 

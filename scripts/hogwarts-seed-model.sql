@@ -125,18 +125,18 @@ WHERE d.code = 'HOG' AND t.kind = 'ad'
 ON CONFLICT (department_id, target_system_id)
 DO UPDATE SET email_domain = EXCLUDED.email_domain, upn_suffix = EXCLUDED.upn_suffix;
 
--- --- Birincil roller: unvan (AD'de `title`) ---
+-- --- Birincil roller: unvan (AD'de `title`; 2026-10-08 olcumu: ogretmenler Teacher, hemsire Nurse) ---
 INSERT INTO roles (kind, name, title)
 VALUES
   ('primary', 'Headmaster',          'Headmaster'),
   ('primary', 'Deputy Headmistress', 'Deputy Headmistress'),
-  ('primary', 'Professor',           'Professor'),
+  ('primary', 'Professor',           'Teacher'),
   ('primary', 'Groundskeeper',       'Keeper of Keys and Grounds'),
   ('primary', 'Caretaker',           'Caretaker'),
   ('primary', 'Librarian',           'Librarian'),
-  ('primary', 'Matron',              'Matron'),
+  ('primary', 'Matron',              'Nurse'),
   ('primary', 'Student',             'Student')
-ON CONFLICT (name) DO NOTHING;
+ON CONFLICT (name) DO UPDATE SET title = EXCLUDED.title;
 
 -- --- Ek roller: dersler (GG-Course-* basina bir rol) ---
 INSERT INTO roles (kind, name)
