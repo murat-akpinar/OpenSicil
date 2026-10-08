@@ -83,6 +83,48 @@
     </div>
     {% endif %}
   </form>
+
+  {# ADR-127: kayıp öğenin çıkışı. Tazeleme silmez; devir yalnızca tek canlı
+     ikiz varsa, kaldırma her zaman — önce bakan tanımlar yazar. Canlı satırda
+     eylem yok; auditor eylemleri görmez. #}
+  {% let lost = self.missing_of(v.target.id) %}
+  {% if !lost.is_empty() %}
+  <details class="group-box border-t border-line pt-4">
+    <summary class="summary-row">
+      <span class="group-title">{{ lang.t("catalog.missing_title") }}</span>
+      <span class="badge badge-warn">{{ lost.len() }}</span>
+    </summary>
+    <p class="hint mb-3">{{ lang.t("catalog.missing_hint") }}</p>
+    <div class="tbl-scroll">
+      <table class="tbl">
+        <tbody>
+        {% for m in lost %}
+          <tr>
+            <td><span class="font-medium">{{ m.display_name }}</span><br><span class="muted text-xs">{{ m.location }}</span></td>
+            <td class="text-sm">
+              {% if m.roles.is_empty() && m.departments.is_empty() %}<span class="muted">{{ lang.t("catalog.no_refs") }}</span>{% endif %}
+              {% for r in m.roles %}<span class="badge badge-muted">{{ r }}</span> {% endfor %}
+              {% for d in m.departments %}<span class="badge badge-info">{{ d }}</span> {% endfor %}
+            </td>
+            {% if can_edit %}
+            <td class="text-right whitespace-nowrap">
+              {% if m.twin.is_some() %}
+              <form method="post" action="/catalog/{{ m.id }}/hand-over" class="inline">
+                <button class="btn" type="submit">{{ lang.t("catalog.hand_over") }}</button>
+              </form>
+              {% endif %}
+              <form method="post" action="/catalog/{{ m.id }}/remove" class="inline">
+                <button class="btn" type="submit">{{ lang.t("catalog.remove") }}</button>
+              </form>
+            </td>
+            {% endif %}
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  {% endif %}
 </section>
 {% endfor %}
 </div>

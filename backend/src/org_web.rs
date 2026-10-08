@@ -122,6 +122,8 @@ pub fn routes() -> Router<AppState> {
         .route("/targets", get(targets_page))
         .route("/targets/{id}", post(save_target))
         .route("/targets/{id}/catalog-refresh", post(refresh_catalog))
+        .route("/catalog/{id}/hand-over", post(hand_over_missing))
+        .route("/catalog/{id}/remove", post(remove_missing))
 }
 
 // Tekrar eden alanlar (entitlement) ve hedef basina ayar alanlari (pa.<hedef> ...).
@@ -316,13 +318,19 @@ fn item_views(
     pick: impl Fn(i64) -> bool,
 ) -> Vec<ItemView> {
     list.iter()
-        .filter(|c| c.target_id == target)
+        .filter(|c| c.target_id == target && offered(c, &pick))
         .map(|c| ItemView {
             id: c.id,
             label: item_label(c, lang),
             selected: pick(c.id),
         })
         .collect()
+}
+
+/// ADR-127 madde 6: kayip oge yeni secenek olarak sunulmaz; tanimda zaten
+/// isaretliyse "(kayıp)" etiketiyle kalir (operator kaldirabilsin diye).
+fn offered(c: &org::CatalogChoice, pick: impl Fn(i64) -> bool) -> bool {
+    !c.missing || pick(c.id)
 }
 
 fn target_views(
@@ -336,7 +344,7 @@ fn target_views(
         let names = options
             .memberships
             .iter()
-            .filter(|c| c.target_id == target)
+            .filter(|c| c.target_id == target && offered(c, selected))
             .map(|c| c.display_name.clone());
         names
             .zip(item_views(&options.memberships, target, lang, selected))
@@ -717,6 +725,17 @@ struct TargetsTemplate {
     error: String,
     info: String,
     can_edit: bool,
+    /// ADR-127: kayip katalog ogeleri ve onlara bakan tanimlar
+    missing: Vec<crate::catalog_exit::Missing>,
+}
+
+impl TargetsTemplate {
+    fn missing_of(&self, target: &i64) -> Vec<&crate::catalog_exit::Missing> {
+        self.missing
+            .iter()
+            .filter(|m| m.target_id == *target)
+            .collect()
+    }
 }
 
 /// `?new=` degeri izinli listeden gecer: ekrana yalnizca `ROLE_KINDS`'teki bir
@@ -1358,15 +1377,15 @@ async fn render_targets(state: &AppState, op: &Operator, notice: Notice) -> Resp
         Ok(tz) => tz,
         Err(response) => return *response,
     };
-    let (targets, options, refreshes) = match (
-        org::list_targets(&state.pool).await,
-        org::catalog_options(&state.pool).await,
-        org::last_catalog_refresh(&state.pool, &time_zone).await,
-    ) {
-        (Ok(t), Ok(o), Ok(r)) => (t, o, r),
-        (Err(e), _, _) | (_, Err(e), _) | (_, _, Err(e)) => {
-            return internal("hedef sistemler okunamadı", e)
-        }
+    let loaded = tokio::try_join!(
+        org::list_targets(&state.pool),
+        org::catalog_options(&state.pool),
+        org::last_catalog_refresh(&state.pool, &time_zone),
+        crate::catalog_exit::missing(&state.pool),
+    );
+    let (targets, options, refreshes, missing) = match loaded {
+        Ok(loaded) => loaded,
+        Err(e) => return internal("hedef sistemler okunamadı", e),
     };
     let views = targets
         .into_iter()
@@ -1379,8 +1398,62 @@ async fn render_targets(state: &AppState, op: &Operator, notice: Notice) -> Resp
         error: notice.error,
         info: notice.info,
         can_edit: allowed(op, WRITE_AUTHORITIES),
+        missing,
     })
 }
+
+// --- START FEATURE: missing-catalog-exit ---
+/// ADR-127: kayip satirin iki cikisi; yetki tanim duzenlemeyle ayni, sonuc
+/// hedefler sayfasina 303 + flash, denetimde hangi oge nereye/hangi tanimlardan.
+async fn hand_over_missing(
+    OperatorSession(op): OperatorSession,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Response {
+    exit_missing(&state, &op, id, true).await
+}
+
+async fn remove_missing(
+    OperatorSession(op): OperatorSession,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Response {
+    exit_missing(&state, &op, id, false).await
+}
+
+async fn exit_missing(state: &AppState, op: &Operator, id: i64, hand_over: bool) -> Response {
+    use crate::catalog_exit::{self, Outcome};
+    if !allowed(op, WRITE_AUTHORITIES) {
+        return forbidden(op.lang);
+    }
+    let outcome = match hand_over {
+        true => catalog_exit::hand_over(&state.pool, id).await,
+        false => catalog_exit::remove(&state.pool, id).await,
+    };
+    let (detail, key) = match outcome {
+        Ok(Outcome::NotMissing) => return StatusCode::NOT_FOUND.into_response(),
+        Ok(Outcome::NoTwin) => {
+            return Notice::err(op.lang.t("catalog.no_twin").to_string())
+                .redirect(&state.pool, op, "/targets")
+                .await
+        }
+        Ok(Outcome::HandedOver { twin }) => (
+            serde_json::json!({ "action": "catalog_handed_over", "item": id, "to": twin }),
+            "catalog.handed_over",
+        ),
+        Ok(Outcome::Removed { roles, departments }) => (
+            serde_json::json!({ "action": "catalog_removed", "item": id,
+                "roles": roles, "departments": departments }),
+            "catalog.removed",
+        ),
+        Err(e) => return internal("kayıp katalog öğesi işlenemedi", e),
+    };
+    audit_operator(state, op, crate::audit::TARGET_CHANGED, None, detail).await;
+    Notice::info(op.lang.t(key).to_string())
+        .redirect(&state.pool, op, "/targets")
+        .await
+}
+// --- END FEATURE: missing-catalog-exit ---
 
 type RefreshRow = (i64, String, String, String);
 
@@ -1650,6 +1723,76 @@ mod tests {
             .header(header::COOKIE, cookie)
             .body(Body::from(body.to_string()))
             .unwrap()
+    }
+
+    /// ADR-127: kayip satirin eylemleri yetkide; canli satira 404; rol formu
+    /// isaretli olmayan kayip ogeyi secenek olarak sunmaz.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn missing_catalog_items_have_an_exit_only_for_editors() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        crate::test_support::seed_two_identities(&pool).await;
+        let cat = crate::test_support::seed_example_catalog(&pool).await;
+        let app = crate::web::routes()
+            .with_state(crate::web::test_state(pool.clone(), "https://localhost"));
+        let admin = cookie_as(&pool, "ayse.yonetici", &["admin"]).await;
+        let auditor = cookie_as(&pool, "veli.denetci", &["auditor"]).await;
+        let send = |method: &'static str, uri: String, c: String| {
+            let app = app.clone();
+            async move { app.oneshot(request(method, &uri, "", &c)).await.unwrap() }
+        };
+        sqlx::query("UPDATE catalog_items SET missing_since = now() WHERE id = $1")
+            .bind(cat.gg_nobet)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let role: i64 = sqlx::query_scalar("SELECT primary_role_id FROM identities LIMIT 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        let page = body_string(send("GET", "/targets".into(), admin.clone()).await).await;
+        assert!(
+            page.contains(&format!("/catalog/{}/remove", cat.gg_nobet)),
+            "{page}"
+        );
+        assert!(
+            !page.contains(&format!("/catalog/{}/hand-over", cat.gg_nobet)),
+            "ikizi yok"
+        );
+        let page = body_string(send("GET", "/targets".into(), auditor.clone()).await).await;
+        assert!(!page.contains("/catalog/"), "auditor eylem görmez");
+        let role_form =
+            body_string(send("GET", format!("/roles/{role}"), admin.clone()).await).await;
+        assert!(
+            !role_form.contains(&format!("value=\"{}\"", cat.gg_nobet)),
+            "işaretli olmayan kayıp öğe seçenek değil"
+        );
+
+        let remove = format!("/catalog/{}/remove", cat.gg_nobet);
+        assert_eq!(
+            send("POST", remove.clone(), auditor).await.status(),
+            StatusCode::FORBIDDEN
+        );
+        let live = format!("/catalog/{}/remove", cat.gg_vpn);
+        assert_eq!(
+            send("POST", live, admin.clone()).await.status(),
+            StatusCode::NOT_FOUND
+        );
+        let r = send("POST", remove, admin.clone()).await;
+        let page = body_string(follow(&app, r, &admin).await).await;
+        assert!(page.contains("katalogdan kaldırıldı"), "{page}");
+        let audited: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM audit_log WHERE detail->>'action' = 'catalog_removed'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(audited, 1);
+
+        drop(app);
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
     }
 
     /// ADR-126 madde 1: basari POST'u 303 doner; mesaj yonlendirilen GET'te bir kez basilir.

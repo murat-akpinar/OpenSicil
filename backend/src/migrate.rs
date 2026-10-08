@@ -89,7 +89,8 @@ async fn fill_slugs(pool: &PgPool) -> Result<(), String> {
 //   silindi temizligi (kisisel veri kolonlari + deleted_at) yalnizca worker
 //   (ADR-015, ADR-038, ADR-077). Kimlik satiri hic silinmez, ic ID kalir.
 // - identity_additional_roles: suresi dolan atamayi worker siler (ADR-020)
-// - catalog_items: yalnizca worker yazar, silmez (kayip isaretler); target_systems
+// - catalog_items: yalnizca worker yazar, silmez (kayip isaretler); backend yalnizca
+//   operatorun istegiyle KAYIP satiri siler (ADR-127, kosul kodda); target_systems
 //   satirlari sabit, varsayilanlarini backend gunceller; yetki ogesi ve tek
 //   degerli ayar tablolari backend'in (ADR-015, docs/03)
 // - account_links: yalnizca worker (ADR-015); backend uc operator kararini yazar:
@@ -133,6 +134,7 @@ GRANT SELECT ON target_systems, catalog_items TO {backend}, {worker};
 GRANT UPDATE (provision_account_default, default_container_item_id, retention_days, \
 delete_requires_approval, password_reset_delay_days) ON target_systems TO {backend};
 GRANT INSERT, UPDATE ON catalog_items TO {worker};
+GRANT DELETE ON catalog_items TO {backend};
 GRANT SELECT, INSERT, UPDATE, DELETE ON role_entitlements, department_entitlements, \
 role_target_settings, department_target_settings TO {backend};
 GRANT SELECT ON role_entitlements, department_entitlements, role_target_settings, \

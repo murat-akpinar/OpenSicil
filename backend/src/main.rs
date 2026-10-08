@@ -6,6 +6,7 @@ mod auth;
 mod bootstrap_account;
 mod bulk_adopt;
 mod bulk_manage;
+mod catalog_exit;
 mod change_set;
 mod common_settings;
 mod cookie;
