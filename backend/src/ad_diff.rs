@@ -54,6 +54,8 @@ impl Diff {
     /// Alan etiketinin i18n anahtari
     pub fn label(&self) -> &'static str {
         match self.field {
+            "given_name" => "field.given_name",
+            "surname" => "field.surname",
             "employee_number" => "field.employee_number",
             "department" => "field.department",
             "role" => "field.role",
@@ -67,6 +69,9 @@ pub struct Pair {
     pub identity_id: i64,
     pub person: String,
     pub account_name: String,
+    /// AD'deki ad/soyad (ADR-138): iki tarafta da degismisse listeye duser
+    pub ad_given_name: Option<String>,
+    pub ad_surname: Option<String>,
     pub ad_employee_number: Option<String>,
     pub ad_mobile: Option<String>,
     pub ad_telephone: Option<String>,
@@ -77,6 +82,8 @@ pub struct Pair {
     pub ad_title: Option<String>,
     /// `ad_title`'in unvani olan birincil rol; eslesme yoksa `None`
     pub ad_role_id: Option<i64>,
+    pub given_name: String,
+    pub surname: String,
     pub employee_number: Option<String>,
     pub mobile_phone: Option<String>,
     /// Kimligin departman adi; `department_id` `NOT NULL` oldugundan hep dolu
@@ -84,14 +91,6 @@ pub struct Pair {
     /// Kimligin birincil rolunun unvani; yer tutucu rolde ve unvan girilmemis
     /// rolde `None` — karsilastirilacak degerimiz yok, satir cikmaz
     pub role_title: Option<String>,
-}
-
-/// ADR-018 madde 5 / ADR-042: bastaki sifirlar ve bosluklar atilarak esit mi.
-/// `worker/src/adoption.rs:employee_number_matches` ikizi — crate'ler bagimsiz
-/// (ADR-070), fonksiyon paylasilamiyor.
-fn same_employee_number(a: &str, b: &str) -> bool {
-    let norm = |s: &str| s.trim().trim_start_matches('0').to_string();
-    norm(a) == norm(b)
 }
 
 fn filled(value: &Option<String>) -> Option<&str> {
@@ -133,8 +132,20 @@ pub fn diffs(p: &Pair) -> Vec<Diff> {
         node_id: None,
     };
     let mut out = Vec::new();
+    for (field, ad, ours) in [
+        ("given_name", &p.ad_given_name, &p.given_name),
+        ("surname", &p.ad_surname, &p.surname),
+    ] {
+        if let Some(ad) = filled(ad) {
+            if ad != ours.trim() {
+                out.push(row(field, ad, ours));
+            }
+        }
+    }
     if let (Some(ad), Some(ours)) = (filled(&p.ad_employee_number), filled(&p.employee_number)) {
-        if !same_employee_number(ad, ours) {
+        // Yazim birebir (ADR-138 ek): `00000000009` ile `9` farktir; bastaki
+        // sifiri yok sayan kural yalnizca sahiplenme eslestirmesinde
+        if ad != ours {
             out.push(row("employee_number", ad, ours));
         }
     }
@@ -170,7 +181,7 @@ pub fn diffs(p: &Pair) -> Vec<Diff> {
 // degil) ve yer tutucu rol iki yerde de disarida kalir: unvani AD'ye yazilmaz,
 // dolumu gece taramasinin isidir.
 const PAIRS_SQL: &str = "SELECT f.identity_id, i.given_name || ' ' || i.surname, \
-    f.account_name, f.employee_number, f.mobile, f.telephone_number, \
+    f.account_name, f.given_name, f.surname, f.employee_number, f.mobile, f.telephone_number, \
     f.department_name, \
     (SELECT max(d.id) FROM departments d \
        WHERE lower(d.name) = lower(f.department_name) HAVING count(*) = 1), \
@@ -178,7 +189,7 @@ const PAIRS_SQL: &str = "SELECT f.identity_id, i.given_name || ' ' || i.surname,
     (SELECT max(r.id) FROM roles r \
        WHERE r.kind = 'primary' AND NOT r.placeholder \
          AND lower(btrim(r.title)) = lower(btrim(f.title)) HAVING count(*) = 1), \
-    i.employee_number, i.mobile_phone, dep.name, \
+    i.given_name, i.surname, i.employee_number, i.mobile_phone, dep.name, \
     CASE WHEN rol.placeholder THEN NULL ELSE rol.title END \
     FROM reconcile_findings f JOIN identities i ON i.id = f.identity_id \
     JOIN departments dep ON dep.id = i.department_id \
@@ -186,68 +197,33 @@ const PAIRS_SQL: &str = "SELECT f.identity_id, i.given_name || ' ' || i.surname,
     WHERE f.target_system_id = $1 AND i.deleted_at IS NULL \
     ORDER BY i.given_name, i.surname, f.identity_id";
 
-/// identity_id, kisi, hesap adi, AD sicil, AD cep, AD sabit hat, AD departman,
-/// AD departmaninin agactaki id'si, AD unvan, unvanin rol id'si, sicil, cep,
-/// departman adi, rolumuzun unvani
-type PairRow = (
-    i64,
-    String,
-    String,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<i64>,
-    Option<String>,
-    Option<i64>,
-    Option<String>,
-    Option<String>,
-    String,
-    Option<String>,
-);
-
 pub async fn list(pool: &PgPool, target: i64) -> Result<Vec<Diff>, sqlx::Error> {
-    let rows: Vec<PairRow> = sqlx::query_as(PAIRS_SQL)
-        .bind(target)
-        .fetch_all(pool)
-        .await?;
+    use sqlx::Row;
+    let rows = sqlx::query(PAIRS_SQL).bind(target).fetch_all(pool).await?;
     Ok(rows
-        .into_iter()
-        .flat_map(
-            |(
-                identity_id,
-                person,
-                account_name,
-                ad_employee_number,
-                ad_mobile,
-                ad_telephone,
-                ad_department,
-                ad_department_id,
-                ad_title,
-                ad_role_id,
-                employee_number,
-                mobile_phone,
-                department_name,
-                role_title,
-            )| {
-                diffs(&Pair {
-                    identity_id,
-                    person,
-                    account_name,
-                    ad_employee_number,
-                    ad_mobile,
-                    ad_telephone,
-                    ad_department,
-                    ad_department_id,
-                    ad_title,
-                    ad_role_id,
-                    employee_number,
-                    mobile_phone,
-                    department_name,
-                    role_title,
-                })
-            },
-        )
+        .iter()
+        .flat_map(|r| {
+            diffs(&Pair {
+                identity_id: r.get(0),
+                person: r.get(1),
+                account_name: r.get(2),
+                ad_given_name: r.get(3),
+                ad_surname: r.get(4),
+                ad_employee_number: r.get(5),
+                ad_mobile: r.get(6),
+                ad_telephone: r.get(7),
+                ad_department: r.get(8),
+                ad_department_id: r.get(9),
+                ad_title: r.get(10),
+                ad_role_id: r.get(11),
+                given_name: r.get(12),
+                surname: r.get(13),
+                employee_number: r.get(14),
+                mobile_phone: r.get(15),
+                department_name: r.get(16),
+                role_title: r.get(17),
+            })
+        })
         .collect())
 }
 
@@ -271,6 +247,8 @@ pub struct Outcome {
 // yarisi yok; `rows_affected() == 0` "atlandi" demektir.
 const TAKE_EMPLOYEE_SQL: &str = "UPDATE identities SET employee_number = $2 WHERE id = $1 \
     AND NOT EXISTS (SELECT 1 FROM identities o WHERE o.employee_number = $2 AND o.id <> $1)";
+const TAKE_GIVEN_NAME_SQL: &str = "UPDATE identities SET given_name = $2 WHERE id = $1";
+const TAKE_SURNAME_SQL: &str = "UPDATE identities SET surname = $2 WHERE id = $1";
 const TAKE_PHONE_SQL: &str = "UPDATE identities SET mobile_phone = $2 WHERE id = $1";
 // Departman ve rol id'si `list`'te cozuldu; burada ad eslestirmesi tekrarlanmaz.
 const TAKE_DEPARTMENT_SQL: &str = "UPDATE identities SET department_id = $2 WHERE id = $1";
@@ -302,6 +280,15 @@ pub async fn take(pool: &PgPool, target: i64, selected: &[&str]) -> Result<Outco
                 .execute(pool)
                 .await?
                 .rows_affected(),
+            ("given_name" | "surname", _) => sqlx::query(match diff.field {
+                "given_name" => TAKE_GIVEN_NAME_SQL,
+                _ => TAKE_SURNAME_SQL,
+            })
+            .bind(diff.identity_id)
+            .bind(&diff.ad)
+            .execute(pool)
+            .await?
+            .rows_affected(),
             ("employee_number", _) => sqlx::query(TAKE_EMPLOYEE_SQL)
                 .bind(diff.identity_id)
                 .bind(&diff.ad)
@@ -321,7 +308,8 @@ pub async fn take(pool: &PgPool, target: i64, selected: &[&str]) -> Result<Outco
                 .push(format!("{} ({})", diff.person, diff.ad));
             continue;
         }
-        if matches!(diff.field, "department" | "role") {
+        // Ad degisikligi turemis oznitelikleri (displayName) de degistirir (ADR-138)
+        if matches!(diff.field, "department" | "role" | "given_name" | "surname") {
             crate::jobs::enqueue(
                 pool,
                 diff.identity_id,
@@ -350,6 +338,8 @@ mod tests {
             identity_id: 1,
             person: "Draco Malfoy".into(),
             account_name: "draco.malfoy".into(),
+            ad_given_name: None,
+            ad_surname: None,
             ad_employee_number: None,
             ad_mobile: None,
             ad_telephone: None,
@@ -357,6 +347,8 @@ mod tests {
             ad_department_id: None,
             ad_title: None,
             ad_role_id: None,
+            given_name: "Draco".into(),
+            surname: "Malfoy".into(),
             employee_number: None,
             mobile_phone: None,
             department_name: "Hogwarts".into(),
@@ -448,9 +440,11 @@ mod tests {
         p.ad_employee_number = Some("00000000009".into());
         assert!(diffs(&p).is_empty());
 
-        // bastaki sifir fark degil
-        p.employee_number = Some("9".into());
+        // ayni yazim fark degil; bastaki sifir farktir (AD'deki yazim alinabilsin)
+        p.employee_number = Some("00000000009".into());
         assert!(diffs(&p).is_empty());
+        p.employee_number = Some("9".into());
+        assert_eq!(diffs(&p)[0].ours, "9");
 
         // gercek fark
         p.employee_number = Some("10".into());
@@ -462,6 +456,26 @@ mod tests {
             ("00000000009", "10")
         );
         assert_eq!(rows[0].key(), "1.employee_number");
+    }
+
+    #[test]
+    fn name_rows_compare_exactly_and_ignore_an_empty_directory_value() {
+        let mut p = pair();
+        assert!(diffs(&p).is_empty());
+        p.ad_given_name = Some(" Draco ".into());
+        assert!(diffs(&p).is_empty(), "boşluk fark değil");
+        p.ad_given_name = Some("draco".into());
+        p.ad_surname = Some("Malfoy-Black".into());
+        let rows = diffs(&p);
+        assert_eq!(
+            rows.iter()
+                .map(|r| (r.field, r.label()))
+                .collect::<Vec<_>>(),
+            [
+                ("given_name", "field.given_name"),
+                ("surname", "field.surname")
+            ]
+        );
     }
 
     #[test]

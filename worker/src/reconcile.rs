@@ -383,6 +383,242 @@ pub async fn fill_placeholder_roles(pool: &PgPool, target: i64) -> Result<u64, S
 }
 // --- END FEATURE: reconcile ---
 
+// --- START FEATURE: ad-change-sync ---
+// ADR-138: AD'de yapilan degisiklik kendiliginden gelir. Taban onceki taramanin
+// anlik goruntusudur — ayri bir "son esitlenen deger" tablosu yok. Alan yalnizca
+// AD'de degistiyse (bizdeki deger AD'nin eski haline esitse) kimlige yazilir;
+// iki taraf da degistiyse satir "AD'de farkli" listesinde kalir (ADR-112 madde 2).
+
+/// Bir hesabin kisi alanlari: AD tarafi (eski/yeni tarama) ya da kimlik tarafi.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PersonFields {
+    pub given_name: Option<String>,
+    pub surname: Option<String>,
+    pub employee_number: Option<String>,
+    pub phone: Option<String>,
+    pub department: Option<String>,
+    pub title: Option<String>,
+}
+
+fn same_text(a: &str, b: &str) -> bool {
+    a.trim() == b.trim()
+}
+
+// Departman ve unvan agacta buyuk/kucuk harfe bakmadan cozulur (ad_diff ile ayni).
+fn same_name(a: &str, b: &str) -> bool {
+    a.trim().to_lowercase() == b.trim().to_lowercase()
+}
+
+fn present(v: &Option<String>) -> Option<&str> {
+    v.as_deref().map(str::trim).filter(|v| !v.is_empty())
+}
+
+/// ADR-138 madde 1: yeni AD degeri yalnizca AD degistiyse ve biz eski AD
+/// degerinde duruyorsak alinir. Taban yoksa, AD bosaldiysa ya da bizde bossa
+/// (onu dolum yapar, ADR-112 madde 1) hicbir sey alinmaz.
+fn ad_only_change<'a>(
+    old: Option<&str>,
+    new: Option<&'a str>,
+    ours: Option<&str>,
+    same: fn(&str, &str) -> bool,
+) -> Option<&'a str> {
+    let (old, new, ours) = (old?, new?, ours?);
+    (!same(old, new) && same(ours, old)).then_some(new)
+}
+
+/// (alan, alanin okunusu, esitlik kurali)
+type FieldRule = (
+    &'static str,
+    fn(&PersonFields) -> &Option<String>,
+    fn(&str, &str) -> bool,
+);
+
+/// Alinacak alanlar: (alan, AD'deki yeni deger, bizdeki eski deger).
+pub fn ad_changes<'a>(
+    old: &PersonFields,
+    new: &'a PersonFields,
+    ours: &'a PersonFields,
+) -> Vec<(&'static str, &'a str, &'a str)> {
+    let fields: [FieldRule; 6] = [
+        ("given_name", |p| &p.given_name, same_text),
+        ("surname", |p| &p.surname, same_text),
+        (
+            // Yazim birebir: `00000000009` ile `9` esitlemede farktir (ADR-138 ek);
+            // bastaki sifiri yok sayan kural yalnizca sahiplenme eslestirmesinde
+            "employee_number",
+            |p| &p.employee_number,
+            same_text,
+        ),
+        ("mobile_phone", |p| &p.phone, same_text),
+        ("department", |p| &p.department, same_name),
+        ("role", |p| &p.title, same_name),
+    ];
+    fields
+        .into_iter()
+        .filter_map(|(field, get, same)| {
+            let to = ad_only_change(
+                present(get(old)),
+                present(get(new)),
+                present(get(ours)),
+                same,
+            )?;
+            Some((field, to, present(get(ours))?))
+        })
+        .collect()
+}
+
+fn ad_side(row: &sqlx::postgres::PgRow, prefix: &str) -> PersonFields {
+    let get = |c: &str| row.get::<Option<String>, _>(format!("{prefix}{c}").as_str());
+    PersonFields {
+        given_name: get("given_name"),
+        surname: get("surname"),
+        employee_number: get("employee_number"),
+        phone: adoption::writable_phone(get("mobile").or(get("telephone_number")).as_deref())
+            .map(str::to_string),
+        department: get("department_name"),
+        title: get("title"),
+    }
+}
+
+/// Taramadan once cagrilir: bagli hesaplarin onceki AD hali (taban).
+pub async fn load_previous(
+    pool: &PgPool,
+    target: i64,
+) -> Result<HashMap<String, PersonFields>, sqlx::Error> {
+    let rows = sqlx::query(
+        "SELECT external_id, given_name, surname, employee_number, mobile, telephone_number, \
+         department_name, title FROM reconcile_findings \
+         WHERE target_system_id = $1 AND identity_id IS NOT NULL",
+    )
+    .bind(target)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .iter()
+        .map(|row| (row.get("external_id"), ad_side(row, "")))
+        .collect())
+}
+
+// Yeni bulgu + kimligin bugunku hali + AD metninin agactaki karsiligi. Yer tutucu
+// rolun unvani "bos" sayilir: onu `fill_placeholder_roles` doldurur.
+const CHANGES_SQL: &str = "SELECT f.identity_id, f.external_id, \
+    f.given_name, f.surname, f.employee_number, f.mobile, f.telephone_number, \
+    f.department_name, f.title, \
+    (SELECT max(d.id) FROM departments d \
+       WHERE lower(d.name) = lower(f.department_name) HAVING count(*) = 1) AS department_id, \
+    (SELECT max(r.id) FROM roles r WHERE r.kind = 'primary' AND NOT r.placeholder \
+       AND lower(btrim(r.title)) = lower(btrim(f.title)) HAVING count(*) = 1) AS role_id, \
+    i.given_name AS i_given_name, i.surname AS i_surname, \
+    i.employee_number AS i_employee_number, i.mobile_phone AS i_mobile, \
+    NULL::text AS i_telephone_number, dep.name AS i_department_name, \
+    CASE WHEN rol.placeholder THEN NULL ELSE rol.title END AS i_title \
+    FROM reconcile_findings f JOIN identities i ON i.id = f.identity_id \
+    JOIN departments dep ON dep.id = i.department_id \
+    JOIN roles rol ON rol.id = i.primary_role_id \
+    WHERE f.target_system_id = $1 AND i.deleted_at IS NULL ORDER BY f.identity_id";
+
+// Sicil tekil: baska kimlikte duruyorsa yazilmaz (ADR-112 madde 1 ile ayni kural).
+fn update_sql(field: &str) -> &'static str {
+    match field {
+        "given_name" => "UPDATE identities SET given_name = $1 WHERE id = $2",
+        "surname" => "UPDATE identities SET surname = $1 WHERE id = $2",
+        "employee_number" => {
+            "UPDATE identities SET employee_number = $1 WHERE id = $2 AND NOT EXISTS \
+             (SELECT 1 FROM identities o WHERE o.employee_number = $1 AND o.id <> $2)"
+        }
+        _ => "UPDATE identities SET mobile_phone = $1 WHERE id = $2",
+    }
+}
+
+/// Bulgular yazildiktan sonra cagrilir. Doner: AD'den degisiklik alinan kimlik sayisi.
+pub async fn take_ad_changes(
+    pool: &PgPool,
+    target: i64,
+    previous: &HashMap<String, PersonFields>,
+) -> Result<usize, String> {
+    let rows = sqlx::query(CHANGES_SQL)
+        .bind(target)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| format!("AD değişiklik adayları okunamadı: {e}"))?;
+    let mut tx: Transaction<'_, Postgres> = pool.begin().await.map_err(|e| e.to_string())?;
+    let mut changed_ids: Vec<i64> = Vec::new();
+    for row in &rows {
+        let external_id: String = row.get("external_id");
+        let Some(old) = previous.get(&external_id) else {
+            continue; // taban yok: ilk tarama ya da yeni baglanti
+        };
+        let identity: i64 = row.get("identity_id");
+        let (new, ours) = (ad_side(row, ""), ad_side(row, "i_"));
+        let mut taken = 0;
+        for (field, to, from) in ad_changes(old, &new, &ours) {
+            let node = match field {
+                "department" => Some(row.get::<Option<i64>, _>("department_id")),
+                "role" => Some(row.get::<Option<i64>, _>("role_id")),
+                _ => None,
+            };
+            let query = match (field, node) {
+                // agacta tek dugume cozulmuyor: listeye kalir, tahmin edilmez
+                (_, Some(None)) => continue,
+                ("department", Some(Some(id))) => {
+                    sqlx::query("UPDATE identities SET department_id = $1 WHERE id = $2").bind(id)
+                }
+                (_, Some(Some(id))) => {
+                    sqlx::query("UPDATE identities SET primary_role_id = $1 WHERE id = $2").bind(id)
+                }
+                (_, None) => sqlx::query(update_sql(field)).bind(to),
+            };
+            let done = query
+                .bind(identity)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("AD değişikliği yazılamadı: {e}"))?
+                .rows_affected();
+            if done == 0 {
+                continue;
+            }
+            sqlx::query(
+                "INSERT INTO audit_log (event_type, identity_id, target_system_id, detail) \
+                 VALUES ($1, $2, $3, jsonb_build_object('source', 'ad_auto', \
+                 'target_system_id', $3, 'field', $4::text, 'from', $5::text, 'to', $6::text))",
+            )
+            .bind(TAKEN_EVENT)
+            .bind(identity)
+            .bind(target)
+            .bind(field)
+            .bind(from)
+            .bind(to)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("AD değişikliği denetime yazılamadı: {e}"))?;
+            taken += 1;
+        }
+        if taken == 0 {
+            continue;
+        }
+        // Departman/rol OU'yu ve gruplari, ad turemis oznitelikleri belirler: tek is.
+        sqlx::query(
+            "INSERT INTO jobs (identity_id, target_system_id, priority) VALUES ($1, $2, 1) \
+             ON CONFLICT (identity_id, target_system_id) WHERE status <> 'succeeded' DO NOTHING",
+        )
+        .bind(identity)
+        .bind(target)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("AD değişikliği sonrası iş açılamadı: {e}"))?;
+        changed_ids.push(identity);
+    }
+    tx.commit().await.map_err(|e| e.to_string())?;
+    for identity in &changed_ids {
+        crate::log::audit(TAKEN_EVENT, None, Some(*identity), Some(target), None);
+    }
+    Ok(changed_ids.len())
+}
+
+/// backend `audit::IDENTITY_FIELD_TAKEN` ile ayni olay; kaynak `ad_auto`.
+pub const TAKEN_EVENT: &str = "identity.field_taken";
+// --- END FEATURE: ad-change-sync ---
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -605,7 +841,7 @@ mod tests {
         let set_placeholder = |id: i64| {
             let pool = pool.clone();
             async move {
-                sqlx::query("UPDATE identities SET primary_role_id = $2 WHERE id = $1")
+                sqlx::query("UPDATE identities SET primary_role_id = $1 WHERE id = $2")
                     .bind(id)
                     .bind(placeholder)
                     .execute(&pool)
@@ -844,6 +1080,203 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(again, 1, "silinmiş kimliğe ikinci dolum satırı yazılmaz");
+
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
+    fn person(given: &str, employee: &str, department: &str) -> PersonFields {
+        PersonFields {
+            given_name: Some(given.to_string()),
+            employee_number: Some(employee.to_string()),
+            department: Some(department.to_string()),
+            ..PersonFields::default()
+        }
+    }
+
+    // ADR-138 madde 1: yalnizca AD'de degisen alan alinir.
+    #[test]
+    fn only_a_directory_side_change_is_taken() {
+        let old = person("Draco", "9", "Slytherin");
+        let ours = person("Draco", "9", "Slytherin");
+
+        // AD degismedi: hicbir sey
+        assert!(ad_changes(&old, &old, &ours).is_empty());
+
+        // AD'de ad ve sicilin yazimi degisti; departmanda yalnizca harf buyuklugu
+        let new = person("Drako", "00000000009", "slytherin ");
+        assert_eq!(
+            ad_changes(&old, &new, &ours),
+            vec![
+                ("given_name", "Drako", "Draco"),
+                ("employee_number", "00000000009", "9")
+            ]
+        );
+
+        // sitede de degismis: cakisma, alinmaz (listeye kalir)
+        let ours_changed = person("Dray", "9", "Slytherin");
+        // ad sitede de degismis: cakisma, alinmaz; sicil yalnizca AD'de degisti
+        assert_eq!(
+            ad_changes(&old, &new, &ours_changed),
+            vec![("employee_number", "00000000009", "9")]
+        );
+
+        // taban/AD/biz bos: alinmaz (bosaltma siteye tasinmaz, bos alani dolum doldurur)
+        let empty = PersonFields::default();
+        assert!(ad_changes(&empty, &new, &ours).is_empty());
+        assert!(ad_changes(&old, &empty, &ours).is_empty());
+        assert!(ad_changes(&old, &new, &empty).is_empty());
+
+        // gercek sicil degisikligi alinir
+        let new = person("Draco", "10", "Slytherin");
+        assert_eq!(
+            ad_changes(&old, &new, &ours),
+            vec![("employee_number", "10", "9")]
+        );
+    }
+
+    // ADR-138 uctan uca: ilk taramada taban yok; ikinci taramada yalnizca AD'de
+    // degisen alan kimlige yazilir, iki tarafta degisen alana dokunulmaz.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn a_directory_side_change_reaches_the_identity_on_the_next_scan() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        let seed = crate::test_support::seed_example_model(&pool).await;
+        let key = [7u8; crate::crypto::KEY_LEN];
+        for (id, given, surname, employee) in [
+            (seed.identity, "Ayşe", "Yılmaz", "100"),
+            (seed.other_identity, "Ali", "Kaya", "200"),
+        ] {
+            sqlx::query(
+                "UPDATE identities SET given_name = $2, surname = $3, employee_number = $4, \
+                 mobile_phone = '+905321111111' WHERE id = $1",
+            )
+            .bind(id)
+            .bind(given)
+            .bind(surname)
+            .bind(employee)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        let links = [
+            link("g-1", MANAGED, seed.identity, "?"),
+            link("g-2", OBSERVED, seed.other_identity, "?"),
+        ];
+        let accounts = |ayse_given: &str, ayse_mobile: &str, ayse_employee: &str, ali_sn: &str| {
+            let mut ayse = account("g-1", "ayse.yilmaz", true);
+            ayse.given_name = Some(ayse_given.to_string());
+            ayse.surname = Some("Yılmaz".to_string());
+            ayse.employee_number = Some(ayse_employee.to_string());
+            ayse.mobile = Some(ayse_mobile.to_string());
+            let mut ali = account("g-2", "ali.kaya", true);
+            ali.given_name = Some("Ali".to_string());
+            ali.surname = Some(ali_sn.to_string());
+            ali.employee_number = Some("200".to_string());
+            ali.mobile = Some("+905321111111".to_string());
+            vec![ayse, ali]
+        };
+        let scan = |accs: Vec<DirectoryAccount>| {
+            let pool = pool.clone();
+            let links = links.clone();
+            async move {
+                let job: i64 = sqlx::query_scalar(
+                    "INSERT INTO read_jobs (kind, target_system_id, requested_by, status) \
+                     VALUES ('reconcile', $1, 'test', 'succeeded') RETURNING id",
+                )
+                .bind(seed.ad)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+                let previous = load_previous(&pool, seed.ad).await.unwrap();
+                store(&pool, seed.ad, job, &compare(&accs, &links), &key)
+                    .await
+                    .unwrap();
+                take_ad_changes(&pool, seed.ad, &previous).await.unwrap()
+            }
+        };
+
+        assert_eq!(
+            scan(accounts("Ayşe", "+905321111111", "100", "Kaya")).await,
+            0,
+            "ilk taramada taban yok"
+        );
+        // sitede Ali'nin soyadi degisti (gozlem modu, AD'ye gitmedi)
+        sqlx::query("UPDATE identities SET surname = 'Kaya-Site' WHERE id = $1")
+            .bind(seed.other_identity)
+            .execute(&pool)
+            .await
+            .unwrap();
+        // AD'de: Ayse'nin adi ve cebi degisti, sicilin yazimi degisti (sifirlar);
+        // Ali'nin soyadi AD'de de degisti (cakisma)
+        assert_eq!(
+            scan(accounts(
+                "Ayşegül",
+                "+905322222222",
+                "00000000100",
+                "Kaya-AD"
+            ))
+            .await,
+            1
+        );
+        let fields = |id: i64| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_as::<_, (String, String, Option<String>, Option<String>)>(
+                    "SELECT given_name, surname, employee_number, mobile_phone \
+                     FROM identities WHERE id = $1",
+                )
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+            }
+        };
+        assert_eq!(
+            fields(seed.identity).await,
+            (
+                "Ayşegül".into(),
+                "Yılmaz".into(),
+                Some("00000000100".into()),
+                Some("+905322222222".into())
+            )
+        );
+        assert_eq!(
+            fields(seed.other_identity).await.1,
+            "Kaya-Site",
+            "iki tarafta değişen alan listeye kalır"
+        );
+        let audit: Vec<String> = sqlx::query_scalar(
+            "SELECT detail->>'field' FROM audit_log WHERE event_type = $1 \
+             AND detail->>'source' = 'ad_auto' AND identity_id = $2 ORDER BY id",
+        )
+        .bind(TAKEN_EVENT)
+        .bind(seed.identity)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(audit, ["given_name", "employee_number", "mobile_phone"]);
+        let jobs: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM jobs WHERE identity_id = $1 AND target_system_id = $2",
+        )
+        .bind(seed.identity)
+        .bind(seed.ad)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(jobs, 1, "kimlik için tek iş");
+
+        assert_eq!(
+            scan(accounts(
+                "Ayşegül",
+                "+905322222222",
+                "00000000100",
+                "Kaya-AD"
+            ))
+            .await,
+            0,
+            "AD değişmedi: tekrar alınmaz"
+        );
 
         drop(pool);
         crate::test_support::drop_temp_db(&admin_pool, &db_name).await;

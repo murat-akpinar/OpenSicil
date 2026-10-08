@@ -1293,6 +1293,20 @@ Kurallar:
   - Not (2026-10-08): `backend/src/target_keys.rs` — `decide` saf karar, `resolve` katmanı. axum'da `Router::layer` routing'den **sonra** çalıştığı için uygulama dış router'ın `fallback_service`'ine kondu, katman onun üstünde; handler'lar `Path<i64>` kaldı. Bilinmeyen slug için ayrı `NotFound` sonucu: ilk koşuda `Path<i64>` 400 dönüyordu. Şablonlar sayısal bağlantı basıyor, tıklanınca bir kez 303 (ADR-137 madde 4)
   - Doğrulama (2026-10-08, vaultscan): `scripts/test-all.sh` → `TEMİZ`, backend **281/281** (+4: üç saf karar testi, bir gerçek router testi), worker **128/128**. Çalışan yığında `curl`: `/targets/1/reconcile?page=2` → `303 /targets/active-directory/reconcile?page=2`, `/targets/2` → `303 /targets/zimbra`, `/targets/yok` → `404`, oturumsuz `/targets/active-directory/mappings` → giriş sayfası
 
+## AD'de yapılan değişiklik kendiliğinden gelir (ADR-138)
+
+> Kullanıcı isteği (2026-10-08): "ad'de değiştirdiğim siteye yansımalı, web arayüzünden değiştirdiğim ad'ye yansımalı". Sorulan üç soru: alanlar kişi alanları, iki tarafta değişen listeye, sıklık 15 dakika.
+
+- [x] AD'de değişen kişi alanı bir sonraki taramada kimliğe gelir, mutabakat 15 dakikada bir
+  - Kabul: önceki taramaya göre yalnızca AD'de değişen ad, soyad, sicil, cep, departman ve unvan kimliğe yazılır; sitede de değişmişse "AD'de farklı" listesinde kalır
+  - Kabul: alınan her alan `identity.field_taken` (`source: ad_auto`, önce/sonra) olarak denetime girer, kimlik için tek iş açılır
+  - Kabul: "AD'de farklı" listesi ad ve soyadı da gösterir
+  - Kabul: mutabakat 15 dakikada bir kendiliğinden açılır; gece taraması değişmez
+  - Kabul: çalışan yığında AD'de bir kişinin cebi ya da adı değiştirilir, en geç 15 dakika sonra kişi sayfasında görünür
+  - Not (2026-10-08): taban ayrı tablo değil, önceki anlık görüntü — `reconcile::load_previous` `store`'dan önce okur, saf `ad_changes` alan başına karar verir, `take_ad_changes` yazar + denetim + tek iş. Periyodik açıcı `scheduler::open_periodic_reconcile` (`RECONCILE_EVERY` 15 dakika, sabit; ayar ekranına taşınması gerekirse ADR-131 listesine girer). Backend fark listesine ad ve soyad eklendi; tuple 16 alanı aştığı için `ad_diff::list` satırı sırayla okuyor
+  - Not (sicil, aynı gün): ilk sürüm sicili baştaki sıfırları atarak karşılaştırıyordu (sahiplenmenin kuralı). Draco'da OpenSicil `9` ↔ AD `00000000009` bu yüzden ne kendiliğinden geldi ne listede çıktı. Eşitlemede ve fark listesinde yazım artık birebir; sahiplenme eşleştirmesi değişmedi
+  - Doğrulama (2026-10-08): vaultscan `scripts/test-all.sh` → TEMİZ (iki crate test + fmt + clippy + audit, lab Samba + gerçek Postgres + Windows AD + lab Keycloak); sicil düzeltmesinden sonra laptopta lab dışı testler backend 275 / worker 121 geçti. Çalışan yığın: 15 dakikalık tarama 17:45, 18:00, 18:15'te kendiliğinden koştu; kullanıcı Draco'nun AD'deki `employeeNumber`'ını yeni kodla "AD'de farklı" listesinden aldı ve "güzel oldu" dedi. Özellikten önce var olan fark kendiliğinden gelmez (taban yok), listeden bir kez alınır
+
 ## Bende değil: kullanıcı kararı, terminali veya ölçümü bekleyen kutucuklar
 
 > Üçü de yazılı ve hazır; ilerlemesi bana bağlı değil (biri kullanıcının terminalini, biri gerçek AD'de ikinci bir servis hesabını, biri eksik gelen spec'i bekliyor). Sıranın sonunda duruyorlar ki "ilk işaretlenmemiş kutucuktan devam et" kuralı yapılabilir işe denk gelsin. Engeli kalkan kutucuk yukarıdaki sıraya taşınır.
@@ -1320,6 +1334,7 @@ Kurallar:
   - Kabul: `OU=Hogwarts`'a yalnızca "Reset user passwords" devredilmiş ikinci bir servis hesabıyla parola sıfırlanır; `pwdLastSet` kendiliğinden 0 oluyor mu ölçülür
   - Kabul: evet ise bu hak [docs/05](05-active-directory.md#servis-hesabı-yetkileri) delegasyon tablosuna ve docs/09 ön koşullarına eklenir
   - Not: replikasyon sorusu (W9) ikinci bir DC istiyor; bu lab'da ölçülemez, kapsam dışı bırakıldı
+  - Ölçüm (2026-10-08, gerçek Hogwarts AD): kullanıcı `svc-reset`'i açtı (`OU=Hogwarts`'a `CA;Reset Password;user` + `WP;pwdLastSet;user`, hiçbir grupta değil, birincil grup 513). `ad_account::tests::delegated_reset_works_without_unexpire_password` bu hesapla worker'ın sıfırlama yolunu çalıştırdı → `Ok`, `pwdLastSet` 0. Unexpire-Password **gerekmiyor**; docs/05 tablosu yeterli, docs/09 ön koşullarına ve docs/11 W10'a yazıldı. Bilgi: `pwdLastSet = -1` de kabul edildi (rc 0)
 
 
 ### Raporlar: tek sayfa akışı (ADR-119 C) — ADR-134'e taşındı

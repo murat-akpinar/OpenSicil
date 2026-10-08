@@ -238,6 +238,30 @@ pub async fn open_nightly_scans(
     Ok(opened.rows_affected() as usize)
 }
 
+/// ADR-138 madde 4: gece taramasinin arasinda mutabakat; AD'deki degisiklik en
+/// gec bu surede siteye gelir. Yalnizca mutabakat, katalog yenileme gecede kalir.
+// ponytail: her turda butun yonetilen OU'lar okunur; buyuk dizinde uSNChanged ile artimli okuma
+pub const RECONCILE_EVERY: &str = "15 minutes";
+
+pub async fn open_periodic_reconcile(pool: &PgPool) -> Result<usize, String> {
+    let opened = sqlx::query(
+        "INSERT INTO read_jobs (kind, target_system_id) \
+         SELECT 'reconcile', t.id FROM target_systems t \
+         WHERE t.kind = 'ad' \
+           AND (SELECT ad_host <> '' FROM app_settings WHERE id = TRUE) \
+           AND NOT EXISTS (SELECT 1 FROM read_jobs r WHERE r.kind = 'reconcile' \
+                 AND r.target_system_id = t.id AND r.created_at >= now() - $1::interval \
+                 AND r.result IS DISTINCT FROM $2) \
+         ON CONFLICT DO NOTHING",
+    )
+    .bind(RECONCILE_EVERY)
+    .bind(crate::read_lane::RECLAIMED)
+    .execute(pool)
+    .await
+    .map_err(|e| format!("periyodik mutabakat açılamadı: {e}"))?;
+    Ok(opened.rows_affected() as usize)
+}
+
 // `silindi` icin is acilmaz: silme zaten uygulanmistir, her dakika bos is uretilirdi.
 pub fn needs_job(state: LifecycleState, applied: Option<&str>) -> bool {
     state != LifecycleState::Deleted && applied != Some(state_name(state))
@@ -685,6 +709,39 @@ mod tests {
             assert_eq!(open(&["00:00", &latest]).await, 0, "son dilim de tüketildi");
         }
 
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
+    // ADR-138 madde 4: son 15 dakikada mutabakat varsa yenisi acilmaz; AD baglantisi yoksa hic.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn a_reconcile_opens_every_fifteen_minutes_once_ad_is_configured() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        assert_eq!(
+            open_periodic_reconcile(&pool).await.unwrap(),
+            0,
+            "AD ayarlanmamış"
+        );
+        sqlx::query("UPDATE app_settings SET ad_host = 'dc.example' WHERE id = TRUE")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(open_periodic_reconcile(&pool).await.unwrap(), 1);
+        sqlx::query("UPDATE read_jobs SET status = 'succeeded'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            open_periodic_reconcile(&pool).await.unwrap(),
+            0,
+            "15 dakika dolmadı"
+        );
+        sqlx::query("UPDATE read_jobs SET created_at = now() - interval '16 minutes'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(open_periodic_reconcile(&pool).await.unwrap(), 1);
         drop(pool);
         crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
     }

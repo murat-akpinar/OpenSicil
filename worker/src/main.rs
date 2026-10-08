@@ -250,6 +250,10 @@ async fn run_reconcile(
     let links = reconcile::load_links(pool, target)
         .await
         .map_err(|e| format!("hesap bağlantıları okunamadı: {e}"))?;
+    // ADR-138: onceki anlik goruntu "AD'nin gecen seferki hali" — store silmeden once
+    let previous = reconcile::load_previous(pool, target)
+        .await
+        .map_err(|e| format!("önceki tarama okunamadı: {e}"))?;
     let findings = reconcile::compare(&accounts, &links);
     let counts = reconcile::store(pool, target, read_job_id, &findings, &env.aead_key)
         .await
@@ -258,9 +262,11 @@ async fn run_reconcile(
     let filled = reconcile::fill_linked_identities(pool, target).await?;
     // ADR-120 madde 5: yer tutucu rol de "bos" sayilir, AD'deki unvandan dolar
     let roles = reconcile::fill_placeholder_roles(pool, target).await?;
+    let changed = reconcile::take_ad_changes(pool, target, &previous).await?;
     Ok(format!(
         "{} hesap tarandı: {} yönetiliyor, {} gözlemde, {} yönetilmeyen, {} kayıp; \
-         {filled} kimlikte boş alan AD'den doldu, {roles} kimlikte rol unvandan doldu",
+         {filled} kimlikte boş alan AD'den doldu, {roles} kimlikte rol unvandan doldu, \
+         {changed} kimlikte AD'deki değişiklik alındı",
         accounts.len(),
         counts.managed,
         counts.observed,
@@ -430,6 +436,9 @@ async fn tick_if_due(pool: &PgPool, worker_id: &str, next_tick: &mut Instant) {
         Ok(0) => {}
         Ok(opened) => log_info!("worker: zamanlayıcı {opened} geçiş işi açtı"),
         Err(e) => log_error!("worker: zamanlayıcı tiki başarısız: {e}"),
+    }
+    if let Err(e) = scheduler::open_periodic_reconcile(pool).await {
+        log_error!("worker: {e}");
     }
     // ADR-051/099: gece mutabakati okuma seridine istek olarak yazilir (F-13)
     let slots = ops.map.get(common_settings::SCAN_AT).map(String::as_str);

@@ -244,4 +244,5 @@
 - Raporlar'a ayrılmış ama açık hesaplar girdi (metrikle tek tanım)
 - AD CA sertifikası Yapılandırma ekranından girilir, .env'deki CA yolu kalktı
 - Hedef sistem sayfaları okunur adreste (/targets/active-directory/…)
+- AD'de yapılan kişi alanı değişikliği 15 dakika içinde kendiliğinden gelir
 

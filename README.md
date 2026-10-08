@@ -19,7 +19,7 @@ OpenSicil, kendi Active Directory'sini işleten kurumlar için açık kaynak bir
 
 **v1 hazır (2026-10-02): ilk beş faz tamamlandı.** Sıfırdan kurulan ya da mevcut personeli olan bir kurum ürünü Active Directory üstünde tek başına kullanabilir: kayıt, görev değişikliği, askı, planlı ve acil ayrılış, ilk parola teslimi, roller ve departman ağacı, değişiklik seti eşiği ve onayı, mutabakat raporu ve gece koşusu, CSV ile toplu içe aktarma, mevcut hesapların sahiplenilmesi ve toplu yönetime alınması, metrik ucu, Kubernetes'te çalışma. Zimbra v1'e dahil değildir (ADR-090); sırada o bölüm var. Tasarım 12 belge ve 134 karar kaydı (ADR) olarak yazıldı; her faz güvenlik ve test kapanışından geçti — güvenlik kontrol listesinde testi ya da kodu henüz olmayan maddeler `docs/07`'de açık olarak ve nedeniyle duruyor (gerçek Postgres + lab Keycloak + lab Samba AD'ye karşı testler, kapsam ≥ %90, imaj taraması, N-03 yük ölçümü 20.000 kimlikte). Kurulum: [docs/09](docs/09-kurulum.md).
 
-**v1'den sonra eklendi:** AD'den geri dolum ve mutabakatta "AD'de farklı" listesi (ADR-112), fark listesine departman ve rol (ADR-120), kapsam köklerinin altından katalog OU keşfi (ADR-121), kayıp hesabın bağlantısının kaldırılması (ADR-122), yenilenen arayüz kabuğu (ADR-114).
+**v1'den sonra eklendi:** AD'den geri dolum ve mutabakatta "AD'de farklı" listesi (ADR-112), fark listesine departman ve rol (ADR-120), kapsam köklerinin altından katalog OU keşfi (ADR-121), kayıp hesabın bağlantısının kaldırılması (ADR-122), yenilenen arayüz kabuğu (ADR-114), AD'de yapılan kişi alanı değişikliğinin 15 dakika içinde kendiliğinden gelmesi (ADR-138).
 
 ## Hangi sorunu çözer
 
@@ -151,7 +151,7 @@ flowchart LR
 
 Olaylar yalnızca girdiyi değiştirir: işe giriş başlangıç tarihini, ayrılış bitiş anını, askı iki tarihi, rol değişikliği rol listesini. Durumun kendisi **türetilir, saklanmaz** (ADR-038). Aynı iş iki kez çalışırsa zararsızdır: ikincisi fark bulamaz. Mutabakat raporu da aynı hesaplamayı kullanır; sürüklenecek ikinci bir fark kodu yoktur.
 
-**Ters yön alan bazlıdır** (ADR-112): kimlikte boş olan bir alanın AD'de değeri varsa gece taramasından sonra onaysız yazılır — boş alan sahipsizdir. İkisi de dolu ve farklıysa otomatik yazma yoktur; mutabakat ekranındaki "AD'de farklı" listesinden operatör satırları seçip "AD'dekini al" der. "En yeni kazanır" kurulmaz: AD'de alan düzeyinde değişiklik zamanı yoktur.
+**Ters yön de çalışır** (ADR-112, ADR-138): mutabakat 15 dakikada bir koşar. Kimlikte boş olan bir alanın AD'de değeri varsa onaysız yazılır — boş alan sahipsizdir. Dolu alanda tarama AD'nin şimdiki halini **önceki taramadaki haliyle** karşılaştırır: değişiklik yalnızca AD'de yapıldıysa (ad, soyad, sicil, cep, departman, unvan) kimliğe kendiliğinden gelir ve denetime `ad_auto` kaynağıyla girer. Aynı alan iki taramanın arasında hem AD'de hem OpenSicil'de değiştiyse ya da fark özellik devreye girmeden önce de varsa, mutabakat ekranındaki "AD'de farklı" listesinde bekler; operatör satırları seçip "AD'dekini al" der. "En yeni kazanır" kurulmaz: AD'de alan düzeyinde değişiklik zamanı yoktur, taban önceki taramadır.
 
 ### Kimlik yaşam döngüsü
 
