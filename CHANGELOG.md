@@ -237,4 +237,5 @@
 - Etkinlik geçmişi aynı filtrelerle CSV olarak indirilir, indirme denetime girer
 - Raporlar'a yetki dökümü girdi (rol ve grup başına kişiler, CSV)
 - Raporlar'a ayrılmış ama açık hesaplar girdi (metrikle tek tanım)
+- AD CA sertifikası Yapılandırma ekranından girilir, .env'deki CA yolu kalktı
 

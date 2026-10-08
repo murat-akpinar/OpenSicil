@@ -75,8 +75,9 @@ k create secret generic nginx-tls --from-file=cert.pem="$WORK/cert.pem" --from-f
 # ortak ayarlar Ayarlar tablosunda (ADR-131); manifest configMapRef'i bos haritayi okur
 k create configmap common >/dev/null
 k create configmap backend-config --from-literal=PUBLIC_URL="$BASE" \
-  --from-literal=APPROVAL_TIMELOCK_HOURS=0 --from-literal=AD_CA_FILE=/etc/opensicil/ad-ca.pem >/dev/null
-k create configmap worker-config --from-literal=AD_CA_FILE=/etc/opensicil/ad-ca.pem >/dev/null
+  --from-literal=APPROVAL_TIMELOCK_HOURS=0 >/dev/null
+# CA artik Ayarlar'da (ADR-136); manifestin bekledigi configmap'ler bos/zararsiz kalir
+k create configmap worker-config >/dev/null
 k create configmap ad-ca --from-file=ad-ca.pem=samba-lab/tls/ca.pem >/dev/null
 # nginx.conf'taki resolver Docker'ın gömülü DNS'i; kümede kube-dns. nginx resolver'ı
 # arama alanı (search) uygulamaz: upstream adı FQDN olmalı (backend.<ns>.svc.cluster.local)
@@ -122,6 +123,7 @@ curl -sk -o /dev/null -b "$ADMIN" \
   --data-urlencode "ad_host=samba-ad:6360" \
   --data-urlencode "ad_bind_dn=CN=Administrator,CN=Users,DC=opensicil,DC=lab" \
   --data-urlencode "ad_service_password=$AD_LAB_PASSWORD" \
+  --data-urlencode "ad_ca_pem@samba-lab/tls/ca.pem" \
   --data-urlencode "zimbra_url=" --data-urlencode "zimbra_admin_password=" \
   --data-urlencode "oidc_issuer=http://samba-ad:8081/realms/opensicil" \
   --data-urlencode "oidc_client_id=opensicil-backend" \

@@ -46,7 +46,7 @@ pub struct AdConfig {
     pub urls: Vec<String>,
     pub bind_dn: String,
     pub password: String,
-    pub ca_file: String,
+    pub ca_pem: String,
 }
 
 pub use crate::scope::{parse_scope, ManagedScope};
@@ -73,15 +73,14 @@ pub fn parse_urls(ad_host: &str) -> Vec<String> {
 pub async fn load_config(
     pool: &PgPool,
     aead_key: &[u8; crate::crypto::KEY_LEN],
-    ca_file: Option<&str>,
 ) -> Result<Option<AdConfig>, String> {
-    let row: (String, String, Option<Vec<u8>>) = sqlx::query_as(
-        "SELECT ad_host, ad_bind_dn, ad_service_password_enc FROM app_settings WHERE id = TRUE",
+    let row: (String, String, Option<Vec<u8>>, String) = sqlx::query_as(
+        "SELECT ad_host, ad_bind_dn, ad_service_password_enc, ad_ca_pem FROM app_settings WHERE id = TRUE",
     )
     .fetch_one(pool)
     .await
     .map_err(|e| format!("AD ayarları okunamadı: {e}"))?;
-    let (ad_host, bind_dn, password_enc) = row;
+    let (ad_host, bind_dn, password_enc, ca_pem) = row;
     if ad_host.trim().is_empty() {
         return Ok(None);
     }
@@ -90,21 +89,20 @@ pub async fn load_config(
     };
     let password = String::from_utf8(crate::crypto::decrypt(aead_key, &password_enc)?)
         .map_err(|_| "AD parolası UTF-8 değil".to_string())?;
-    let ca_file = ca_file
-        .ok_or("AD_CA_FILE ortam değişkeni eksik")?
-        .to_string();
+    // ADR-136: kok CA Yapilandirma ekranindan; env yolu yok
+    if ca_pem.trim().is_empty() {
+        return Err("AD CA sertifikası girilmemiş".to_string());
+    }
     Ok(Some(AdConfig {
         urls: parse_urls(&ad_host),
         bind_dn,
         password,
-        ca_file,
+        ca_pem,
     }))
 }
 
 // PEM'deki her CERTIFICATE blogu DER'e cevrilir; ek crate yok (base64 zaten var).
-fn read_pem_certs(path: &str) -> Result<Vec<Vec<u8>>, String> {
-    let text =
-        std::fs::read_to_string(path).map_err(|e| format!("CA dosyası okunamadı ({path}): {e}"))?;
+fn parse_pem_certs(text: &str) -> Result<Vec<Vec<u8>>, String> {
     let mut certs = Vec::new();
     let mut current: Option<String> = None;
     for line in text.lines().map(str::trim) {
@@ -113,7 +111,7 @@ fn read_pem_certs(path: &str) -> Result<Vec<Vec<u8>>, String> {
             ("-----END CERTIFICATE-----", Some(body)) => {
                 let der = base64::engine::general_purpose::STANDARD
                     .decode(body.as_bytes())
-                    .map_err(|e| format!("CA dosyası base64 çözülemedi: {e}"))?;
+                    .map_err(|e| format!("CA sertifikası base64 çözülemedi: {e}"))?;
                 certs.push(der);
                 current = None;
             }
@@ -122,14 +120,14 @@ fn read_pem_certs(path: &str) -> Result<Vec<Vec<u8>>, String> {
         }
     }
     if certs.is_empty() {
-        return Err(format!("CA dosyasında sertifika yok: {path}"));
+        return Err("CA metninde sertifika yok".to_string());
     }
     Ok(certs)
 }
 
-fn tls_settings(ca_file: &str) -> Result<LdapConnSettings, WriteError> {
+fn tls_settings(ca_pem: &str) -> Result<LdapConnSettings, WriteError> {
     let mut roots = rustls::RootCertStore::empty();
-    for der in read_pem_certs(ca_file).map_err(WriteError::Failed)? {
+    for der in parse_pem_certs(ca_pem).map_err(WriteError::Failed)? {
         roots
             .add(der.into())
             .map_err(|e| WriteError::Failed(format!("CA sertifikası geçersiz: {e}")))?;
@@ -162,7 +160,7 @@ pub fn classify(error: LdapError) -> WriteError {
 pub async fn connect(cfg: &AdConfig) -> Result<Ldap, WriteError> {
     let mut last = WriteError::Unreachable("DC adresi verilmedi".to_string());
     for url in &cfg.urls {
-        let settings = tls_settings(&cfg.ca_file)?;
+        let settings = tls_settings(&cfg.ca_pem)?;
         match LdapConnAsync::with_settings(settings, url).await {
             Ok((conn, mut ldap)) => {
                 ldap3::drive!(conn);
@@ -826,16 +824,45 @@ mod tests {
 
     #[test]
     fn pem_reader_extracts_der_blocks() {
-        let dir = std::env::temp_dir().join(format!("opensicil-ca-{}", std::process::id()));
-        std::fs::write(
-            &dir,
-            "junk\n-----BEGIN CERTIFICATE-----\nAQID\n-----END CERTIFICATE-----\n",
-        )
-        .unwrap();
-        let certs = read_pem_certs(dir.to_str().unwrap()).unwrap();
+        let certs =
+            parse_pem_certs("junk\n-----BEGIN CERTIFICATE-----\nAQID\n-----END CERTIFICATE-----\n")
+                .unwrap();
         assert_eq!(certs, vec![vec![1, 2, 3]]);
-        std::fs::remove_file(&dir).unwrap();
-        assert!(read_pem_certs("/yok/boyle/dosya").is_err());
+        assert!(parse_pem_certs("").is_err());
+        assert!(
+            parse_pem_certs("-----BEGIN CERTIFICATE-----\n!!\n-----END CERTIFICATE-----").is_err()
+        );
+    }
+
+    // ADR-136: CA ayarlardan gelir; adres doluyken CA'siz baglanti kurulmaz
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn load_config_reads_the_ca_from_settings() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        let key = [5u8; crate::crypto::KEY_LEN];
+        assert!(load_config(&pool, &key).await.unwrap().is_none());
+
+        sqlx::query(
+            "UPDATE app_settings SET ad_host = 'dc1', ad_bind_dn = 'CN=svc', \
+             ad_service_password_enc = $1 WHERE id = TRUE",
+        )
+        .bind(crate::crypto::encrypt(&key, b"parola"))
+        .execute(&pool)
+        .await
+        .unwrap();
+        let missing = load_config(&pool, &key).await.err().unwrap();
+        assert!(missing.contains("CA"), "{missing}");
+
+        sqlx::query("UPDATE app_settings SET ad_ca_pem = 'PEM' WHERE id = TRUE")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let cfg = load_config(&pool, &key).await.unwrap().unwrap();
+        assert_eq!(cfg.ca_pem, "PEM");
+        assert_eq!(cfg.urls, ["ldaps://dc1:636"]);
+
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
     }
 
     #[test]
@@ -864,7 +891,7 @@ mod tests {
             urls: parse_urls(&var("AD_LAB_URL")),
             bind_dn: var("AD_LAB_BIND_DN"),
             password: var("AD_LAB_PASSWORD"),
-            ca_file: var("AD_CA_FILE"),
+            ca_pem: crate::test_support::read_ca(&var("AD_CA_FILE")),
         };
         let scope = ManagedScope {
             user_ous: vec!["OU=Personel,DC=opensicil,DC=lab".to_string()],

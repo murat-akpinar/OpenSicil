@@ -114,6 +114,7 @@ curl -s -o /dev/null -b "$ADMIN" \
   --data-urlencode "ad_host=localhost:6360" \
   --data-urlencode "ad_bind_dn=CN=Administrator,CN=Users,DC=opensicil,DC=lab" \
   --data-urlencode "ad_service_password=$AD_LAB_PASSWORD" \
+  --data-urlencode "ad_ca_pem@samba-lab/tls/ca.pem" \
   --data-urlencode "zimbra_url=" --data-urlencode "zimbra_admin_password=" \
   --data-urlencode "oidc_issuer=http://localhost:8081/realms/opensicil" \
   --data-urlencode "oidc_client_id=opensicil-backend" \
@@ -153,7 +154,7 @@ ROLE=$(q "SELECT id FROM roles WHERE slug = '$ROLE_KEY'")
 # ---- 5. worker ve kaynak örnekleyici ----
 echo "5) worker (servis rolüyle, canlı mod; kapsam = yük ağacı) → açılışta katalog"
 env "${COMMON[@]}" DATABASE_URL="postgres://load_worker:load-worker-pw@$PG_HOST/$DB" \
-  AD_CA_FILE="$PWD/samba-lab/tls/ca.pem" "worker/target/$PROFILE/worker" >"$WORK/worker.log" 2>&1 &
+  "worker/target/$PROFILE/worker" >"$WORK/worker.log" 2>&1 &
 WORKER_PID=$!
 ( while true; do
     docker stats --no-stream --format '{{.Name}} {{.CPUPerc}} {{.MemUsage}}' "$SAMBA" opensicil-test-pg 2>/dev/null

@@ -696,7 +696,7 @@ mod tests {
             urls: ad::parse_urls(&var("AD_LAB_URL")),
             bind_dn: var("AD_LAB_BIND_DN"),
             password: var("AD_LAB_PASSWORD"),
-            ca_file: var("AD_CA_FILE"),
+            ca_pem: crate::test_support::read_ca(&var("AD_CA_FILE")),
         };
         let mut ldap = ad::connect(&cfg).await.expect("lab AD");
         let username = format!("yeniden{}", std::process::id() % 100_000);
@@ -751,7 +751,7 @@ mod tests {
             urls: ad::parse_urls(&var("AD_LAB_URL")),
             bind_dn: var("AD_LAB_BIND_DN"),
             password: var("AD_LAB_PASSWORD"),
-            ca_file: var("AD_CA_FILE"),
+            ca_pem: crate::test_support::read_ca(&var("AD_CA_FILE")),
         };
         let mut ldap = ad::connect(&cfg).await.expect("lab AD");
         let username = format!("test{}", std::process::id() % 100_000);
@@ -879,7 +879,7 @@ mod tests {
             urls: ad::parse_urls(&var("AD_WIN_URL")),
             bind_dn: var("AD_WIN_BIND_DN"),
             password: var("AD_WIN_PASSWORD"),
-            ca_file: var("AD_WIN_CA_FILE"),
+            ca_pem: crate::test_support::read_ca(&var("AD_WIN_CA_FILE")),
         };
         let ou = var("AD_WIN_OU");
         let mut ldap = ad::connect(&cfg).await.expect("Windows AD");

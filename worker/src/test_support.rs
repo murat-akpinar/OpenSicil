@@ -197,6 +197,11 @@ async fn seed_org(pool: &PgPool, m: &ExampleModel) -> (i64, i64, i64, i64) {
     (ankara, bt, primary, additional)
 }
 
+// Lab testleri CA'yi dosyadan (.lab-env AD_CA_FILE) okur; uygulama ayarlardan (ADR-136)
+pub fn read_ca(path: &str) -> String {
+    std::fs::read_to_string(path).unwrap_or_else(|e| panic!("CA okunamadı ({path}): {e}"))
+}
+
 // Lab AD baglanti ayarini Yapilandirma sayfasinin yazacagi gibi DB'ye yazar
 // (parola AEAD ile sifreli) ve AdConfig doner.
 pub async fn configure_lab_ad(
@@ -207,12 +212,15 @@ pub async fn configure_lab_ad(
     password: &str,
     ca_file: &str,
 ) -> crate::ad::AdConfig {
+    let ca_pem = read_ca(ca_file);
     sqlx::query(
-        "UPDATE app_settings SET ad_host = $1, ad_bind_dn = $2, ad_service_password_enc = $3 WHERE id = TRUE",
+        "UPDATE app_settings SET ad_host = $1, ad_bind_dn = $2, ad_service_password_enc = $3, \
+         ad_ca_pem = $4 WHERE id = TRUE",
     )
     .bind(url)
     .bind(bind_dn)
     .bind(crate::crypto::encrypt(key, password.as_bytes()))
+    .bind(&ca_pem)
     .execute(pool)
     .await
     .expect("AD ayarı yazılamadı");
@@ -233,7 +241,7 @@ pub async fn configure_lab_ad(
         urls: crate::ad::parse_urls(url),
         bind_dn: bind_dn.to_string(),
         password: password.to_string(),
-        ca_file: ca_file.to_string(),
+        ca_pem,
     }
 }
 

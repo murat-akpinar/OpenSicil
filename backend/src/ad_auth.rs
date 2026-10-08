@@ -16,7 +16,6 @@ use sqlx::PgPool;
 
 const LDAPS_PORT: u16 = 636;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-const CA_FILE_VAR: &str = "AD_CA_FILE";
 // LDAP sonuc kodu 49: gecersiz kimlik bilgisi (yanlis parola, pasif/kilitli hesap)
 const INVALID_CREDENTIALS_RC: u32 = 49;
 const USER_ATTRS: [&str; 4] = ["sAMAccountName", "objectGUID", "mail", "memberOf"];
@@ -85,7 +84,7 @@ struct AdConfig {
     urls: Vec<String>,
     bind_dn: String,
     password: String,
-    ca_file: String,
+    ca_pem: String,
 }
 
 // Baglanti bilgisi Yapilandirma sayfasindan (ADR-068), parola AEAD ile cozulur.
@@ -93,13 +92,13 @@ async fn load_config(
     pool: &PgPool,
     aead_key: &[u8; crate::crypto::KEY_LEN],
 ) -> Result<AdConfig, AuthError> {
-    let row: (String, String, Option<Vec<u8>>) = sqlx::query_as(
-        "SELECT ad_host, ad_bind_dn, ad_service_password_enc FROM app_settings WHERE id = TRUE",
+    let row: (String, String, Option<Vec<u8>>, String) = sqlx::query_as(
+        "SELECT ad_host, ad_bind_dn, ad_service_password_enc, ad_ca_pem FROM app_settings WHERE id = TRUE",
     )
     .fetch_one(pool)
     .await
     .map_err(|e| AuthError::Unavailable(format!("AD ayarları okunamadı: {e}")))?;
-    let (ad_host, bind_dn, password_enc) = row;
+    let (ad_host, bind_dn, password_enc, ca_pem) = row;
     if ad_host.trim().is_empty() {
         return Err(AuthError::NotConfigured);
     }
@@ -110,13 +109,16 @@ async fn load_config(
         crate::crypto::decrypt(aead_key, &password_enc).map_err(AuthError::Unavailable)?,
     )
     .map_err(|_| AuthError::Unavailable("AD parolası UTF-8 değil".to_string()))?;
-    let ca_file = std::env::var(CA_FILE_VAR)
-        .map_err(|_| AuthError::Unavailable(format!("{CA_FILE_VAR} ortam değişkeni eksik")))?;
+    if ca_pem.trim().is_empty() {
+        return Err(AuthError::Unavailable(
+            "AD CA sertifikası girilmemiş".to_string(),
+        ));
+    }
     Ok(AdConfig {
         urls: parse_urls(&ad_host),
         bind_dn,
         password,
-        ca_file,
+        ca_pem,
     })
 }
 
@@ -139,9 +141,7 @@ pub fn parse_urls(ad_host: &str) -> Vec<String> {
 }
 
 // PEM'deki her CERTIFICATE blogu DER'e cevrilir; ek crate yok (base64 zaten var).
-fn read_pem_certs(path: &str) -> Result<Vec<Vec<u8>>, String> {
-    let text =
-        std::fs::read_to_string(path).map_err(|e| format!("CA dosyası okunamadı ({path}): {e}"))?;
+fn parse_pem_certs(text: &str) -> Result<Vec<Vec<u8>>, String> {
     let mut certs = Vec::new();
     let mut current: Option<String> = None;
     for line in text.lines().map(str::trim) {
@@ -150,7 +150,7 @@ fn read_pem_certs(path: &str) -> Result<Vec<Vec<u8>>, String> {
             ("-----END CERTIFICATE-----", Some(body)) => {
                 let der = base64::engine::general_purpose::STANDARD
                     .decode(body.as_bytes())
-                    .map_err(|e| format!("CA dosyası base64 çözülemedi: {e}"))?;
+                    .map_err(|e| format!("CA sertifikası base64 çözülemedi: {e}"))?;
                 certs.push(der);
                 current = None;
             }
@@ -159,19 +159,26 @@ fn read_pem_certs(path: &str) -> Result<Vec<Vec<u8>>, String> {
         }
     }
     if certs.is_empty() {
-        return Err(format!("CA dosyasında sertifika yok: {path}"));
+        return Err("CA metninde sertifika yok".to_string());
     }
     Ok(certs)
 }
 
-// Sertifika dogrulamasi kapatilamaz (docs/05): kok CA dosyadan gelir.
-fn tls_settings(ca_file: &str) -> Result<LdapConnSettings, AuthError> {
+/// Yapilandirma kaydinda (ADR-136) ve her baglantida ayni kural: her blok
+/// cozulmeli ve rustls kok deposuna eklenebilmeli.
+pub fn root_store(ca_pem: &str) -> Result<rustls::RootCertStore, String> {
     let mut roots = rustls::RootCertStore::empty();
-    for der in read_pem_certs(ca_file).map_err(AuthError::Unavailable)? {
+    for der in parse_pem_certs(ca_pem)? {
         roots
             .add(der.into())
-            .map_err(|e| AuthError::Unavailable(format!("CA sertifikası geçersiz: {e}")))?;
+            .map_err(|e| format!("CA sertifikası geçersiz: {e}"))?;
     }
+    Ok(roots)
+}
+
+// Sertifika dogrulamasi kapatilamaz (docs/05): kok CA Yapilandirma'dan gelir (ADR-136).
+fn tls_settings(ca_pem: &str) -> Result<LdapConnSettings, AuthError> {
+    let roots = root_store(ca_pem).map_err(AuthError::Unavailable)?;
     let config = rustls::ClientConfig::builder_with_provider(Arc::new(
         rustls::crypto::ring::default_provider(),
     ))
@@ -198,7 +205,7 @@ fn classify(error: LdapError) -> AuthError {
 async fn connect(cfg: &AdConfig, bind_dn: &str, password: &str) -> Result<Ldap, AuthError> {
     let mut last = AuthError::Unavailable("DC adresi verilmedi".to_string());
     for url in &cfg.urls {
-        let settings = tls_settings(&cfg.ca_file)?;
+        let settings = tls_settings(&cfg.ca_pem)?;
         match LdapConnAsync::with_settings(settings, url).await {
             Ok((conn, mut ldap)) => {
                 ldap3::drive!(conn);
@@ -464,9 +471,20 @@ mod tests {
     }
 
     #[test]
-    fn a_pem_without_a_certificate_block_is_refused() {
-        assert!(read_pem_certs("/dev/null").is_err());
-        assert!(read_pem_certs("/olmayan/ca.pem").is_err());
+    fn a_pem_without_a_valid_certificate_block_is_refused() {
+        assert!(root_store("").is_err());
+        assert!(root_store("rastgele metin").is_err());
+        assert!(root_store("-----BEGIN CERTIFICATE-----\n!!!\n-----END CERTIFICATE-----").is_err());
+        assert!(
+            root_store("-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----").is_err()
+        );
+        assert_eq!(
+            root_store(crate::test_support::TEST_CA_PEM).unwrap().len(),
+            1
+        );
+        let ca = crate::test_support::TEST_CA_PEM;
+        let two = format!("{ca}{ca}");
+        assert!(root_store(&two).is_ok());
     }
 }
 // --- END FEATURE: ad-login ---

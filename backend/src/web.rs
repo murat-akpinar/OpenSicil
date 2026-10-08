@@ -125,6 +125,7 @@ struct ConfigTemplate {
     ad_bind_dn: String,
     ad_service_password_set: bool,
     ad_national_id_attribute: String,
+    ad_ca_pem: String,
     zimbra_url: String,
     zimbra_admin_password_set: bool,
     oidc_issuer: String,
@@ -572,6 +573,7 @@ async fn render_config(
             ad_bind_dn: s.ad_bind_dn,
             ad_service_password_set: s.ad_service_password_set,
             ad_national_id_attribute: s.ad_national_id_attribute,
+            ad_ca_pem: s.ad_ca_pem,
             zimbra_url: s.zimbra_url,
             zimbra_admin_password_set: s.zimbra_admin_password_set,
             oidc_issuer: s.oidc_issuer,
@@ -594,6 +596,8 @@ struct ConfigForm {
     /// ADR-106 madde 5; bos = TC kimlik no okunmaz (varsayilan)
     #[serde(default)]
     ad_national_id_attribute: String,
+    /// ADR-136: kok CA PEM metni
+    ad_ca_pem: String,
     zimbra_url: String,
     zimbra_admin_password: String,
     oidc_issuer: String,
@@ -608,6 +612,7 @@ impl From<ConfigForm> for crate::settings::AppSettingsInput {
             ad_bind_dn: form.ad_bind_dn,
             ad_service_password: form.ad_service_password,
             ad_national_id_attribute: form.ad_national_id_attribute,
+            ad_ca_pem: form.ad_ca_pem,
             zimbra_url: form.zimbra_url,
             zimbra_admin_password: form.zimbra_admin_password,
             oidc_issuer: form.oidc_issuer,
@@ -624,6 +629,18 @@ fn valid_attribute_name(name: &str) -> bool {
     name.is_empty()
         || (name.starts_with(|c: char| c.is_ascii_alphabetic())
             && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
+}
+
+/// ADR-136: AD adresi doluyken CA zorunlu (LDAPS dogrulamasi kapatilamaz);
+/// dolu CA, baglantinin kullanacagi ayni kuralla dogrulanir.
+fn check_ad_ca(ad_host: &str, ca_pem: &str) -> Result<(), &'static str> {
+    match (ad_host.trim().is_empty(), ca_pem.trim().is_empty()) {
+        (_, false) => crate::ad_auth::root_store(ca_pem)
+            .map(|_| ())
+            .map_err(|_| "err.ad_ca_invalid"),
+        (false, true) => Err("err.ad_ca_required"),
+        (true, true) => Ok(()),
+    }
 }
 
 /// Denetim satirina yalnizca hangi sirrin guncellendigi girer, degeri degil.
@@ -650,6 +667,9 @@ async fn config_submit(
     if !valid_attribute_name(form.ad_national_id_attribute.trim()) {
         let text = operator.lang.t("err.ldap_attribute_shape").to_string();
         return (StatusCode::BAD_REQUEST, text).into_response();
+    }
+    if let Err(key) = check_ad_ca(&form.ad_host, &form.ad_ca_pem) {
+        return (StatusCode::BAD_REQUEST, operator.lang.t(key).to_string()).into_response();
     }
     let secrets_updated = updated_secret_names(&form);
     let before = match crate::settings::load(&state.pool).await {
@@ -1338,13 +1358,27 @@ mod tests {
         assert_eq!(crate::change_set::threshold(&pool).await.unwrap(), 10);
 
         // Ayarlari sirlarla kaydet.
-        let form = "ad_host=dc1.example.org&ad_bind_dn=CN%3Dsvc&ad_service_password=cok-gizli-ad&\
-                     ad_national_id_attribute=extensionAttribute5&\
-                     zimbra_url=https%3A%2F%2Fzimbra.example.org&zimbra_admin_password=cok-gizli-zimbra&\
-                     oidc_issuer=https%3A%2F%2Fidp.example.org&oidc_client_id=opensicil&oidc_client_secret=cok-gizli-oidc";
+        let ca = crate::identity_web::urlencode(crate::test_support::TEST_CA_PEM);
+        let form = format!(
+            "ad_host=dc1.example.org&ad_bind_dn=CN%3Dsvc&ad_service_password=cok-gizli-ad&\
+             ad_national_id_attribute=extensionAttribute5&ad_ca_pem={ca}&\
+             zimbra_url=https%3A%2F%2Fzimbra.example.org&zimbra_admin_password=cok-gizli-zimbra&\
+             oidc_issuer=https%3A%2F%2Fidp.example.org&oidc_client_id=opensicil&oidc_client_secret=cok-gizli-oidc"
+        );
+        // ADR-136: AD adresi doluyken CA bos ya da bozuksa hicbir alan yazilmaz
+        for bad_ca in [String::new(), crate::identity_web::urlencode("bozuk")] {
+            let bad = form.replace(&format!("ad_ca_pem={ca}"), &format!("ad_ca_pem={bad_ca}"));
+            let response = app
+                .clone()
+                .oneshot(form_request("POST", "/config", &bad, Some(&cookie)))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        }
+        assert_eq!(crate::settings::load(&pool).await.unwrap().ad_host, "");
         let response = app
             .clone()
-            .oneshot(form_request("POST", "/config", form, Some(&cookie)))
+            .oneshot(form_request("POST", "/config", &form, Some(&cookie)))
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::SEE_OTHER);
@@ -1368,6 +1402,7 @@ mod tests {
         let body = body_string(response).await;
         assert!(body.contains("dc1.example.org"));
         assert!(body.contains(r#"value="extensionAttribute5""#));
+        assert!(body.contains("-----BEGIN CERTIFICATE-----"));
         assert!(body.contains("kayıtlı"));
         assert!(!body.contains("cok-gizli-ad"));
         assert!(!body.contains("cok-gizli-zimbra"));
@@ -1505,6 +1540,7 @@ mod tests {
                 ad_bind_dn: String::new(),
                 ad_service_password: String::new(),
                 ad_national_id_attribute: String::new(),
+                ad_ca_pem: String::new(),
                 zimbra_url: String::new(),
                 zimbra_admin_password: String::new(),
                 oidc_issuer: issuer,
@@ -1685,7 +1721,8 @@ mod tests {
     #[ignore = "gerçek Postgres ve lab Samba AD gerektirir: DATABASE_URL + AD_LAB_URL/AD_LAB_BIND_DN/AD_LAB_PASSWORD + AD_CA_FILE ile çalıştır (--include-ignored)"]
     async fn ad_login_flow_against_lab_samba() {
         let var = |n: &str| std::env::var(n).unwrap_or_else(|_| panic!("{n} ayarlanmalı"));
-        std::env::var("AD_CA_FILE").expect("AD_CA_FILE lab CA'sına işaret etmeli");
+        // ADR-136: uygulama CA'yi ayarlardan okur; test dosyayi okuyup oraya yazar
+        let ca_pem = std::fs::read_to_string(var("AD_CA_FILE")).expect("lab CA okunamadı");
         let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
         // test_state'in kurdugu AppState.aead_key ile ayni olmali
         crate::settings::save(
@@ -1696,6 +1733,7 @@ mod tests {
                 ad_bind_dn: var("AD_LAB_BIND_DN"),
                 ad_service_password: var("AD_LAB_PASSWORD"),
                 ad_national_id_attribute: String::new(),
+                ad_ca_pem: ca_pem,
                 zimbra_url: String::new(),
                 zimbra_admin_password: String::new(),
                 oidc_issuer: String::new(),

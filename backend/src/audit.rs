@@ -84,6 +84,18 @@ pub async fn record(
 
 // Yapilandirma degisikligi: sirlar hic yazilmaz, yalnizca hangi sirrin
 // guncellendigi (docs/07 "hassas alanlar haric").
+/// ADR-136: CA metni denetime girmez, parmak izi girer; bos CA bos dize.
+fn sha256_hex(text: &str) -> String {
+    use sha2::{Digest, Sha256};
+    if text.is_empty() {
+        return String::new();
+    }
+    Sha256::digest(text.as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
 pub fn settings_change_detail(
     before: &crate::settings::AppSettings,
     after: &crate::settings::AppSettings,
@@ -94,6 +106,7 @@ pub fn settings_change_detail(
             "ad_host": s.ad_host,
             "ad_bind_dn": s.ad_bind_dn,
             "ad_national_id_attribute": s.ad_national_id_attribute,
+            "ad_ca_sha256": sha256_hex(&s.ad_ca_pem),
             "zimbra_url": s.zimbra_url,
             "oidc_issuer": s.oidc_issuer,
             "oidc_client_id": s.oidc_client_id,
@@ -139,6 +152,7 @@ mod tests {
             ad_bind_dn: "CN=svc,DC=example,DC=local".to_string(),
             ad_service_password_set: secret_set,
             ad_national_id_attribute: String::new(),
+            ad_ca_pem: format!("CA-{host}"),
             zimbra_url: String::new(),
             zimbra_admin_password_set: false,
             oidc_issuer: String::new(),
@@ -163,6 +177,17 @@ mod tests {
         assert_eq!(detail["before"]["ad_host"], "dc1");
         assert_eq!(detail["after"]["ad_host"], "dc2");
         assert_eq!(detail["secrets_updated"][0], "ad_service_password");
+        assert!(
+            !text.contains("CA-dc1"),
+            "CA metni değil parmak izi: {text}"
+        );
+        let fingerprint = detail["after"]["ad_ca_sha256"].as_str().unwrap();
+        assert_eq!(fingerprint.len(), 64);
+        assert_ne!(
+            detail["before"]["ad_ca_sha256"],
+            detail["after"]["ad_ca_sha256"]
+        );
+        assert_eq!(sha256_hex(""), "");
     }
 
     #[tokio::test]

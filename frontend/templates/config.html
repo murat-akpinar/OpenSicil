@@ -72,6 +72,12 @@
             <input class="input" type="password" id="ad_service_password" name="ad_service_password" autocomplete="new-password">
             {% if ad_service_password_set %}<span class="hint">{{ lang.t("config.stored_hint") }}</span>{% endif %}
           </div>
+          {# ADR-136: kök CA ekrandan; sır değil, kayıtlı metin aynen görünür #}
+          <div>
+            <label class="label" for="ad_ca_pem">{{ lang.t("config.ad_ca") }}</label>
+            <textarea class="input font-mono text-xs" id="ad_ca_pem" name="ad_ca_pem" rows="6" spellcheck="false" placeholder="-----BEGIN CERTIFICATE-----">{{ ad_ca_pem }}</textarea>
+            <span class="hint">{{ lang.t("config.ad_ca_hint") }}</span>
+          </div>
           {# ADR-106 madde 5: TC kimlik no AD şemasında yok; kurum koyduysa öznitelik adı buradan. Boş = okunmaz #}
           <div>
             <label class="label" for="ad_national_id_attribute">{{ lang.t("config.national_id_attribute") }}</label>

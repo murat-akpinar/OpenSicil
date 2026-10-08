@@ -450,7 +450,7 @@ mod tests {
             urls: ad::parse_urls(&var("AD_LAB_URL")),
             bind_dn: var("AD_LAB_BIND_DN"),
             password: var("AD_LAB_PASSWORD"),
-            ca_file: var("AD_CA_FILE"),
+            ca_pem: crate::test_support::read_ca(&var("AD_CA_FILE")),
         };
         let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
         let ids = crate::test_support::seed_example_model(&pool).await;

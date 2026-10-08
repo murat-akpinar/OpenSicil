@@ -70,7 +70,6 @@ async fn prepare_pool(database_url: &str) -> Result<PgPool, String> {
 struct Env {
     database_url: String,
     aead_key: [u8; crypto::KEY_LEN],
-    ad_ca_file: Option<String>,
 }
 
 // ADR-131 madde 6: isletme ayarlari is/tik basina tablodan okunur; ekrandaki
@@ -143,7 +142,6 @@ fn load_env() -> Result<Env, String> {
     Ok(Env {
         database_url,
         aead_key,
-        ad_ca_file: std::env::var("AD_CA_FILE").ok(),
     })
 }
 
@@ -219,7 +217,7 @@ type OpenAd = (
 
 async fn open_ad(pool: &PgPool, env: &Env) -> Result<OpenAd, String> {
     let ops = load_operational(pool).await?;
-    let cfg = ad::load_config(pool, &env.aead_key, env.ad_ca_file.as_deref())
+    let cfg = ad::load_config(pool, &env.aead_key)
         .await
         .map_err(|e| format!("AD ayarları okunamadı: {e}"))?
         .ok_or_else(|| "AD yapılandırılmamış".to_string())?;
@@ -465,7 +463,6 @@ fn engine_env_of<'a>(
         mode: ops.write_mode,
         settings: &ops.map,
         aead_key: &env.aead_key,
-        ad_ca_file: env.ad_ca_file.as_deref(),
         worker_id,
         sensitive_mapping_enabled: ops.common.sensitive_mapping_enabled,
         first_login_change_required: ops.first_login_change_required,

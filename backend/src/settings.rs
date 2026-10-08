@@ -8,6 +8,8 @@ pub struct AppSettings {
     pub ad_service_password_set: bool,
     /// ADR-106 madde 5: TC kimlik no'nun AD'de durdugu oznitelik; bos = okunmaz
     pub ad_national_id_attribute: String,
+    /// ADR-136: kok CA PEM metni; sir degil, formda aynen gosterilir
+    pub ad_ca_pem: String,
     pub zimbra_url: String,
     pub zimbra_admin_password_set: bool,
     pub oidc_issuer: String,
@@ -22,6 +24,7 @@ pub struct AppSettingsInput {
     pub ad_bind_dn: String,
     pub ad_service_password: String,
     pub ad_national_id_attribute: String,
+    pub ad_ca_pem: String,
     pub zimbra_url: String,
     pub zimbra_admin_password: String,
     pub oidc_issuer: String,
@@ -37,6 +40,7 @@ pub async fn load(pool: &PgPool) -> Result<AppSettings, sqlx::Error> {
         bool,
         String,
         String,
+        String,
         bool,
         String,
         String,
@@ -44,7 +48,7 @@ pub async fn load(pool: &PgPool) -> Result<AppSettings, sqlx::Error> {
         bool,
     ) = sqlx::query_as(
         "SELECT ad_host, ad_bind_dn, ad_service_password_enc IS NOT NULL, \
-                ad_national_id_attribute, \
+                ad_national_id_attribute, ad_ca_pem, \
                 zimbra_url, zimbra_admin_password_enc IS NOT NULL, \
                 oidc_issuer, oidc_client_id, oidc_client_secret_enc IS NOT NULL, \
                 oidc_admin_verified_at IS NOT NULL \
@@ -58,12 +62,13 @@ pub async fn load(pool: &PgPool) -> Result<AppSettings, sqlx::Error> {
         ad_bind_dn: row.1,
         ad_service_password_set: row.2,
         ad_national_id_attribute: row.3,
-        zimbra_url: row.4,
-        zimbra_admin_password_set: row.5,
-        oidc_issuer: row.6,
-        oidc_client_id: row.7,
-        oidc_client_secret_set: row.8,
-        oidc_admin_verified: row.9,
+        ad_ca_pem: row.4,
+        zimbra_url: row.5,
+        zimbra_admin_password_set: row.6,
+        oidc_issuer: row.7,
+        oidc_client_id: row.8,
+        oidc_client_secret_set: row.9,
+        oidc_admin_verified: row.10,
     })
 }
 
@@ -134,7 +139,7 @@ pub async fn save(
             zimbra_admin_password_enc = COALESCE($5, zimbra_admin_password_enc), \
             oidc_issuer = $6, oidc_client_id = $7, \
             oidc_client_secret_enc = COALESCE($8, oidc_client_secret_enc), \
-            ad_national_id_attribute = $9 \
+            ad_national_id_attribute = $9, ad_ca_pem = $10 \
          WHERE id = TRUE",
     )
     .bind(&input.ad_host)
@@ -146,6 +151,7 @@ pub async fn save(
     .bind(&input.oidc_client_id)
     .bind(encrypt_if_present(&input.oidc_client_secret))
     .bind(input.ad_national_id_attribute.trim())
+    .bind(input.ad_ca_pem.trim())
     .execute(pool)
     .await?;
     Ok(())
@@ -171,6 +177,8 @@ mod tests {
             ad_bind_dn: "CN=svc,DC=example,DC=org".to_string(),
             ad_service_password: "gizli-ad-parolasi".to_string(),
             ad_national_id_attribute: "extensionAttribute5".to_string(),
+            ad_ca_pem: "  -----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n"
+                .to_string(),
             zimbra_url: "https://zimbra.example.org:7071".to_string(),
             zimbra_admin_password: "gizli-zimbra-parolasi".to_string(),
             oidc_issuer: "https://idp.example.org/realms/opensicil".to_string(),
@@ -213,6 +221,10 @@ mod tests {
 
         assert_eq!(loaded.ad_host, "dc1.example.org");
         assert_eq!(loaded.ad_national_id_attribute, "extensionAttribute5");
+        assert_eq!(
+            loaded.ad_ca_pem,
+            "-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----"
+        );
         assert!(loaded.ad_service_password_set);
         assert!(loaded.zimbra_admin_password_set);
         assert!(loaded.oidc_client_secret_set);

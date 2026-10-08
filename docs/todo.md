@@ -1270,6 +1270,19 @@ Kurallar:
 
 ---
 
+## AD CA sertifikası ekrandan (ADR-136)
+
+> Kullanıcı isteği (2026-10-08): bağlantı ayarlarının hepsi `/config`'ten, `.env`'den değil. Kalan tek parça AD kök CA'sıydı (`AD_CA_PATH` mount).
+
+- [x] CA sertifikası `/config` AD kartında; backend ve worker veritabanından okur, `AD_CA_FILE`/`AD_CA_PATH` kalkar
+  - Kabul: `app_settings.ad_ca_pem`; formda metin alanı, kayıtta PEM doğrulanır, AD adresi doluyken boş CA reddedilir (400, hiçbir alan yazılmaz)
+  - Kabul: `ad_auth` ve `ad::load_config` CA'yı DB'den okur; env okuma yolu, `.env.example` satırı ve compose mount'u yok; lab betikleri CA'yı formla gönderir
+  - Kabul: denetim satırında `ad_ca_sha256` önce → sonra; çalışan yığında (vaultscan) CA ekrandan girilip Samba'ya bağlanılır
+  - Doğrulama (2026-10-08, vaultscan, `.lab-env`): worker 128/128 (Samba'ya karşı lab testleri CA'yı ayarlardan okuyarak), backend 276/277 — tek kırmızı `oidc_login_flow_against_lab_keycloak` (lab Keycloak kurulu değil, değişiklikten önce de kırmızı); `ad_login_flow_against_lab_samba` CA'yı ayarlardan alıp geçti. İki crate'te fmt, clippy `-D warnings`, audit temiz. Yeni testler: CA'sız/bozuk CA ile `/config` 400 ve hiçbir alan yazılmıyor, `root_store` geçerli/bozuk PEM, `load_config` CA'yı ayarlardan okuyor, denetimde parmak izi. Yığın yeniden kuruldu: migration 36, container'larda CA mount'u yok, dört servis `healthy`
+  - Bekliyor: çalışan yığında CA'nın ekrandan girilip Samba'ya bağlanılması — `/config`'e giriş kullanıcıda (bootstrap parolası bende yok)
+
+---
+
 ## Bende değil: kullanıcı kararı, terminali veya ölçümü bekleyen kutucuklar
 
 > Üçü de yazılı ve hazır; ilerlemesi bana bağlı değil (biri kullanıcının terminalini, biri gerçek AD'de ikinci bir servis hesabını, biri eksik gelen spec'i bekliyor). Sıranın sonunda duruyorlar ki "ilk işaretlenmemiş kutucuktan devam et" kuralı yapılabilir işe denk gelsin. Engeli kalkan kutucuk yukarıdaki sıraya taşınır.

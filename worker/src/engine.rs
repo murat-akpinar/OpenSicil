@@ -33,7 +33,6 @@ pub struct EngineEnv<'a> {
     /// ADR-131: isletme ayarlari (kapsam, sablonlar, pasif OU); is basina okunur
     pub settings: &'a HashMap<String, String>,
     pub aead_key: &'a [u8; crate::crypto::KEY_LEN],
-    pub ad_ca_file: Option<&'a str>,
     pub worker_id: &'a str,
     /// ADR-029: hassas kaynak eslemesi; kapaliyken satir mudahaledir
     pub sensitive_mapping_enabled: bool,
@@ -124,7 +123,7 @@ pub async fn run_job(
     }
     // AD yapilandirilmamissa is deneme tuketmeden bekler (ADR-052 "erisilemiyor"
     // gibi): Yapilandirma sayfasindan ayar girilince kaldigi yerden surer.
-    let cfg = ad::load_config(pool, env.aead_key, env.ad_ca_file)
+    let cfg = ad::load_config(pool, env.aead_key)
         .await
         .map_err(JobError::Failed)?
         .ok_or_else(|| JobError::Unreachable("AD yapılandırılmamış".to_string()))?;
@@ -1745,14 +1744,12 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
-        let ca = var("AD_CA_FILE");
         let settings = test_support::settings(&pool).await;
         let env = EngineEnv {
             time_zone: "Europe/Istanbul",
             mode: Mode { dry_run: false },
             settings: &settings,
             aead_key: &key,
-            ad_ca_file: Some(&ca),
             worker_id: "read-lane",
             sensitive_mapping_enabled: false,
             first_login_change_required: true,
@@ -1891,13 +1888,11 @@ mod tests {
             .await
             .unwrap()
             .unwrap_or(job);
-        let ca = var("AD_CA_FILE");
         let env = |ownership: bool, dry_run: bool| EngineEnv {
             time_zone: "Europe/Istanbul",
             mode: Mode { dry_run },
             settings: &settings,
             aead_key: &key,
-            ad_ca_file: Some(&ca),
             worker_id: "w1",
             sensitive_mapping_enabled: false,
             first_login_change_required: true,
@@ -2289,14 +2284,12 @@ mod tests {
             .await
             .unwrap()
             .unwrap_or(job);
-        let ca = var("AD_CA_FILE");
         let settings = test_support::settings(&pool).await;
         let env = |dry_run: bool, change_required: bool| EngineEnv {
             time_zone: "Europe/Istanbul",
             mode: Mode { dry_run },
             settings: &settings,
             aead_key: &key,
-            ad_ca_file: Some(&ca),
             worker_id: "w1",
             sensitive_mapping_enabled: false,
             first_login_change_required: change_required,
@@ -2619,14 +2612,12 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        let ca = var("AD_CA_FILE");
         let settings = test_support::settings(&pool).await;
         let env = EngineEnv {
             time_zone: "Europe/Istanbul",
             mode: Mode { dry_run: false },
             settings: &settings,
             aead_key: &key,
-            ad_ca_file: Some(&ca),
             worker_id: "w1",
             sensitive_mapping_enabled: false,
             first_login_change_required: true,
@@ -2697,7 +2688,6 @@ mod tests {
             .await
             .unwrap()
             .unwrap_or(job);
-        let ca = var("AD_CA_FILE");
         // Pasif OU bastan tanimli: ayrilisa kadar hicbir adim pasif konteynere bakmaz
         test_support::set_setting(
             &pool,
@@ -2711,7 +2701,6 @@ mod tests {
             mode: Mode { dry_run },
             settings: &settings,
             aead_key: &key,
-            ad_ca_file: Some(&ca),
             worker_id: "w1",
             sensitive_mapping_enabled: false,
             first_login_change_required: true,

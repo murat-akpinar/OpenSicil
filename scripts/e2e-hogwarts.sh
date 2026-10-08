@@ -66,13 +66,14 @@ curl -s -o /dev/null -b "$BOOT" \
   --data-urlencode "ad_host=$AD_HOST" \
   --data-urlencode "ad_bind_dn=$AD_BIND_DN" \
   --data-urlencode "ad_service_password=$AD_PASSWORD" \
+  --data-urlencode "ad_ca_pem@$AD_CA" \
   --data-urlencode "zimbra_url=" --data-urlencode "zimbra_admin_password=" \
   --data-urlencode "oidc_issuer=" --data-urlencode "oidc_client_id=" \
   --data-urlencode "oidc_client_secret=" "$BASE/config"
 
 echo "4) worker (kuru çalıştırma: hedefe yazma ihtimali bile yok)"
 env "${COMMON[@]}" DATABASE_URL="postgres://hw_worker:hw-worker-pw@$PG_HOST/$DB" \
-  AD_CA_FILE="$AD_CA" worker/target/debug/worker >"$WORK/worker.log" 2>&1 &
+  worker/target/debug/worker >"$WORK/worker.log" 2>&1 &
 WORKER_PID=$!
 
 echo "5) katalog ve mutabakat taraması"

@@ -64,6 +64,7 @@ curl -s -o /dev/null -b "$BOOT" \
   --data-urlencode "ad_host=localhost:6360" \
   --data-urlencode "ad_bind_dn=CN=Administrator,CN=Users,DC=opensicil,DC=lab" \
   --data-urlencode "ad_service_password=$AD_LAB_PASSWORD" \
+  --data-urlencode "ad_ca_pem@samba-lab/tls/ca.pem" \
   --data-urlencode "zimbra_url=" --data-urlencode "zimbra_admin_password=" \
   --data-urlencode "oidc_issuer=http://localhost:8081/realms/opensicil" \
   --data-urlencode "oidc_client_id=opensicil-backend" \
@@ -71,7 +72,7 @@ curl -s -o /dev/null -b "$BOOT" \
 
 echo "4) worker (servis rolüyle, canlı mod) → açılışta katalog"
 env "${COMMON[@]}" DATABASE_URL="postgres://e2e_worker:e2e-worker-pw@$PG_HOST/$DB" \
-  AD_CA_FILE="$PWD/samba-lab/tls/ca.pem" worker/target/debug/worker >"$WORK/worker.log" 2>&1 &
+  worker/target/debug/worker >"$WORK/worker.log" 2>&1 &
 WORKER_PID=$!
 for _ in $(seq 1 30); do
   [ "$(psql -d $DB -c "SELECT count(*) FROM catalog_items WHERE kind = 'ou' AND display_name = 'Personel'")" = "1" ] && break

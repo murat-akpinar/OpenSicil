@@ -7,6 +7,20 @@ use std::path::Path;
 
 use sqlx::PgPool;
 
+// Tek kullanimlik, anahtari atilmis kendinden imzali CA (yalnizca ayristirma testi)
+pub const TEST_CA_PEM: &str = "-----BEGIN CERTIFICATE-----
+MIIBkDCCATWgAwIBAgIUC6O9bglLGxwhyKaQa2P5YnOtK5kwCgYIKoZIzj0EAwIw
+HDEaMBgGA1UEAwwRT3BlblNpY2lsIFRlc3QgQ0EwIBcNMjYxMDA4MTE1NDAwWhgP
+MjEyNjA5MTQxMTU0MDBaMBwxGjAYBgNVBAMMEU9wZW5TaWNpbCBUZXN0IENBMFkw
+EwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE8rAdnDYpq5EDkMRVcRukkoybdG+PCi3m
+XXau0sUR8UiRF+wc/0TMt5PaXWrEKiPlGoDpxVICqk/pjzMETvc0oqNTMFEwHQYD
+VR0OBBYEFOlthHZn2IwapkW/6fyttjMr+2SiMB8GA1UdIwQYMBaAFOlthHZn2Iwa
+pkW/6fyttjMr+2SiMA8GA1UdEwEB/wQFMAMBAf8wCgYIKoZIzj0EAwIDSQAwRgIh
+AOjEArQXCXRbUm9zFwGnYBtHyWQgaAGfTB1Lz+4mpQATAiEArhBFsOZa6uChJQpN
+HUAC43uLqvLEpdT7nZLf1niCp00=
+-----END CERTIFICATE-----
+";
+
 pub async fn create_temp_db(admin_pool: &PgPool, admin_url: &str) -> (PgPool, String) {
     // Saat çözünürlüğü kaba olabilir; aynı anda başlayan testler aynı damgayı alır.
     static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
