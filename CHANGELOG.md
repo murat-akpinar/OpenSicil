@@ -88,6 +88,7 @@
 - Arayüz bölümünün kapanışı — güvenlik ve test
 - Katalog lab testi kendi OU'sunu açar, test sırasına bağlı kalmaz
 - Yönetilen bağlantıda yer tutucu rol olamaz kuralı teste bağlanır, kayıt ve düzenleme kapısı eklenir
+- Log bölümü kapanışı — testler, kapsam, imaj ve sır taraması
 
 ### Yeniden düzenleme
 
