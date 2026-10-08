@@ -2573,6 +2573,80 @@ mod tests {
 
     // Postgres + lab Samba AD: kayit → AD'de hesap (etkin, gruplu) → baglanti →
     // ikinci calisma degisiklik uretmez; kuru mod hedefe dokunmaz.
+    // ADR-062 kapanis senaryosu: worker `add` ile baglanti kaydi arasinda olurse hesap
+    // AD'de durur ama baglanti yoktur; is yeniden alininca ikinci hesap acilmaz (ad
+    // veritabaninda sabit, ayni sAMAccountName ikinci `add`'i AD reddeder).
+    #[tokio::test]
+    #[ignore = "lab Samba AD gerektirir: AD_LAB_URL, AD_LAB_BIND_DN, AD_LAB_PASSWORD, AD_CA_FILE ile çalıştır"]
+    async fn a_crash_between_add_and_link_never_opens_a_second_account() {
+        let var = |n: &str| std::env::var(n).unwrap_or_else(|_| panic!("{n} ayarlanmalı"));
+        let (admin_pool, pool, db_name) = test_support::fresh_migrated_db().await;
+        let seed = test_support::seed_example_model(&pool).await;
+        let key = [7u8; crate::crypto::KEY_LEN];
+        let cfg = test_support::configure_lab_ad(
+            &pool,
+            &key,
+            &var("AD_LAB_URL"),
+            &var("AD_LAB_BIND_DN"),
+            &var("AD_LAB_PASSWORD"),
+            &var("AD_CA_FILE"),
+        )
+        .await;
+        test_support::point_model_at_real_catalog(&pool, &seed, &cfg).await;
+        test_support::delete_lab_accounts(&cfg, "kesinti.test*").await;
+        sqlx::query("UPDATE identities SET given_name = 'Kesinti', surname = $2 WHERE id = $1")
+            .bind(seed.identity)
+            .bind(format!("Test{}", std::process::id() % 100_000))
+            .execute(&pool)
+            .await
+            .unwrap();
+        test_support::enqueue(&pool, seed.identity, seed.ad, 1).await;
+        let job = crate::queue::claim(&pool, "w1", &[])
+            .await
+            .unwrap()
+            .unwrap();
+        let ca = var("AD_CA_FILE");
+        let settings = test_support::settings(&pool).await;
+        let env = EngineEnv {
+            time_zone: "Europe/Istanbul",
+            mode: Mode { dry_run: false },
+            settings: &settings,
+            aead_key: &key,
+            ad_ca_file: Some(&ca),
+            worker_id: "w1",
+            sensitive_mapping_enabled: false,
+            first_login_change_required: true,
+            ownership_mode_enabled: false,
+            limits: LAB_LIMITS,
+        };
+        let live = run_job(&pool, &job, &env).await.unwrap();
+        assert!(live.starts_with("hesap açıldı"), "{live}");
+        // Olum taklidi: hesap AD'de, baglanti satiri yazilmamis
+        sqlx::query("DELETE FROM account_links WHERE identity_id = $1")
+            .bind(seed.identity)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let retry = run_job(&pool, &job, &env).await;
+        assert!(retry.is_err(), "ikinci `add` başarı saymaz: {retry:?}");
+        let username: String = sqlx::query_scalar("SELECT username FROM identities WHERE id = $1")
+            .bind(seed.identity)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let mut ldap = ad::connect(&cfg).await.unwrap();
+        let base = ad::base_dn(&mut ldap).await.unwrap();
+        let filter = format!("(sAMAccountName={})", ldap3::ldap_escape(&username));
+        let found = ad::search(&mut ldap, &base, ldap3::Scope::Subtree, &filter, &["cn"])
+            .await
+            .unwrap();
+        assert_eq!(found.len(), 1, "hedefte tek hesap");
+        ldap.unbind().await.ok();
+        test_support::delete_lab_accounts(&cfg, "kesinti.test*").await;
+        drop(pool);
+        test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
     #[tokio::test]
     #[ignore = "lab Samba AD gerektirir: AD_LAB_URL, AD_LAB_BIND_DN, AD_LAB_PASSWORD, AD_CA_FILE ile çalıştır"]
     async fn provisions_account_in_lab_then_is_idempotent() {

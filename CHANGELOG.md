@@ -94,6 +94,7 @@
 - Log bölümü kapanışı — testler, kapsam, imaj ve sır taraması
 - Lab koşusunda veritabanının bütün tabloları düz parola ve kimlik numarasına karşı taranır
 - Ayrılışı geri almanın yıkıcı sınıfı teste bağlanır, ADR-059 açığı ölçülür
+- ADR-062 kesinti senaryoları — add sonrası ölüm, kapalı veritabanı, iki worker
 
 ### Yeniden düzenleme
 

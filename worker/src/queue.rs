@@ -274,6 +274,46 @@ mod tests {
         assert_eq!(backoff_seconds(9), 960, "16 dk tavan");
     }
 
+    // ADR-062 madde 3: iki worker ayni kuyrukta eszamanli calisirken hicbir is iki
+    // kez alinmaz (SKIP LOCKED + kira); her is tam bir kez alinir.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn two_workers_never_claim_the_same_job() {
+        let (admin_pool, pool, db_name) = test_support::fresh_migrated_db().await;
+        let seed = test_support::seed_example_model(&pool).await;
+        let mut expected = Vec::new();
+        for i in 0..40 {
+            let identity: i64 = sqlx::query_scalar(
+                "INSERT INTO identities (given_name, surname, department_id, primary_role_id, \
+                 employment_type, start_date) SELECT 'K', $2, department_id, primary_role_id, \
+                 'permanent', current_date FROM identities WHERE id = $1 RETURNING id",
+            )
+            .bind(seed.identity)
+            .bind(format!("Kişi{i}"))
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            expected.push(test_support::enqueue(&pool, identity, seed.ad, 1).await);
+        }
+        let drain = |worker: &'static str| {
+            let pool = pool.clone();
+            async move {
+                let mut got = Vec::new();
+                while let Some(job) = claim(&pool, worker, &[]).await.unwrap() {
+                    got.push(job.id);
+                }
+                got
+            }
+        };
+        let (a, b) = tokio::join!(tokio::spawn(drain("w1")), tokio::spawn(drain("w2")));
+        let mut all: Vec<i64> = a.unwrap().into_iter().chain(b.unwrap()).collect();
+        all.sort();
+        expected.sort();
+        assert_eq!(all, expected, "her iş tam bir kez alındı");
+        drop(pool);
+        test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
     #[tokio::test]
     #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
     async fn claims_by_priority_reclaims_expired_lease_and_backs_off() {

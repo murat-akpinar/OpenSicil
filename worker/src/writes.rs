@@ -424,6 +424,24 @@ mod tests {
             "başarısız sonuç da niyetine bağlanır"
         );
 
+        // ADR-062 madde 2: veritabani kapaliyken niyet yazilamaz → hedefe yazilmaz
+        let calls_before = writer.calls.len();
+        let db_down = sqlx::postgres::PgPoolOptions::new()
+            .acquire_timeout(std::time::Duration::from_millis(300))
+            .connect_lazy("postgres://x:x@127.0.0.1:1/x")
+            .unwrap();
+        let unreachable_db = apply(
+            &db_down,
+            &job,
+            "w1",
+            Mode { dry_run: false },
+            &mut writer,
+            &request,
+        )
+        .await;
+        assert!(matches!(unreachable_db, Err(WriteFailure::Db(_))));
+        assert_eq!(writer.calls.len(), calls_before, "niyet yoksa yazma yok");
+
         // kira baskasinda: yazma yapilmaz
         sqlx::query("UPDATE jobs SET locked_by = 'w2' WHERE id = $1")
             .bind(job.id)
