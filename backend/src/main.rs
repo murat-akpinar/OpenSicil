@@ -56,6 +56,7 @@ mod search;
 mod server;
 mod settings;
 mod shell;
+mod target_keys;
 #[cfg(test)]
 mod test_support;
 mod token;

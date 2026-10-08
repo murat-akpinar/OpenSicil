@@ -10,7 +10,8 @@ use crate::web::{self, AppState};
 
 // Operator reddi (ADR-059) web rotalarinin tamamini sarar: her istekte kimlik durumu.
 pub(crate) fn build_router(state: AppState) -> Router {
-    Router::new()
+    let pool = state.pool.clone();
+    let app = Router::new()
         .route("/api/health", get(health::health))
         .with_state(state.pool.clone())
         // Metrik ucu (F-19): operator oturumu degil Bearer token; nginx disariya kapatir
@@ -25,7 +26,15 @@ pub(crate) fn build_router(state: AppState) -> Router {
                     crate::operator_guard::enforce,
                 ))
                 .with_state(state),
-        )
+        );
+    // ADR-137: okunur hedef adresi routing'den once cozulur; Router::layer routing'den
+    // sonra calistigi icin uygulama dis router'in fallback'ine konur.
+    Router::new()
+        .fallback_service(app)
+        .layer(axum::middleware::from_fn_with_state(
+            pool,
+            crate::target_keys::resolve,
+        ))
         .layer(axum::middleware::from_fn(logging::log_requests))
         // En dista: govdesiz 404/405/500 yanitlari kabugun icindeki sayfaya cevrilir
         .layer(axum::middleware::from_fn(crate::errors::error_page))
@@ -237,6 +246,60 @@ mod tests {
     }
 
     const OPERATOR_COOKIE: &str = crate::cookie::OPERATOR_SESSION_COOKIE_NAME;
+
+    // ADR-137: gercek router'da okunur hedef adresi; sayisal GET okunur adrese doner.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn target_pages_answer_on_readable_address() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        let operator = crate::operator_session::Operator {
+            subject: "sub-admin".to_string(),
+            username: "admin".to_string(),
+            email: String::new(),
+            authorities: vec![crate::oidc::ADMIN_AUTHORITY.to_string()],
+            auth_source: crate::operator_session::AuthSource::Oidc,
+            lang: crate::i18n::DEFAULT,
+        };
+        let token = crate::operator_session::create_session(&pool, &operator)
+            .await
+            .unwrap();
+        let app = build_router(AppState {
+            pool: pool.clone(),
+            ..test_state()
+        });
+        let get = |uri: &str| {
+            Request::builder()
+                .uri(uri)
+                .header("cookie", format!("{OPERATOR_COOKIE}={token}"))
+                .body(Body::empty())
+                .unwrap()
+        };
+
+        let response = app
+            .clone()
+            .oneshot(get("/targets/1/mappings?x=1"))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert_eq!(
+            response.headers()["location"],
+            "/targets/active-directory/mappings?x=1"
+        );
+        for uri in [
+            "/targets/active-directory",
+            "/targets/active-directory/mappings",
+            "/targets/active-directory/reconcile",
+            "/targets/zimbra",
+        ] {
+            let response = app.clone().oneshot(get(uri)).await.unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "{uri}");
+        }
+        let response = app.oneshot(get("/targets/yok")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
 
     #[tokio::test]
     async fn health_route_is_wired_through_router() {

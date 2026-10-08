@@ -1284,6 +1284,15 @@ Kurallar:
 
 ---
 
+## Hedef sistem adresleri okunur (ADR-137)
+- [x] `/targets/1/…` yerine `/targets/active-directory/…`
+  - Kabul: `/targets/{slug}/…` bütün alt sayfalarda (Genel, Katalog, Eşlemeler, Yönetime al, Mutabakat) çalışır; slug `org::slug_for(name)`, kolon ve migration yok
+  - Kabul: sayısal adres GET'te sorgu dizesiyle birlikte okunur adrese 303 ile yönlenir; POST yönlenmez, formlar ve testlerdeki sayısal yollar aynen çalışır
+  - Kabul: bilinmeyen slug 404; `/targets` listesi ve kişi/içe aktarma adresleri değişmez
+  - Kabul: test — saf yönlendirme kararı (sayısal GET, sayısal POST, slug, bilinmeyen, alt yol + sorgu) ve gerçek router üzerinden uçtan uca slug'lı sayfa
+  - Not (2026-10-08): `backend/src/target_keys.rs` — `decide` saf karar, `resolve` katmanı. axum'da `Router::layer` routing'den **sonra** çalıştığı için uygulama dış router'ın `fallback_service`'ine kondu, katman onun üstünde; handler'lar `Path<i64>` kaldı. Bilinmeyen slug için ayrı `NotFound` sonucu: ilk koşuda `Path<i64>` 400 dönüyordu. Şablonlar sayısal bağlantı basıyor, tıklanınca bir kez 303 (ADR-137 madde 4)
+  - Doğrulama (2026-10-08, vaultscan): `scripts/test-all.sh` → `TEMİZ`, backend **281/281** (+4: üç saf karar testi, bir gerçek router testi), worker **128/128**. Çalışan yığında `curl`: `/targets/1/reconcile?page=2` → `303 /targets/active-directory/reconcile?page=2`, `/targets/2` → `303 /targets/zimbra`, `/targets/yok` → `404`, oturumsuz `/targets/active-directory/mappings` → giriş sayfası
+
 ## Bende değil: kullanıcı kararı, terminali veya ölçümü bekleyen kutucuklar
 
 > Üçü de yazılı ve hazır; ilerlemesi bana bağlı değil (biri kullanıcının terminalini, biri gerçek AD'de ikinci bir servis hesabını, biri eksik gelen spec'i bekliyor). Sıranın sonunda duruyorlar ki "ilk işaretlenmemiş kutucuktan devam et" kuralı yapılabilir işe denk gelsin. Engeli kalkan kutucuk yukarıdaki sıraya taşınır.
