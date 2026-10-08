@@ -1133,17 +1133,31 @@ fn first_value(attrs: &HashMap<String, Vec<String>>, name: &str) -> Option<Strin
 
 // Astlar icin ayni hedefe tek kimlik oncelikli is; acik is varsa yenisi acilmaz.
 async fn enqueue_subordinates(c: &AdJob<'_>) -> Result<(), JobError> {
+    enqueue_dependents(c.pool, c.job.identity_id, c.job.target_system_id)
+        .await
+        .map(|_| ())
+        .map_err(|e| JobError::Failed(format!("astların işi açılamadı: {e}")))
+}
+
+/// ADR-041/052: etkin yoneticisi bu kimlik olanlar — dogrudan astlar ve ona devredilmis
+/// ayrilmislar (`handover_manager_id`) — devir yoneticisi ayrilinca onu gosteren
+/// ayrilmisin etkin yoneticisi de degisir. Doner: acilan is sayisi.
+pub async fn enqueue_dependents(
+    pool: &PgPool,
+    identity: i64,
+    target: i64,
+) -> Result<u64, sqlx::Error> {
     sqlx::query(
         "INSERT INTO jobs (identity_id, target_system_id, priority) \
-         SELECT id, $2, 1 FROM identities WHERE manager_id = $1 AND deleted_at IS NULL \
+         SELECT id, $2, 1 FROM identities \
+         WHERE (manager_id = $1 OR handover_manager_id = $1) AND deleted_at IS NULL \
          ON CONFLICT (identity_id, target_system_id) WHERE status <> 'succeeded' DO NOTHING",
     )
-    .bind(c.job.identity_id)
-    .bind(c.job.target_system_id)
-    .execute(c.pool)
+    .bind(identity)
+    .bind(target)
+    .execute(pool)
     .await
-    .map(|_| ())
-    .map_err(|e| JobError::Failed(format!("astların işi açılamadı: {e}")))
+    .map(|done| done.rows_affected())
 }
 
 // ADR-046/048: hic kullanilmamis = lastLogonTimestamp bos ve pwdLastSet 0.
@@ -1620,6 +1634,43 @@ mod tests {
         // departed → pending: hesap pasif kalir, yazma yok, niyet satiri dogmaz (ADR-059 acigi)
         let to_pending = plan_enabled(&link(Some("departed")), &account(false), false, true);
         assert_eq!(class(to_pending), None);
+    }
+
+    // ADR-052 son madde: devir yoneticisi ayrilinca ona devredilmis ayrilmisin isi acilir.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn a_departing_handover_manager_reopens_the_departed_pointing_at_them() {
+        let (admin_pool, pool, db_name) = test_support::fresh_migrated_db().await;
+        let seed = test_support::seed_example_model(&pool).await;
+        let boss = seed.identity;
+        let left: i64 = sqlx::query_scalar(
+            "INSERT INTO identities (given_name, surname, department_id, primary_role_id, \
+             employment_type, start_date, end_at, handover_manager_id) \
+             SELECT 'Eski', 'Personel', department_id, primary_role_id, 'permanent', \
+             current_date - 30, now() - interval '1 day', id FROM identities WHERE id = $1 \
+             RETURNING id",
+        )
+        .bind(boss)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(enqueue_dependents(&pool, boss, seed.ad).await.unwrap(), 1);
+        let job: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM jobs WHERE identity_id = $1 AND target_system_id = $2",
+        )
+        .bind(left)
+        .bind(seed.ad)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(job, 1);
+        assert_eq!(
+            enqueue_dependents(&pool, boss, seed.ad).await.unwrap(),
+            0,
+            "açık iş varken ikincisi açılmaz"
+        );
+        drop(pool);
+        test_support::drop_temp_db(&admin_pool, &db_name).await;
     }
 
     #[test]

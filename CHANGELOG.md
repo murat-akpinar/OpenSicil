@@ -62,6 +62,7 @@
 - Fark hesabı sürerken ekran kendini tazeler, POST resend sormuyor
 - Yarıda kalan okuma işi kira dolunca geri alınır, gece taraması tıkanmaz
 - Kayıp katalog devri hazır sorgu önbelleğine fazla parametre bağlamaz, okuma transaction içinde
+- Devir yöneticisi ayrılınca ona devredilmiş ayrılmış kimliklerin işi de açılır
 
 ### Geri alınanlar
 
