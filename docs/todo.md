@@ -1258,6 +1258,18 @@ Kurallar:
 
 ---
 
+## Veritabanı imajı gosu'suz (ADR-135)
+
+> ADR-134 kapanışının "önerilen"i. Üst akım `postgres:18.6-alpine`'da 22 `fixed` bulgu, hepsi gosu'nun Go stdlib'inden; etiket zaten en yenisi, yükseltilecek sürüm yok.
+
+- [x] `db` servisi kendi imajıyla: gosu silinir, `USER postgres`
+  - Kabul: `postgres/Dockerfile` (`FROM postgres:18.6-alpine`, `apk upgrade`, `rm /usr/local/bin/gosu`, `USER postgres`), `compose.yaml` `build: ./postgres`; trivy CRITICAL,HIGH'da `fixed` bulgu yok
+  - Kabul: boş volume'de `initdb` geçer; var olan volume'de veri kaybolmaz ve yığın `healthy`
+  - Doğrulama (2026-10-08, vaultscan): `opensicil-db` trivy **0** bulgu (önce 22, hepsi `fixed`). Boş volume'le tek kullanımlık container açıldı → `initdb` geçti, `pg_isready` kabul ediyor, süreç `postgres`. Çalışan yığında `docker compose up -d db` → container yeniden oluştu, `id -un` = `postgres`, `initdb` koşmadı, 35 migration ve denetim satırları yerinde, dört servis `healthy`, `/api/health` 200. `docker compose config --quiet` temiz
+  - Not: giriş betiği artık veri dizininin sahipliğini düzeltemez — bind mount'a geçen kurulum dizini önce `chown 70:70` eder (ADR-135 Sonuçları). `k8s-lab/` manifestleri lab dosyası, üst akım imajını kullanmaya devam eder
+
+---
+
 ## Bende değil: kullanıcı kararı, terminali veya ölçümü bekleyen kutucuklar
 
 > Üçü de yazılı ve hazır; ilerlemesi bana bağlı değil (biri kullanıcının terminalini, biri gerçek AD'de ikinci bir servis hesabını, biri eksik gelen spec'i bekliyor). Sıranın sonunda duruyorlar ki "ilk işaretlenmemiş kutucuktan devam et" kuralı yapılabilir işe denk gelsin. Engeli kalkan kutucuk yukarıdaki sıraya taşınır.

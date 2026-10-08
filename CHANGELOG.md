@@ -65,6 +65,7 @@
 - Yarıda kalan okuma işi kira dolunca geri alınır, gece taraması tıkanmaz
 - Kayıp katalog devri hazır sorgu önbelleğine fazla parametre bağlamaz, okuma transaction içinde
 - Devir yöneticisi ayrılınca ona devredilmiş ayrılmış kimliklerin işi de açılır
+- Veritabanı imajı gosu'suz ve postgres kullanıcısıyla başlıyor, imaj taraması temiz
 
 ### Geri alınanlar
 
