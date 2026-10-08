@@ -355,3 +355,29 @@ pub async fn settings(pool: &PgPool) -> std::collections::HashMap<String, String
         .await
         .expect("işletme ayarları okunamadı")
 }
+
+/// N-09: veritabaninin butun tablolarinda duz metin arar (`pg_dump`'in gorecegi
+/// her satir `row_to_json` ile metne cevrilir). Doner: eslesen tablo adlari.
+pub async fn plain_text_hits(pool: &PgPool, needle: &str) -> Vec<String> {
+    let tables: Vec<String> = sqlx::query_scalar(
+        "SELECT quote_ident(table_name) FROM information_schema.tables \
+         WHERE table_schema = 'public' AND table_type = 'BASE TABLE' ORDER BY 1",
+    )
+    .fetch_all(pool)
+    .await
+    .expect("tablo listesi okunamadı");
+    let mut hits = Vec::new();
+    for table in tables {
+        // Tablo adi information_schema'dan, quote_ident'li; kullanici girdisi degil
+        let sql = format!("SELECT count(*) FROM {table} t WHERE row_to_json(t)::text LIKE $1");
+        let n: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
+            .bind(format!("%{needle}%"))
+            .fetch_one(pool)
+            .await
+            .expect("tablo taranamadı");
+        if n > 0 {
+            hits.push(table);
+        }
+    }
+    hits
+}

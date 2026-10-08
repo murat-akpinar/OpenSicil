@@ -2391,6 +2391,31 @@ mod tests {
         );
         ldap.unbind().await.ok();
 
+        // N-09: dokumde, kuyrukta ve denetimde duz parola ve duz kimlik no yok.
+        // Kimlik no backend'in yazdigi gibi sifreli konur; bulguya da sifreli girer.
+        let national_id = "10000000146";
+        sqlx::query(
+            "UPDATE identities SET national_id_enc = $2, national_id_bidx = $3, \
+             national_id_country = 'TR' WHERE id = $1",
+        )
+        .bind(seed.identity)
+        .bind(crate::crypto::encrypt_versioned(
+            &key,
+            national_id.as_bytes(),
+        ))
+        .bind(vec![9u8; 32])
+        .execute(&pool)
+        .await
+        .unwrap();
+        for needle in [password.as_str(), national_id] {
+            let hits = test_support::plain_text_hits(&pool, needle).await;
+            assert!(hits.is_empty(), "düz metin bulundu: {hits:?}");
+        }
+        // Tarayicinin kendisi calisiyor: bilinen duz deger bulunuyor
+        assert!(test_support::plain_text_hits(&pool, "parola.test")
+            .await
+            .contains(&"identities".to_string()));
+
         test_support::delete_lab_accounts(&cfg, "parola.test*").await;
         drop(pool);
         test_support::drop_temp_db(&admin_pool, &db_name).await;

@@ -91,6 +91,7 @@
 - Katalog lab testi kendi OU'sunu açar, test sırasına bağlı kalmaz
 - Yönetilen bağlantıda yer tutucu rol olamaz kuralı teste bağlanır, kayıt ve düzenleme kapısı eklenir
 - Log bölümü kapanışı — testler, kapsam, imaj ve sır taraması
+- Lab koşusunda veritabanının bütün tabloları düz parola ve kimlik numarasına karşı taranır
 
 ### Yeniden düzenleme
 
