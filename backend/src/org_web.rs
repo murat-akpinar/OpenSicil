@@ -120,7 +120,7 @@ pub fn routes() -> Router<AppState> {
         .route("/departments/{id}/approve", post(approve_department))
         .route("/departments/{id}/reject", post(reject_department))
         .route("/targets", get(targets_page))
-        .route("/targets/{id}", post(save_target))
+        .route("/targets/{id}", get(target_page).post(save_target))
         .route("/targets/{id}/catalog-refresh", post(refresh_catalog))
         .route("/catalog/{id}/hand-over", post(hand_over_missing))
         .route("/catalog/{id}/remove", post(remove_missing))
@@ -535,6 +535,26 @@ fn organization_tabs(lang: Lang, current: &str) -> Tabs {
     Tabs::new(lang, "nav.organization", &ORGANIZATION_TABS, current)
 }
 
+/// Uygulama calisma alaninin sekmeleri (ADR-134 madde 2). Dort sayfa da her
+/// operatore okunur, eylemler kendi yetkisinde; gizlenecek sekme yok.
+pub(crate) fn target_tabs(lang: Lang, target: i64, current: &str) -> Tabs {
+    let base = format!("/targets/{target}");
+    let hrefs = [
+        base.clone(),
+        format!("{base}/mappings"),
+        format!("{base}/manage"),
+        format!("{base}/reconcile"),
+    ];
+    let keys = [
+        "targets.tab_general",
+        "targets.tab_mappings",
+        "targets.tab_manage",
+        "reconcile.title",
+    ];
+    let items: Vec<(&str, &'static str)> = hrefs.iter().map(String::as_str).zip(keys).collect();
+    Tabs::new(lang, "nav.targets", &items, current)
+}
+
 #[derive(Template)]
 #[template(path = "roles.html")]
 struct RolesTemplate {
@@ -737,6 +757,9 @@ struct TargetsTemplate {
     can_edit: bool,
     /// ADR-127: kayip katalog ogeleri ve onlara bakan tanimlar
     missing: Vec<crate::catalog_exit::Missing>,
+    /// Tek hedef sayfasi (`/targets/{id}`) seridi ve basligi; liste sayfasinda yok
+    tabs: Option<Tabs>,
+    target_name: String,
 }
 
 impl TargetsTemplate {
@@ -1384,7 +1407,12 @@ async fn reject_department(
     decide_key(&state, &op, Owner::Department, &key, false).await
 }
 
-async fn render_targets(state: &AppState, op: &Operator, notice: Notice) -> Response {
+async fn render_targets(
+    state: &AppState,
+    op: &Operator,
+    only: Option<i64>,
+    notice: Notice,
+) -> Response {
     let time_zone = match state.time_zone().await {
         Ok(tz) => tz,
         Err(response) => return *response,
@@ -1399,11 +1427,20 @@ async fn render_targets(state: &AppState, op: &Operator, notice: Notice) -> Resp
         Ok(loaded) => loaded,
         Err(e) => return internal("hedef sistemler okunamadı", e),
     };
-    let views = targets
+    let views: Vec<TargetFormView> = targets
         .into_iter()
+        .filter(|t| only.is_none_or(|id| t.id == id))
         .map(|target| target_form_view(target, &options, &refreshes, op.lang))
         .collect();
+    if only.is_some() && views.is_empty() {
+        return (StatusCode::NOT_FOUND, op.lang.t("err.target_not_found")).into_response();
+    }
     render(&TargetsTemplate {
+        tabs: only.map(|id| target_tabs(op.lang, id, &format!("/targets/{id}"))),
+        target_name: match only {
+            Some(_) => views[0].target.name.clone(),
+            None => String::new(),
+        },
         lang: op.lang,
         shell: Shell::of(op),
         targets: views,
@@ -1526,7 +1563,16 @@ async fn targets_page(
     State(state): State<AppState>,
 ) -> Response {
     let notice = Notice::take(&state.pool, &op.username).await;
-    render_targets(&state, &op, notice).await
+    render_targets(&state, &op, None, notice).await
+}
+
+async fn target_page(
+    OperatorSession(op): OperatorSession,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Response {
+    let notice = Notice::take(&state.pool, &op.username).await;
+    render_targets(&state, &op, Some(id), notice).await
 }
 
 async fn save_target(
@@ -1556,6 +1602,7 @@ async fn save_target(
         return render_targets(
             &state,
             &op,
+            Some(id),
             Notice::err(op.lang.t("err.day_numbers").into()),
         )
         .await;
@@ -1564,7 +1611,9 @@ async fn save_target(
     target.password_reset_delay_days = delay;
     if let Err(e) = org::save_target(&state.pool, &target).await {
         return match save_error(e, "hedef sistem kaydedilemedi") {
-            Ok(key) => render_targets(&state, &op, Notice::err(op.lang.t(key).into())).await,
+            Ok(key) => {
+                render_targets(&state, &op, Some(id), Notice::err(op.lang.t(key).into())).await
+            }
             Err(response) => *response,
         };
     }
@@ -1840,6 +1889,65 @@ mod tests {
             assert_eq!(role_kind_of(Some(junk)), "", "{junk}");
         }
         assert_eq!(role_kind_of(None), "");
+    }
+
+    /// ADR-134 madde 2: hedefin dort sayfasi ayni baslik ve ayni seritle acilir,
+    /// etkin sekme sayfanin kendisi; auditor dordunu de okur, serit eksilmez.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn target_pages_share_one_tab_strip() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        let catalog = crate::test_support::seed_example_catalog(&pool).await;
+        let app = crate::web::routes()
+            .with_state(crate::web::test_state(pool.clone(), "https://localhost"));
+        let auditor = cookie(&pool, &["auditor"]).await;
+        let name: String = sqlx::query_scalar("SELECT name FROM target_systems WHERE id = $1")
+            .bind(catalog.ad)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let base = format!("/targets/{}", catalog.ad);
+        let pages = [
+            (base.clone(), "Genel ve katalog"),
+            (format!("{base}/mappings"), "Eşlemeler"),
+            (format!("{base}/manage"), "Yönetime alma"),
+            (format!("{base}/reconcile"), "Mutabakat"),
+        ];
+        for (url, label) in &pages {
+            let r = app
+                .clone()
+                .oneshot(request("GET", url, "", &auditor))
+                .await
+                .unwrap();
+            assert_eq!(r.status(), StatusCode::OK, "{url}");
+            let body = body_string(r).await;
+            assert!(
+                body.contains(&format!(r#"<h1 class="h1 mb-3">{name}</h1>"#)),
+                "{url}"
+            );
+            assert!(
+                body.contains(&format!(
+                    r#"<a class="tab" href="{url}" aria-current="page">{label}</a>"#
+                )),
+                "{url}: {body}"
+            );
+            for (other, _) in &pages {
+                assert!(
+                    body.contains(&format!(r#"href="{other}""#)),
+                    "{url} -> {other}"
+                );
+            }
+            assert_eq!(body.matches(r#"aria-current="page""#).count(), 1, "{url}");
+        }
+        for url in ["/targets/999999", "/targets/999999/reconcile"] {
+            let r = app
+                .clone()
+                .oneshot(request("GET", url, "", &auditor))
+                .await
+                .unwrap();
+            assert_eq!(r.status(), StatusCode::NOT_FOUND, "{url}");
+        }
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
     }
 
     #[tokio::test]

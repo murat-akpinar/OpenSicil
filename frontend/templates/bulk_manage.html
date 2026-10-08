@@ -3,9 +3,10 @@
 {% block content %}
 {# ADR-018/043/051/087: gozlem baglantilari, okuma seridinin hesapladigi farkla;
    secim esigi yalnizca uygulanacak farki olanlari sayar. #}
+{% include "target_head.html" %}
 <div class="page-head">
   <div>
-    <h1 class="h1">{{ lang.t("manage.title") }} — {{ target_name }}</h1>
+    <h2 class="h2">{{ lang.t("manage.title") }}</h2>
     <p class="sub">{{ lang.t("manage.sub") }}</p>
   </div>
   <div class="flex flex-wrap items-center gap-2">
@@ -14,7 +15,6 @@
       <button class="btn" type="submit"{% if diff_running %} disabled{% endif %}><i class="ico ico-refresh" aria-hidden="true"></i>{{ lang.t("manage.compute_diff") }}</button>
     </form>
     {% endif %}
-    <a class="btn" href="/targets/{{ target_id }}/reconcile"><i class="ico ico-chart" aria-hidden="true"></i>{{ lang.t("reconcile.title") }}</a>
   </div>
 </div>
 

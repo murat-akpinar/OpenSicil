@@ -1,10 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ target_name }} — OpenSicil{% endblock %}
 {% block content %}
-<div class="page-head">
-  <h1 class="h1">{{ target_name }}</h1>
-  <a class="link text-sm" href="/targets">{{ lang.t("nav.targets") }}</a>
-</div>
+{% include "target_head.html" %}
 <p class="mb-4 text-sm muted">{{ lang.t("mappings.intro") }}</p>
 {% if !error.is_empty() %}<p class="alert alert-err">{{ error }}</p>{% endif %}
 <section class="card mb-6">

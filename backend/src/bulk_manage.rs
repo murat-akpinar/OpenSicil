@@ -293,6 +293,7 @@ struct ManageTemplate {
     notice: Notice,
     target_id: i64,
     target_name: String,
+    tabs: crate::shell::Tabs,
     rows: Vec<Row>,
     pending: Vec<BatchSummary>,
     can_manage: bool,
@@ -309,6 +310,7 @@ struct ManageBatchTemplate {
     notice: Notice,
     target_id: i64,
     target_name: String,
+    tabs: crate::shell::Tabs,
     batch_id: i64,
     batch_sub: String,
     rows: Vec<Row>,
@@ -324,7 +326,7 @@ fn page_path(target: i64) -> String {
     format!("/targets/{target}/manage")
 }
 
-async fn target_name(pool: &PgPool, target: i64) -> Result<Option<String>, sqlx::Error> {
+pub(crate) async fn target_name(pool: &PgPool, target: i64) -> Result<Option<String>, sqlx::Error> {
     sqlx::query_scalar("SELECT name FROM target_systems WHERE id = $1")
         .bind(target)
         .fetch_optional(pool)
@@ -359,6 +361,7 @@ async fn render_page(state: &AppState, op: &Operator, target: i64, notice: Notic
             notice,
             target_id: target,
             target_name,
+            tabs: crate::org_web::target_tabs(op.lang, target, &page_path(target)),
             rows,
             pending,
             can_manage: allowed(op, AUTHORITIES),
@@ -529,6 +532,7 @@ async fn render_batch(
         notice,
         target_id: batch.target,
         target_name,
+        tabs: crate::org_web::target_tabs(op.lang, batch.target, &page_path(batch.target)),
         batch_id: batch.id,
         batch_sub: op.lang.tn(
             "manage.batch_sub",

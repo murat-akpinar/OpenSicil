@@ -229,4 +229,5 @@
 - Ayrılışta AD hesabı onaysız silinmez; ayrılış nedeni açıklamaya eşlenebilir
 - Menü yedi maddeye indi, Organizasyon sekme şeridiyle açılıyor
 - Personel altı sayfayı tek sekme şeridinde topluyor, Raporlar'dan Listeler kartı kalktı
+- Hedefin dört sayfası tek başlık ve sekme şeridinde
 

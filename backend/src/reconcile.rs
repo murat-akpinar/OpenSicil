@@ -229,6 +229,8 @@ struct ReconcileTemplate {
     shell: Shell,
     lang: Lang,
     target_id: i64,
+    target_name: String,
+    tabs: crate::shell::Tabs,
     v: View,
     notice: Notice,
     can_scan: bool,
@@ -333,6 +335,7 @@ async fn render_page(
         Err(response) => return *response,
     };
     let loaded = tokio::try_join!(
+        crate::bulk_manage::target_name(&state.pool, target),
         load(&state.pool, target, &time_zone, offset),
         crate::bulk_adopt::candidates(&state.pool, &state.aead_key, target),
         crate::identity::form_options(&state.pool),
@@ -342,7 +345,16 @@ async fn render_page(
         crate::national_id_fill::pending(&state.pool, target),
     );
     match loaded {
-        Ok((v, candidates, options, today, placeholder, ad_diffs, national_id_pending)) => {
+        Ok((
+            Some(target_name),
+            v,
+            candidates,
+            options,
+            today,
+            placeholder,
+            ad_diffs,
+            national_id_pending,
+        )) => {
             let shown = v.rows.len() as i64;
             let (range, prev_offset, next_offset) =
                 crate::identity_web::pagination(op.lang, v.offset, shown, v.total());
@@ -353,6 +365,12 @@ async fn render_page(
                 lang: op.lang,
                 shell: Shell::of(op),
                 target_id: target,
+                target_name,
+                tabs: crate::org_web::target_tabs(
+                    op.lang,
+                    target,
+                    &format!("/targets/{target}/reconcile"),
+                ),
                 v,
                 notice,
                 can_scan: allowed(op, &SCAN_AUTHORITIES),
@@ -369,6 +387,7 @@ async fn render_page(
                 national_id_pending,
             })
         }
+        Ok((None, ..)) => axum::http::StatusCode::NOT_FOUND.into_response(),
         Err(e) => internal("mutabakat bulguları okunamadı", e),
     }
 }

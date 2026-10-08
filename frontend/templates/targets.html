@@ -1,9 +1,13 @@
 {% extends "base.html" %}
 {% block title %}{{ lang.t("nav.targets") }} — OpenSicil{% endblock %}
 {% block content %}
+{% if let Some(tabs) = tabs %}
+{% include "target_head.html" %}
+{% else %}
 <div class="page-head">
   <h1 class="h1">{{ lang.t("targets.title") }}</h1>
 </div>
+{% endif %}
 {% if !error.is_empty() %}<p class="alert alert-err">{{ error }}</p>{% endif %}
 {% if !info.is_empty() %}<p class="alert alert-info">{{ info }}</p>{% endif %}
 
@@ -15,7 +19,7 @@
   <div class="card-head flex-wrap">
     <span class="ico-tile"><i class="ico ico-server" aria-hidden="true"></i></span>
     <div class="min-w-0 flex-1">
-      <h2 class="h2">{{ v.target.name }}</h2>
+      <h2 class="h2">{% if tabs.is_some() %}{{ lang.t("targets.tab_general") }}{% else %}<a class="link" href="/targets/{{ v.target.id }}">{{ v.target.name }}</a>{% endif %}</h2>
       {# "Baglanti durumu" diye bir olcum yok: burada yazan son katalog
          yenilemesinin sonucu, adi da o (ADR-114 veri notu) #}
       {% if v.refresh_status.is_empty() %}

@@ -1,9 +1,10 @@
 {% extends "base.html" %}
-{% block title %}{{ lang.t("reconcile.title") }} — OpenSicil{% endblock %}
+{% block title %}{{ lang.t("reconcile.title") }} — {{ target_name }} — OpenSicil{% endblock %}
 {% block content %}
+{% include "target_head.html" %}
 <div class="page-head">
   <div>
-    <h1 class="h1">{{ lang.t("reconcile.title") }}</h1>
+    <h2 class="h2">{{ lang.t("reconcile.title") }}</h2>
     <p class="sub">{{ lang.t("reconcile.subtitle") }}</p>
   </div>
   <div class="flex flex-wrap items-center gap-2">
@@ -12,8 +13,6 @@
       <button class="btn" type="submit"><i class="ico ico-refresh" aria-hidden="true"></i>{{ lang.t("reconcile.scan") }}</button>
     </form>
     {% endif %}
-    {# toplu yonetime alma hr/admin: tarama yetkisinden bagimsiz #}
-    <a class="btn" href="/targets/{{ target_id }}/manage"><i class="ico ico-users" aria-hidden="true"></i>{{ lang.t("manage.title") }}</a>
   </div>
 </div>
 
