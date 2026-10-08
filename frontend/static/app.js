@@ -125,7 +125,9 @@
     });
   }
 
-  // Yolu en uzun eşleşen gezinme bağlantısı aktif olur; kimlik sayfaları "/" altında.
+  // Yolu en uzun önekle eşleşen gezinme bağlantısı aktif olur. Önekler
+  // `data-match`te (ADR-134: maddenin sekmelerinin adresleri), yoksa `href`.
+  // "/" yalnızca kendisiyle eşleşir.
   function activeNav() {
     var path = window.location.pathname;
     // Tarama ekranları adres olarak /targets altında kaldı (ADR-123 madde 3),
@@ -135,14 +137,14 @@
     var bestLength = -1;
     var links = document.querySelectorAll(".side .nav-link");
     for (var i = 0; i < links.length; i++) {
-      var href = links[i].getAttribute("href");
-      var hit =
-        path === href ||
-        (href !== "/" && path.indexOf(href + "/") === 0) ||
-        (href === "/" && path.indexOf("/identities") === 0);
-      if (hit && href.length > bestLength) {
-        best = links[i];
-        bestLength = href.length;
+      var prefixes = (links[i].getAttribute("data-match") || links[i].getAttribute("href")).split(" ");
+      for (var j = 0; j < prefixes.length; j++) {
+        var p = prefixes[j];
+        var hit = path === p || (p !== "/" && path.indexOf(p + "/") === 0);
+        if (hit && p.length > bestLength) {
+          best = links[i];
+          bestLength = p.length;
+        }
       }
     }
     if (best) {

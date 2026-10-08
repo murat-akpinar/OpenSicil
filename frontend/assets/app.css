@@ -753,6 +753,20 @@
   .page-narrow {
     @apply mx-auto w-full max-w-xl px-4 py-7;
   }
+  /* Çalışma alanı sekme şeridi (ADR-134 madde 1): düz bağlantılar, etkin olan
+     `aria-current`. Alt çizgi gölgeyle: `overflow-x-auto` taşan kenarlığı keserdi.
+     Dar ekranda şerit kendi içinde yatay kayar, sayfa taşmaz. */
+  .tabs {
+    @apply mb-6 flex gap-1 overflow-x-auto;
+    box-shadow: inset 0 -1px 0 var(--ctp-line);
+  }
+  .tab {
+    @apply shrink-0 border-b-2 border-transparent px-3.5 py-2.5 text-sm font-bold
+           whitespace-nowrap text-fg-dim no-underline hover:text-fg;
+  }
+  .tab[aria-current="page"] {
+    @apply border-accent text-accent;
+  }
   .page-head {
     @apply mb-6 flex flex-wrap items-center justify-between gap-3;
   }

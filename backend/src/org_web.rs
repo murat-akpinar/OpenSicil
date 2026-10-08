@@ -17,7 +17,7 @@ use crate::i18n::Lang;
 use crate::identity_web::{allowed, audit_operator, forbidden, internal, OperatorSession};
 use crate::operator_session::Operator;
 use crate::org::{self, CatalogOptions, Definition, Owner, SaveError, TargetSetting};
-use crate::shell::Shell;
+use crate::shell::{Shell, Tabs};
 use crate::web::{render, AppState};
 
 const WRITE_AUTHORITIES: &[&str] = &["role_admin", "admin"];
@@ -527,11 +527,20 @@ fn save_error(e: SaveError, what: &str) -> Result<&'static str, Box<Response>> {
     }
 }
 
+/// Organizasyon calisma alaninin sekmeleri (ADR-134 madde 2)
+const ORGANIZATION_TABS: [(&str, &str); 2] =
+    [("/departments", "nav.departments"), ("/roles", "nav.roles")];
+
+fn organization_tabs(lang: Lang, current: &str) -> Tabs {
+    Tabs::new(lang, "nav.organization", &ORGANIZATION_TABS, current)
+}
+
 #[derive(Template)]
 #[template(path = "roles.html")]
 struct RolesTemplate {
     shell: Shell,
     lang: Lang,
+    tabs: Tabs,
     sections: Vec<org::RoleSection>,
     /// Hic rol yoksa ekran bolum tablolari yerine bos durumu basar
     any: bool,
@@ -571,6 +580,7 @@ struct RoleTemplate {
 struct DepartmentsTemplate {
     shell: Shell,
     lang: Lang,
+    tabs: Tabs,
     departments: Vec<org::DepartmentRow>,
     /// Ozet kutulari (ADR-119 B.7): toplam departman, agactaki kisi, bos departman
     total: i64,
@@ -759,6 +769,7 @@ async fn render_roles(
 ) -> Response {
     match org::list_roles(&state.pool).await {
         Ok(roles) => render(&RolesTemplate {
+            tabs: organization_tabs(op.lang, "/roles"),
             lang: op.lang,
             shell: Shell::of(op),
             any: !roles.is_empty(),
@@ -1144,6 +1155,7 @@ async fn render_departments(state: &AppState, op: &Operator, error: String) -> R
         Ok(departments) => {
             let (total, people, empty) = org::department_summary(&departments);
             render(&DepartmentsTemplate {
+                tabs: organization_tabs(op.lang, "/departments"),
                 lang: op.lang,
                 shell: Shell::of(op),
                 departments,
@@ -1848,7 +1860,11 @@ mod tests {
         // Auditor okur, yazamaz.
         let r = send("GET", "/roles".into(), String::new(), auditor.clone()).await;
         assert_eq!(r.status(), StatusCode::OK);
-        assert!(!body_string(r).await.contains("Kaydet"));
+        let body = body_string(r).await;
+        assert!(!body.contains("Kaydet"));
+        // ADR-134: Organizasyon seridi, etkin sekme Roller
+        assert!(body.contains(r#"<a class="tab" href="/roles" aria-current="page">Roller</a>"#));
+        assert!(body.contains(r#"<a class="tab" href="/departments">Departmanlar</a>"#));
         let r = send(
             "POST",
             "/roles".into(),

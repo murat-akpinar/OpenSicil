@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ lang.t("nav.roles") }} — OpenSicil{% endblock %}
 {% block content %}
+{% include "tabs.html" %}
 {% if can_edit %}
 {# ADR-114 C: birincil eylem basligin saginda. `<details>` JS istemiyor,
    satir ici `onclick` CSP'de yasak; form basligin altinda tam genislikte acilir.

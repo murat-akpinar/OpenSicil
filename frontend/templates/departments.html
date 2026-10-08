@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ lang.t("nav.departments") }} — OpenSicil{% endblock %}
 {% block content %}
+{% include "tabs.html" %}
 {% if can_edit %}
 {# ADR-114 C: birincil eylem basligin saginda; form altinda tam genislikte acilir #}
 <details class="page-head-form">

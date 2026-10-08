@@ -1193,11 +1193,14 @@ Kurallar:
 >
 > Her kutucuğun tarayıcı yarısı çalışan yığında (vaultscan) görülür; oturum izni yoksa "Ertelenen" diye yazılır, kod yarısı bekletilmez.
 
-- [ ] Ortak sekme şeridi + kenar çubuğu yeni düzende (ADR-134 madde 1–2)
+- [x] Ortak sekme şeridi + kenar çubuğu yeni düzende (ADR-134 madde 1–2)
   - Kabul: tek askama parçası `tabs.html`; sekmeler düz `<a>`, etkin olan `aria-current="page"`; JS ve yeni bağımlılık yok
   - Kabul: kenar çubuğu 7 madde — Ana sayfa · Personel · Organizasyon · Mutabakat · Uygulamalar · Raporlar · Ayarlar; Roller ve Departmanlar "Organizasyon" altında iki sekme
   - Kabul: hiçbir rota değişmez — yer imleri, 303 yönlendirmeleri (ADR-126) ve testlerdeki yollar aynen çalışır; menüde etkin madde alt sayfada da (ör. `/roles/5`) doğru işaretlenir
   - Kabul: TR/EN birlikte, iki temada, dar ekranda sekme şeridi yatay kayar (sayfa taşmaz — `ui-shots` ölçüm 1)
+  - Not (2026-10-08): `shell::Tabs` (etiket + `Tab { href, label, current }`, `Tabs::new` i18n anahtarlarından kurar) ve `frontend/templates/tabs.html` (`<nav class="tabs">`, düz `<a class="tab">`, etkin olan `aria-current="page"`); şablon `{% include %}` ile alır. İlk kullanan Organizasyon: `/departments` ve `/roles` liste sayfaları (`org_web::ORGANIZATION_TABS`). Rol/departman detay sayfasına şerit konmadı (liste sayfasının sekmesi; gerekirse `tabs` alanı eklenir). Kenar çubuğu yedi madde; aktif madde `data-match` öneklerinin en uzun eşleşmesi (`app.js`) — Personel altı adresi, Organizasyon iki adresi kapsar, `/targets/{id}/reconcile` Mutabakat'ta kalır; `/roles/5` Organizasyon'u işaretler. Rota değişmedi. CSS: `.tabs` alt çizgisi gölgeyle (`overflow-x-auto` kenarlığı keserdi), dar ekranda şerit kendi içinde kayar
+  - Doğrulama: backend testleri (gerçek Postgres `--include-ignored`) — `org_web` rol testi şeridin iki sekmesini ve `aria-current`ı sınar, `shell::tests::only_the_current_tab_is_marked`; `interventions` testinin "şerit yok" iddiası menüdeki yeni `data-match` önekine takılıyordu, bağlantıya (`href="/interventions"`) daraltıldı. fmt + clippy `-D warnings` + audit temiz. vaultscan (lab Samba + gerçek Postgres): backend **261/262** — düşen tek test lab Keycloak'ınki (ortam eksiği). Yığın yeniden derlendi, `/static/app.css` `.tab[aria-current=page]` kuralını sunuyor
+  - **Ertelenen:** tarayıcıda iki tema × iki genişlik (`ui-shots`) — admin oturumu AD girişi istiyor, Windows DC kapalı
 - [ ] Personel çalışma alanı: dört liste ve içe aktarma sekmeye girer (ADR-134 madde 2–3)
   - Kabul: `/identities`, `/imports`, `/upcoming`, `/interventions`, `/deletions`, `/used-names` aynı başlık + aynı sekme şeridini taşır
   - Kabul: müdahale ve silinmeyi bekleyen sekmeleri bekleyen sayıyı rozetle gösterir; sayı sayfanın kendi sorgusundan gelir, sekme başına ek sorgu yalnızca o sayılar için ve tek ifadede

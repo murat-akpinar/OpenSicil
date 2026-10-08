@@ -76,6 +76,43 @@ fn top_authority(authorities: &[String]) -> Option<String> {
         .or_else(|| authorities.first().cloned())
 }
 
+/// Calisma alani sekme seridi (ADR-134 madde 1): `tabs.html` her sekmeyi duz
+/// `<a>` olarak basar, etkin olanina `aria-current="page"` yazar. Her sekme kendi
+/// rotasinda kalir; "tek pencere" ayni serit demek, tek rota degil.
+pub struct Tabs {
+    /// Seridin erisilebilir adi (`<nav aria-label>`)
+    pub label: &'static str,
+    pub items: Vec<Tab>,
+}
+
+pub struct Tab {
+    pub href: String,
+    pub label: &'static str,
+    pub current: bool,
+}
+
+impl Tabs {
+    /// `items` (adres, i18n anahtari) sirasiyla; `current` sayfanin kendi adresi.
+    pub fn new(
+        lang: Lang,
+        label: &'static str,
+        items: &[(&str, &'static str)],
+        current: &str,
+    ) -> Tabs {
+        Tabs {
+            label: lang.t(label),
+            items: items
+                .iter()
+                .map(|(href, key)| Tab {
+                    href: href.to_string(),
+                    label: lang.t(key),
+                    current: *href == current,
+                })
+                .collect(),
+        }
+    }
+}
+
 /// Bas harfler: "Murat Akpinar" -> "MA", tek parcali ad -> tek harf.
 /// Unicode: `chars()` ile ilk karakter alinir, byte dilimlemesi cok baytli
 /// harfte (Ş, Ö, Ç) paniklerdi.
@@ -134,6 +171,19 @@ mod tests {
 
         let none = Shell::from_parts("Murat Akpinar", &[]);
         assert_eq!(none.authority(&Lang::Tr), "");
+    }
+
+    #[test]
+    fn only_the_current_tab_is_marked() {
+        let tabs = Tabs::new(
+            Lang::Tr,
+            "nav.organization",
+            &[("/departments", "nav.departments"), ("/roles", "nav.roles")],
+            "/roles",
+        );
+        assert_eq!(tabs.label, "Organizasyon");
+        let marked: Vec<_> = tabs.items.iter().map(|t| (t.label, t.current)).collect();
+        assert_eq!(marked, [("Departmanlar", false), ("Roller", true)]);
     }
 
     #[test]

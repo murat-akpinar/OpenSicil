@@ -263,7 +263,10 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
-        assert!(!body_of("/".into()).await.contains("/interventions"));
+        // Menunun `data-match` oneki sayfada; aranan seridin baglantisi
+        assert!(!body_of("/".into())
+            .await
+            .contains("href=\"/interventions\""));
 
         // Tek is: serit dogrudan kisi sayfasina gider (ADR-103 kalibi)
         sqlx::query(
