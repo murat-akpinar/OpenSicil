@@ -685,6 +685,10 @@ async fn edit_submit(
         Ok(n) => n,
         Err(key) => return form_error(&state, &op, form, key, FormMode::Edit(id)).await,
     };
+    if let Some(refused) = refuse_own_role_change(&state, &op, id, Some(new.primary_role_id)).await
+    {
+        return refused;
+    }
     match identity::placeholder_refused(&state.pool, new.primary_role_id, Some(id)).await {
         Ok(false) => {}
         Ok(true) => {
@@ -723,6 +727,20 @@ async fn edit_submit(
     Redirect::to(&format!("/identities/{id}")).into_response()
 }
 
+/// docs/07: kendi kaydinda rol degisikligi 403; okunamazsa 500. None: devam.
+async fn refuse_own_role_change(
+    state: &AppState,
+    op: &Operator,
+    id: i64,
+    new_primary: Option<i64>,
+) -> Option<Response> {
+    match identity::own_role_change(&state.pool, id, &op.username, new_primary).await {
+        Ok(false) => None,
+        Ok(true) => Some(forbidden(op.lang)),
+        Err(e) => Some(internal("rol değişikliği sahibi okunamadı", e)),
+    }
+}
+
 async fn enqueue_single(state: &AppState, id: i64) {
     if let Err(e) =
         identity::enqueue_all_targets(&state.pool, id, crate::jobs::Priority::Single).await
@@ -753,6 +771,9 @@ async fn assign_role(
         Ok(tz) => tz,
         Err(response) => return *response,
     };
+    if let Some(refused) = refuse_own_role_change(&state, &op, id, None).await {
+        return refused;
+    }
     let Ok(role_id) = form.role_id.trim().parse::<i64>() else {
         return (
             StatusCode::BAD_REQUEST,
@@ -801,6 +822,9 @@ async fn remove_role(
 ) -> Response {
     if !allowed(&op, REGISTER_AUTHORITIES) {
         return forbidden(op.lang);
+    }
+    if let Some(refused) = refuse_own_role_change(&state, &op, id, None).await {
+        return refused;
     }
     match identity::remove_role(&state.pool, id, role_id).await {
         Ok(true) => {
@@ -1347,6 +1371,96 @@ mod tests {
             .unwrap();
         assert_eq!(r.status(), StatusCode::SEE_OTHER);
         assert_eq!(identity::unassigned_role_count(&pool).await.unwrap(), 0);
+
+        drop(app);
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
+    /// docs/07: operator kendi kaydinda rol degistiremez; baskasinin kaydinda ve
+    /// rolu degistirmeyen duzenlemede engel yok.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn an_operator_cannot_change_roles_on_their_own_record() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        let [own, other] = crate::test_support::seed_two_identities(&pool).await;
+        sqlx::query("UPDATE identities SET username = 'IK.Operatoru' WHERE id = $1")
+            .bind(own)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let (dept, role): (i64, i64) =
+            sqlx::query_as("SELECT department_id, primary_role_id FROM identities WHERE id = $1")
+                .bind(own)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let additional: i64 = sqlx::query_scalar(
+            "INSERT INTO roles (kind, name, slug) VALUES ('additional', 'Yönetici', 'yonetici') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let second: i64 = sqlx::query_scalar(
+            "INSERT INTO roles (kind, name, slug) VALUES ('primary', 'Başka', 'baska') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let app = crate::web::routes()
+            .with_state(crate::web::test_state(pool.clone(), "https://localhost"));
+        let hr = operator_cookie(&pool, &["hr"]).await;
+        let post = |uri: String, body: String| {
+            let (app, hr) = (app.clone(), hr.clone());
+            async move {
+                app.oneshot(request("POST", &uri, &body, &hr))
+                    .await
+                    .unwrap()
+                    .status()
+            }
+        };
+        let edit = |primary: i64| {
+            format!(
+                "given_name=Ay%C5%9Fe&surname=Y%C4%B1lmaz&department_id={dept}&primary_role_id={primary}\
+                 &employment_type=permanent&start_date=2026-10-01"
+            )
+        };
+
+        let assign = format!("role_id={additional}");
+        assert_eq!(
+            post(format!("/identities/{own}/roles"), assign.clone()).await,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            post(format!("/identities/{own}/edit"), edit(second)).await,
+            StatusCode::FORBIDDEN
+        );
+        let unchanged = post(format!("/identities/{own}/edit"), edit(role)).await;
+        assert_eq!(
+            unchanged,
+            StatusCode::SEE_OTHER,
+            "rolü değiştirmeyen düzenleme serbest"
+        );
+        // Baskasinin kaydinda engel yok; kendi kaydindaki ek rol de kaldirilamaz
+        assert_eq!(
+            post(format!("/identities/{other}/roles"), assign).await,
+            StatusCode::SEE_OTHER
+        );
+        sqlx::query("INSERT INTO identity_additional_roles (identity_id, role_id) VALUES ($1, $2)")
+            .bind(own)
+            .bind(additional)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let remove = format!("/identities/{own}/roles/{additional}/delete");
+        assert_eq!(post(remove, String::new()).await, StatusCode::FORBIDDEN);
+        let primary: i64 =
+            sqlx::query_scalar("SELECT primary_role_id FROM identities WHERE id = $1")
+                .bind(own)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(primary, role);
 
         drop(app);
         drop(pool);

@@ -755,6 +755,28 @@ pub async fn unassigned_role_count(pool: &PgPool) -> Result<i64, sqlx::Error> {
 
 /// Yer tutucu rolun id'si: toplu sahiplenme formunun varsayilani. Migration
 /// seed'ler; tek satirdir (kismi tekil indeks).
+/// docs/07: operator kendi kimlik kaydinda rol degistiremez (kendine yetki grubu
+/// veren rol atayamaz). Eslesme kullanici adiyla, buyuk-kucuk harf duyarsiz.
+/// `new_primary` verilirse yalnizca birincil rol degisiyorsa true.
+pub async fn own_role_change(
+    pool: &PgPool,
+    id: i64,
+    username: &str,
+    new_primary: Option<i64>,
+) -> Result<bool, sqlx::Error> {
+    let own: Option<bool> = sqlx::query_scalar(
+        "SELECT COALESCE(lower(username) = lower($2), false) \
+           AND ($3::bigint IS NULL OR primary_role_id <> $3) \
+         FROM identities WHERE id = $1",
+    )
+    .bind(id)
+    .bind(username)
+    .bind(new_primary)
+    .fetch_optional(pool)
+    .await?;
+    Ok(own == Some(true))
+}
+
 /// Degismez kural: `mode = 'managed'` baglantinin kimliginde yer tutucu rol olmaz.
 /// Kapi kalkarsa gece dolumu (`fill_placeholder_roles`) yonetilen hesabin rolunu is
 /// acmadan degistirir ve hesap eski OU'da kalir. Kayit her hedefte yonetilen hesap
