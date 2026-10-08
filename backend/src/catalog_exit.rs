@@ -49,8 +49,8 @@ type MissingRow = (
     Vec<String>,
 );
 
-pub async fn missing(pool: &PgPool) -> Result<Vec<Missing>, sqlx::Error> {
-    let rows: Vec<MissingRow> = sqlx::query_as(MISSING_SQL).fetch_all(pool).await?;
+pub async fn missing<'e>(db: impl sqlx::PgExecutor<'e>) -> Result<Vec<Missing>, sqlx::Error> {
+    let rows: Vec<MissingRow> = sqlx::query_as(MISSING_SQL).fetch_all(db).await?;
     Ok(rows
         .into_iter()
         .map(
@@ -121,7 +121,8 @@ pub async fn hand_over(pool: &PgPool, id: i64) -> Result<Outcome, sqlx::Error> {
     if !lock_missing(&mut tx, id).await? {
         return Ok(Outcome::NotMissing);
     }
-    let twin = missing(pool)
+    // Ayni baglanti: transaction acikken havuzdan ikinci baglanti istenmez
+    let twin = missing(&mut *tx)
         .await?
         .into_iter()
         .find(|m| m.id == id)
@@ -130,11 +131,15 @@ pub async fn hand_over(pool: &PgPool, id: i64) -> Result<Outcome, sqlx::Error> {
         return Ok(Outcome::NoTwin);
     };
     for sql in HAND_OVER_SQL {
-        sqlx::query(sql)
-            .bind(id)
-            .bind(twin)
-            .execute(&mut *tx)
-            .await?;
+        // Ayni metin REMOVE_SQL'de tek parametreyle hazirlanir: fazla bag hazir
+        // sorgu onbellegini bozar, $2 yalnizca onu kullanan sorguya verilir
+        let query = sqlx::query(sql).bind(id);
+        let query = if sql.contains("$2") {
+            query.bind(twin)
+        } else {
+            query
+        };
+        query.execute(&mut *tx).await?;
     }
     delete_item(&mut tx, id).await?;
     tx.commit().await?;
@@ -146,7 +151,7 @@ pub async fn remove(pool: &PgPool, id: i64) -> Result<Outcome, sqlx::Error> {
     if !lock_missing(&mut tx, id).await? {
         return Ok(Outcome::NotMissing);
     }
-    let (roles, departments) = missing(pool)
+    let (roles, departments) = missing(&mut *tx)
         .await?
         .into_iter()
         .find(|m| m.id == id)
