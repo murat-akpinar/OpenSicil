@@ -1246,8 +1246,15 @@ Kurallar:
 - [x] Raporlar: ayrılmış ama açık hesaplar (ADR-134 madde 6)
   - Kabul: `ayrıldı` kimliğin hedefte hâlâ etkin görünen hesabı (son mutabakat bulgusuna göre) ve kaç gündür açık olduğu; ADR-051 metriğiyle aynı tanım, ikinci bir tanım yazılmaz
   - Not (2026-10-08): metriğin tanımı ADR-052'de (ADR-051 değil). Koşul `metrics::departed_unclosed_from!` makrosuna çıktı (`concat!` ile metrik `count(*)` ve rapor satırları aynı FROM/WHERE'i okur; son mutabakat bulgusu `LEFT JOIN`, hedef+hesap tekil olduğundan sayım değişmez). `GET /reports/departed` Raporlar şeridinde dördüncü sekme ("Ayrılmış ama açık"): kişi + sicil, hedef, hesap adı (bulgudan, yoksa GUID), ayrılış günü, kaç gündür açık, uygulanan durum, son taramada (etkin/pasif/dizinde yok/taranmadı). Liste metriğin kümesidir — son taramada pasif görünen ama `applied_state` henüz `departed` olmayan hesap da listede, bulgu sütunu bunu ayırt eder. CSV yok (kabulde yok)
-- [ ] Kapanış: güvenlik ve test
+- [x] Kapanış: güvenlik ve test
   - (1a'daki kapanış şablonunun aynısı; ek olarak `ui-shots` iki tema × iki genişlikte bulgu yok)
+  - Doğrulama (2026-10-08, vaultscan): `scripts/test-all.sh` → backend **276/277**, worker **127/127** (gerçek Postgres `--include-ignored` + lab Samba); kırmızı yalnızca `oidc_login_flow_against_lab_keycloak` (vaultscan'de lab Keycloak yok, ADR-133). fmt + clippy `-D warnings` + `cargo audit` iki crate'te ok
+  - **Kapsam** (`/root/opensicil-cov.sh`, iki ortam testi `--skip`): backend satır **%94,00**, worker satır **%93,94**
+  - **İmaj taraması** (trivy CRITICAL,HIGH, imajlar HEAD'den yeniden derlendi): `Status: fixed` yok — backend 53, worker 51, migrate 53 (backend'le aynı taban), nginx 0 (ADR-071; sayılar önceki kapanışla aynı)
+  - Not (kapsam dışı gözlem): bu kez üst akım `postgres:18.6-alpine` de tarandı — 22 bulgunun 22'si `fixed`, hepsi `/usr/local/bin/gosu`'nun derlendiği Go stdlib v1.24.6'dan. `gosu` yalnızca giriş betiğinde yetki düşürmek için bir kez koşar, ağ ya da girdi işlemez. Projenin derlediği imaj değil; çözüm imajı yeni bir `18.x-alpine` yamasına yükseltmek (önerilen, ayrı kutucuk)
+  - **Sır taraması** (`e0c08c2~1..HEAD`, CHANGELOG hariç): eşleşmelerin hepsi kod bağlamı (`let token = create_session(…)`), derlenmiş CSS'teki `--tw-*` değişkenleri ya da todo notlarının kendisi — değer yok
+  - **Güvenlik listesi:** üç yeni rapor (`activity`, `access_report`, `departed`) yalnızca okur; yetki serviste `allowed(..)` ile ve testli (yetkisiz 403). Filtreler SQL'e yalnızca bağlı parametreyle gidiyor; `format!` ile kurulan SQL yalnızca test modülünde (sentetik veri). Geçersiz filtre 400 değil uyarı, iç hata sızmıyor (`internal`). CSV hücreleri `csv_cell` ile formül enjeksiyonuna karşı kaçırılıyor, iki indirme de denetime giriyor. Sekme şeridi düz `<a>`, yeni JS ve `innerHTML` yok. Yeni env değişkeni yok, `.env.example` ve `docs/MAP.md` güncel (FEATURE adlarının hepsi MAP'te)
+  - **Ertelenen:** `ui-shots` iki tema × iki genişlik — admin oturumu AD girişi istiyor, Windows DC kapalı; bölümdeki dört kutunun ertelenen tarayıcı ölçümüyle birlikte yapılır
 
 ---
 

@@ -105,6 +105,7 @@
 - Ölçek bölümü kapanışı — testler, kapsam, imaj ve sır taraması
 - N-09 — log satırları da düz metin parola ve kimlik no için taranır
 - AD geri dolum bölümü kapanışı — testler, kapsam, imaj ve sır taraması
+- Sekmeli çalışma alanları bölümü kapanışı — testler, kapsam, imaj ve sır taraması
 
 ### Yeniden düzenleme
 
