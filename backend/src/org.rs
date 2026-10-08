@@ -764,36 +764,65 @@ async fn validate_parent(pool: &PgPool, id: i64, parent_id: Option<i64>) -> Resu
 
 // Tanim degisince etkilenen kimlikler: rol → birincil/ek rolu o olanlar, temel rol →
 // herkes; departman → alt agac. Etki onizlemesi (change_set) ayni kumeyi okur.
+// Etkilenen kimlikler tek kaynaktan: liste (onizleme) ve is acma ayni kosulu okur.
+macro_rules! affected_by_role {
+    () => {
+        "SELECT DISTINCT i.id FROM identities i \
+         LEFT JOIN identity_additional_roles a ON a.identity_id = i.id \
+         WHERE i.deleted_at IS NULL AND (i.primary_role_id = $1 OR a.role_id = $1 \
+           OR EXISTS (SELECT 1 FROM roles r WHERE r.id = $1 AND r.kind = 'base'))"
+    };
+}
+macro_rules! affected_by_department {
+    () => {
+        "WITH RECURSIVE down AS ( \
+           SELECT id FROM departments WHERE id = $1 \
+           UNION ALL SELECT d.id FROM departments d JOIN down ON d.parent_id = down.id) \
+         SELECT i.id FROM identities i WHERE i.deleted_at IS NULL \
+           AND i.department_id IN (SELECT id FROM down)"
+    };
+}
+// `jobs::enqueue` ile ayni kural: acik is varsa yenisi acilmaz, oncelik yukselir.
+macro_rules! enqueue_affected_sql {
+    ($affected:expr) => {
+        concat!(
+            "WITH affected AS (",
+            $affected,
+            "), opened AS ( \
+               INSERT INTO jobs (identity_id, target_system_id, priority) \
+               SELECT a.id, t.id, $2 FROM affected a CROSS JOIN target_systems t \
+               ON CONFLICT (identity_id, target_system_id) WHERE status <> 'succeeded' \
+               DO UPDATE SET priority = LEAST(jobs.priority, EXCLUDED.priority) RETURNING 1) \
+             SELECT count(*) FROM affected"
+        )
+    };
+}
+
 pub async fn affected_identities(
     pool: &PgPool,
     owner: Owner,
     id: i64,
 ) -> Result<Vec<i64>, sqlx::Error> {
     let sql = match owner {
-        Owner::Role => {
-            "SELECT DISTINCT i.id FROM identities i \
-             LEFT JOIN identity_additional_roles a ON a.identity_id = i.id \
-             WHERE i.deleted_at IS NULL AND (i.primary_role_id = $1 OR a.role_id = $1 \
-               OR EXISTS (SELECT 1 FROM roles r WHERE r.id = $1 AND r.kind = 'base'))"
-        }
-        Owner::Department => {
-            "WITH RECURSIVE down AS ( \
-               SELECT id FROM departments WHERE id = $1 \
-               UNION ALL SELECT d.id FROM departments d JOIN down ON d.parent_id = down.id) \
-             SELECT i.id FROM identities i WHERE i.deleted_at IS NULL \
-               AND i.department_id IN (SELECT id FROM down)"
-        }
+        Owner::Role => affected_by_role!(),
+        Owner::Department => affected_by_department!(),
     };
     sqlx::query_scalar(sql).bind(id).fetch_all(pool).await
 }
 
-// ponytail: kimlik basina hedef sayisi kadar INSERT; taslak/onay yolu sonraki kutucukta.
+/// Taslak yayimlaninca etkilenen her kimlik icin her hedefe is; tek ifade (20.000
+/// kimlikte kimlik basina INSERT 79 sn surdu, 2026-10-08 olcumu). Doner: kimlik sayisi.
 pub async fn enqueue_affected(pool: &PgPool, owner: Owner, id: i64) -> Result<usize, sqlx::Error> {
-    let ids = affected_identities(pool, owner, id).await?;
-    for identity in &ids {
-        crate::identity::enqueue_all_targets(pool, *identity, Priority::Bulk).await?;
-    }
-    Ok(ids.len())
+    let sql = match owner {
+        Owner::Role => enqueue_affected_sql!(affected_by_role!()),
+        Owner::Department => enqueue_affected_sql!(affected_by_department!()),
+    };
+    let affected: i64 = sqlx::query_scalar(sql)
+        .bind(id)
+        .bind(Priority::Bulk as i16)
+        .fetch_one(pool)
+        .await?;
+    Ok(affected as usize)
 }
 
 /// Tek degerli bir ayari verebilecek kaynaklardan biri: tanimin kendisi, ust
@@ -1367,6 +1396,38 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(jobs, 4, "iki kimlik x iki hedef, acik is tekrar acilmaz");
+        // Eski yolla (kimlik basina `jobs::enqueue`) ayni kume: her etkilenen kimlik x
+        // her hedef; acik iste oncelik yalnizca yukselir (LEAST), dusmez.
+        let pairs: Vec<(i64, i64)> =
+            sqlx::query_as("SELECT identity_id, target_system_id FROM jobs ORDER BY 1, 2")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        let mut expected: Vec<(i64, i64)> = Vec::new();
+        let targets: Vec<i64> = sqlx::query_scalar("SELECT id FROM target_systems ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        for identity in ids {
+            for target in &targets {
+                expected.push((identity, *target));
+            }
+        }
+        expected.sort();
+        assert_eq!(pairs, expected);
+        sqlx::query("UPDATE jobs SET priority = 1 WHERE identity_id = $1")
+            .bind(ids[0])
+            .execute(&pool)
+            .await
+            .unwrap();
+        enqueue_affected(&pool, Owner::Role, base).await.unwrap();
+        let single: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM jobs WHERE identity_id = $1 AND priority = 1")
+                .bind(ids[0])
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(single, 2, "tekil öncelik toplu işle düşmez");
 
         // Listelerdeki kisi sayisi `affected_identities` kuralini izler:
         // temel rol herkesi, birincil rol kadrosunu, ek rol atamayi sayar;

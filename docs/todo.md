@@ -1147,9 +1147,12 @@ Kurallar:
 
 > Faz 3f ve Faz 5 kapanışlarında "önerilen (kapsam dışı)" olarak yazılıp kutucuğa dönmemiş üç yol. Her biri **önce ölçülür**: `scripts/load-lab.sh` (N-03, 20.000 kimlik) ile süre alınır. Sınırın altındaysa kutucuk ölçümle kapanır, kod yazılmaz. Sınır: kullanıcıya dönen POST 5 sn, okuma şeridi işi 15 dk (bir kira uzatmasından fazlası normal ama gece penceresini aşmamalı).
 
-- [ ] Rol/departman onayı işleri tek sorguyla açar (`org::enqueue_affected`)
+- [x] Rol/departman onayı işleri tek sorguyla açar (`org::enqueue_affected`)
   - Bağlam: `backend/src/org.rs:790` `ponytail:` yorumu — kimlik başına hedef sayısı kadar INSERT. Temel rol düzenlemesi 20.000 kimlikte ~100 sn yanıt tahmini (Faz 3f notu)
   - Kabul: önce ölçüm; sınırı aşıyorsa tek `INSERT … SELECT` ile aynı iş kümesi açılır (test: eski ve yeni yol aynı `jobs` satırlarını üretir), `ponytail:` yorumu kalkar
+  - Ölçüm (2026-10-08, vaultscan, gerçek Postgres, geçici ölçüm testi — commit'lenmedi): temel role bağlı **20.002 kimlik × 2 hedef**: eski yol (kimlik başına `enqueue_all_targets`) **79,1 sn** → sınırın (5 sn) çok üstü. Tam `load-lab.sh` koşulmadı: soru yalnızca INSERT döngüsüydü, Samba gerekmiyordu
+  - Not: etkilenen kimlik sorgusu makroyla tek kaynakta (`affected_by_role!`/`affected_by_department!` — önizleme listesi ve iş açma aynı koşul); `enqueue_affected` tek ifade: `WITH affected AS (…), opened AS (INSERT … SELECT a.id, t.id FROM affected CROSS JOIN target_systems ON CONFLICT … DO UPDATE SET priority = LEAST(…)) SELECT count(*) FROM affected` — `jobs::enqueue`'nun kuralının aynısı. Yeni yol aynı ölçümde **2,96 sn**. `ponytail:` yorumu kalktı
+  - Doğrulama: backend **258 test** — `org` testine eşdeğerlik adımları: iş çiftleri kümesi "her etkilenen kimlik × her hedef"e birebir eşit, tekil öncelikli (1) açık iş toplu çağrıyla düşmüyor. Düşen tek test lab Keycloak'ınki. fmt + clippy temiz
 - [ ] CSV önizlemesinde olası mükerrer tek sorgu (`csv_import::possible_duplicates`)
   - Bağlam: yeni satır başına bir `identity::similar_person` sorgusu (20.000 satır ≈ 20.000 sorgu, Faz 5 notu)
   - Kabul: önce ölçüm; aşıyorsa yeni satırların ad-soyadları tek sorguyla (`unnest`) eşlenir, sonuç listesi ve sırası bugünküyle aynı (mevcut test iddiaları değişmez)
