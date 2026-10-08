@@ -1089,11 +1089,34 @@ Kurallar:
   - Doğrulama (2026-10-08, vaultscan): worker **118 test** (yeni `rejected_password_is_regenerated_at_most_three_times` — iki ret + kabul → üçüncü parola döner, üç ret → dördüncü deneme yok ve anlaşılır metin, Samba'nın birebir `add` metni de yeniden üretilir, başka kısıt (`00002082`) → tek deneme; yeni lab testi `lab_rejects_a_weak_password_and_regeneration_opens_the_account` — ilk deneme reddedilip ikincide hesap açılıyor, ret metni tanınıyor), backend 255. Düşenler yine DC kapalı + lab Keycloak yok. fmt + clippy temiz. `docs/07` maddesi test adlarıyla girdi, `docs/05` farklar satırı ölçümle güncellendi
   - **Ertelenen (Windows AD açılınca):** ad parçası içeren parolanın Windows'ta hangi kodla reddedildiği (`windows_ad_answers_open_questions` çıktısı) — tanıma onu da yakalamalı
 
-- [ ] Güvenlik kontrol listesi kanıta bağlanır (`docs/07` 20 açık madde, `docs/08` AD soruları)
+- [x] Güvenlik kontrol listesi kanıta bağlanır (`docs/07` 20 açık madde, `docs/08` AD soruları)
   - Kabul: `docs/07` kontrol listesindeki her açık madde üç sonuçtan birini alır: (a) testi varsa test adı (`crate::modül::test`) madde sonuna yazılır ve `[x]` olur, (b) yalnızca Zimbra'ya bağlıysa "Zimbra bölümünde" notuyla açık kalır, (c) kodda karşılığı yoksa bu bölüme yeni kutucuk açılır ve madde açık kalır
   - Kabul: bu kutucukta kod yazılmaz; yalnızca okuma, test koşusu ve belge. Kısmen doğrulanmış madde (ör. ADR-030'un CSV yarısı) ikiye bölünmez, kalan yarı açıkça yazılır
   - Kabul: `docs/08` AD lab soruları (bind hata kodları, OU taşıma delegasyonu, `LDAP_MATCHING_RULE_IN_CHAIN`, `ldap3` #156) aynı şekilde: cevabı `docs/11`'de ya da bir testte varsa işaretlenir ve kanıtı yazılır, yoksa açık kalır. Gerçek Hogwarts AD açıkken ölçülebilen sorular ölçülür
   - Kabul: README'nin "her faz güvenlik ve test kapanışıyla bitti" cümlesi sonuçla çelişiyorsa düzeltilir
+  - Not (2026-10-08): `docs/07`'de 21 açık madde vardı (kutucuk 20 diyordu). Sonuç: **(a) testle kapanan 5** — fren sayacının yeniden başlatmaya dayanıklılığı, ADR-033 parola penceresi, ADR-042, ADR-055 (beşinci iddia bu gece kapandı), uzun ad/CN; **(b) yalnızca Zimbra 3** (ADR-045, ADR-049, ADR-058) — "Zimbra bölümünde" notuyla açık; **AD yarısı testli, kalanı Zimbra 2** (ADR-024, ADR-056); **(c) kanıtı eksik 11** — her biri altındaki sekiz yeni kutucuktan birine bağlandı ve maddede neyin açık olduğu yazıldı. Her test adı koda karşı `grep` ile doğrulandı. Tarama bir alt ajana yaptırıldı, ağır iddiaları ayrıca okundu: rol atamada operatör–kimlik karşılaştırması yok, `check_schema_ready` eksik migration'ı görmüyor, worker'da `handover_manager_id` hiç geçmiyor
+  - `docs/08` AD soruları: `ldap3` #156 kapandı (her arama `EntriesOnly`'den geçiyor, domain kökü taraması iki lab testinde ve gerçek AD'de koşuyor, `objectGUID` `bin_attrs`'tan); bind hata kodları ve OU taşıma delegasyonu gerçek AD ister — açık; `LDAP_MATCHING_RULE_IN_CHAIN` açık ama artık kritik değil (kod onu kullanmıyor). README cümlesi "kapanışından geçti — açık maddeler `docs/07`'de nedeniyle duruyor" olarak düzeltildi. Kod yazılmadı
+
+- [ ] Worker yazma anında yasaklı ve kapsam dışı hedefi reddeder (`docs/07` ayrıcalıklı grup + kapsam maddeleri, ADR-052 kapsam dışı ayrılış)
+  - Bağlam: yasaklı grup ve kapsam kontrolü bugün yalnızca katalog taramasında ve sahiplenmede; yazma anında motor katalog satırına ve GUID'le bulduğu hesaba güveniyor (`engine::desired_group_guids`, `catalog_guid`, `reconcile_existing`). Veritabanına doğrudan yazılmış yasaklı grup ya da kapsam dışına taşınmış hesap yazmaya gider
+  - Kabul: üyelik eklemeden önce grup DN'i yönetilen grup kapsamında ve yasaklı değil; hesap DN'i yönetilen kullanıcı kapsamında (pasif OU dahil) — değilse iş müdahaleye düşer, hedefe yazılmaz; lab testi + saf test
+- [ ] Operatör kendi kaydında rol değiştiremez (`docs/07` "kişi kendi kimlik kaydında rol değiştiremiyor")
+  - Bağlam: `identity_web` rol atama/kaldırma ve düzenleme operatörü hedef kimlikle karşılaştırmıyor
+  - Kabul: operatörün kullanıcı adı hedef kimliğin `username`'iyle aynıysa rol atama, rol kaldırma ve birincil rol değişikliği 403; backend testi
+- [ ] N-09 taraması: döküm, log ve kuyrukta düz metin parola ve kimlik no yok
+  - Kabul: lab koşusunun sonunda `pg_dump`, iki servisin log çıktısı ve `jobs` tablosu bilinen test parolaları ve kimlik numaralarına karşı taranır; eşleşme sıfır. Betik ya da `#[ignore]` test
+- [ ] Yıkıcı sınıfın iki yolu teste bağlanır (ADR-030 geri alma, ADR-059 bitişi kaldırılıp başlangıcı ileri alınan `ayrıldı` kimlik)
+  - Kabul: ayrılışı geri almanın niyet satırı `operation_class = 'destructive'` (kod var, test yok); ADR-059 vakası önce ölçülür — kod yoksa kapanış notu ya da ayrı karar
+- [ ] ADR-034 ve ADR-057 yazma kuralları teste bağlanır
+  - Kabul: yönetime almada UPN yazılmadığı ve "sadece boşsa yaz" satırının sapma raporlamadığı lab testinde; worker'ın yazma işlemlerinde hedef olarak `<GUID=…>` kullanmadığı (yalnızca arama tabanı) testte
+- [ ] Devir yöneticisi ayrılınca ona devredilmiş ayrılmışların işi açılır (ADR-052 son madde)
+  - Bağlam: `engine::enqueue_subordinates` yalnızca `manager_id = X` olanlara iş açıyor; `handover_manager_id = X` olan ayrılmışlar unutuluyor (worker'da kolon hiç geçmiyor)
+  - Kabul: devir yöneticisinin ayrılış işi bitince `handover_manager_id` ile ona bağlı ayrılmış kimliklere iş açılır; DB testi
+- [ ] Eski şemaya karşı servis başlamaz (ADR-061)
+  - Bağlam: `db::check_schema_ready` (iki crate) yalnızca `_sqlx_migrations` tablosunun varlığına ve başarısız migration'a bakıyor; binary'nin beklediği son migration eksikse servis açılıyor
+  - Kabul: binary'ye gömülü en yüksek migration sürümü veritabanında yoksa backend ve worker sıfır olmayan kodla çıkar (worker binary'si migration dizinini bilmiyorsa sürüm sabiti ikiz dosyada); test. Ek: "AD kapalıyken worker `healthy` kalır" testi
+- [ ] ADR-062 kesinti senaryoları teste bağlanır
+  - Kabul: `add` ile bağlantı kaydı arasında öldürülen işin yeniden alınınca ikinci hesap açmadığı (lab), veritabanı kapalıyken hedefe yazılmadığı ve iki eşzamanlı worker'ın aynı işi almadığı testlerde
 
 - [ ] Doğrulama komutu tek sinyal verir: lab testleri ve bilinen audit bulgusu
   - Bağlam: lab ortamı env'i verilmeden koşulan `cargo test -- --include-ignored` worker'da 8, backend'de 2 testi panikle düşürüyor (`AD_CA_FILE`, `OIDC_LAB_ISSUER` …). `cargo audit` ise ADR-073'te kabul edilen risk olarak yazılmış `rsa` RUSTSEC-2023-0071 (`openidconnect` üzerinden yalnızca backend) yüzünden hata koduyla bitiyor. ADR-073 karar olarak var ama `audit.toml`'a girmemiş

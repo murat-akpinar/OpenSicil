@@ -42,6 +42,7 @@
 - Proje taraması — ADR-055 parola yeniden üretimi, güvenlik listesi kanıtı, tek sinyalli doğrulama ve ölçek kutucukları
 - AD'den geri dolum kuralı docs/03 ve docs/09'a yazılır
 - Denetim kaydının stdout kopyası todo'da kapanır
+- Güvenlik kontrol listesi teste bağlanır, kanıtı olmayan maddeler kutucuğa döner
 
 ### Düzeltmeler
 
