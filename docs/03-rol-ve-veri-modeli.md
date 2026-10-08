@@ -49,6 +49,19 @@ Alan kümesi sabittir. Kuruma özel ek alanlar v2'dedir. Bir alanın hedef siste
 
 **Mükerrer kişi:** Kimlik numarası varsa tekillik kesindir. Yoksa, normalleştirilmiş ad ve soyadı silinmemiş bir kimlikle aynı olan kayıtta uyarı gösterilir; engel değildir.
 
+### AD'den geri dolum
+
+Kaynak OpenSicil'dir; AD'de zaten duran veriyi ise elle yeniden girmek gerekmez (ADR-112). Değer her zaman son mutabakat taramasının bulgusundan gelir — backend AD'ye bağlanmaz, dolum hedefe yazmaz ve fren sayacı harcamaz (ADR-051).
+
+| Durum | Ne olur | Nerede |
+|---|---|---|
+| Alan OpenSicil'de **boş**, AD'de dolu | Tarama bitince kendiliğinden dolar: sicil, cep, e-posta, kullanıcı adı ve yönetici (ADR-129). Sicil başka bir kimlikte duruyorsa yazılmaz, geri kalanı yazılır. Silinmiş kimlik dolmaz (ADR-024'ün temizliği geri alınmaz) | Worker, `identity.fields_filled` denetim satırı |
+| Rol yer tutucu `Tanımsız` | AD'deki `title` bir rolün unvanıyla tek anlamlı eşleşiyorsa o role geçer (ADR-120 madde 5) | Worker, gece |
+| İki tarafta **dolu ve farklı** | Otomatik yazma yok. Mutabakat ekranındaki "AD'de farklı" listesi kişi · alan · iki değer gösterir; operatör satır seçip AD'dekini alır. Alanlar: sicil (baştaki sıfırlar fark sayılmaz), cep, departman, rol unvanı. Departman ya da rol alınırsa iş açılır (OU ve gruplar ondan türer) | Backend, `hr`/`admin`; `identity.field_taken` önce/sonra |
+| TC kimlik no | Yapılandırma'da öznitelik adı verilmedikçe hiç okunmaz. Verildiyse tarama değeri şifreli saklar; dolum operatörün bastığı toplu eylemdir, çünkü yazma AEAD + blind index ister ve worker blind index üretmez. Kontrol hanesinden geçmeyen ve başka kişide kayıtlı numara atlanır; denetime değer girmez | Backend, mutabakat ekranı "TC kimlik no AD'den" |
+
+Dolmayanlar: UPN (eşlenemez, ADR-034) ve kullanıcı adı/e-posta **farkı** — ikisini OpenSicil üretir ve silmede kullanılmış ad olarak yakar; AD'dekini "almak" o kaydı atlardı.
+
 ## Rol modeli
 
 Ayrıntılı gerekçe: ADR-007.

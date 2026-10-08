@@ -164,6 +164,14 @@ Eşik, bağlantısı gözlem modunda olan ya da o hedefte hesabı olmayacak kiml
 
 **Soyad değişimi (v1):** OpenSicil görünen adı ve CN'i günceller; kullanıcı adı ve e-posta değişmez (F-25 v2'dedir). Hesabı AD'de ya da Zimbra'da **elle yeniden adlandırmayın**: kaynak OpenSicil'deki addır, eşlenmiş `mail` bir sonraki işte eski adrese geri yazılır (ADR-012) ve kişi sayfası eski adı gösterir. Yeni soyadla adres gerekiyorsa Zimbra'da takma ad ekleyin; OpenSicil takma adlara dokunmaz.
 
+## AD'den geri dolum
+
+Var olan dizinle başlayan kurum kişileri sahiplendikten sonra ayrıca bir şey yapmaz: her mutabakat taramasının sonunda bağlı kimliklerin **boş** alanları (sicil, cep, e-posta, kullanıcı adı, yönetici) AD'deki değerle dolar, rolü `Tanımsız` olanlar AD unvanından role geçer. Dolu ve farklı alanlar mutabakat ekranındaki "AD'de farklı" listesinde bekler, alınana kadar hiçbir taraf değişmez. Kural ve alan listesi [docs/03](03-rol-ve-veri-modeli.md#adden-geri-dolum)'te.
+
+- **Önce dolum, sonra eşleme değişikliği.** Motor, OpenSicil'de boş olan alanı eşleme satırı varsa AD'de **siler** (ADR-034). Bir özniteliği eşleme satırına bağlamadan (örneğin sicili `employeeNumber`'a) önce en az bir tarama koşsun ve "AD'de farklı" listesi temizlensin; yönetime almadan önce toplu yönetime almanın fark hesabı silinecek alanı gösterir.
+- **TC kimlik no** isteğe bağlıdır: Yapılandırma → Active Directory → "TC kimlik no özniteliği"ne kurumun kullandığı öznitelik (`extensionAttribute5` gibi) yazılır, sonraki taramadan sonra mutabakat ekranında "TC kimlik no AD'den" kartı çıkar ve tek düğmeyle boş olanlar dolar.
+- Denetim kaydı her dolumu kimlik olayı olarak tutar: kendiliğinden dolanlar `identity.fields_filled`, operatörün aldıkları `identity.field_taken` (TC için değer yazılmaz).
+
 ## Aynı dakika giriş
 
 "Kaydet ve ilk parolayı ver" (ADR-056) hesabı bir dakika içinde hazırlar; kişinin o dakika giriş yapabilmesi ayrıca şunlara bağlıdır:
