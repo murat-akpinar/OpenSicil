@@ -1,0 +1,7 @@
+# ADR-073: RUSTSEC-2023-0071 (`rsa`, zamanlama yan kanalı) kabul edilen risktir.
+# `openidconnect` üzerinden yalnızca backend'in ağacında; saldırı RSA özel anahtarı
+# gerektirir, backend hiç RSA özel anahtarı tutmaz (yalnızca IdP imzasını doğrular).
+# Üst akımda düzeltme yok. Proje bir gün RSA özel anahtarı üretir/tutarsa bu satır
+# kalkar. Her kapanışta `cargo audit` yine koşar: başka bulgu çıkarsa hata verir.
+[advisories]
+ignore = ["RUSTSEC-2023-0071"]

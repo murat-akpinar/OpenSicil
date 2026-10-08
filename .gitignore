@@ -22,3 +22,6 @@ CLAUDE.local.md
 
 # geliştirme sürecinin karar kayıtları; dışarıdaki kullanıcıya hitap etmez, localde kalır
 docs/decisions/
+
+# lab test degiskenleri (Windows AD parolasi dahil): yalnizca test makinesinde
+.lab-env
