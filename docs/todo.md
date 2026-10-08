@@ -1315,7 +1315,7 @@ Kurallar:
 
 ### Unexpire-Password ölçümü (gerçek AD, ikinci servis hesabı)
 
-- [ ] "Unexpire-Password hakkı olmadan parola sıfırlama" sorusu ölçülür (ADR-019)
+- [x] "Unexpire-Password hakkı olmadan parola sıfırlama" sorusu ölçülür (ADR-019)
   - Engel: lab servis hesabı `Domain Admins` üyesi, yani hak zaten var ([docs/11](11-dogrulama-notlari.md) W10)
   - Kabul: `OU=Hogwarts`'a yalnızca "Reset user passwords" devredilmiş ikinci bir servis hesabıyla parola sıfırlanır; `pwdLastSet` kendiliğinden 0 oluyor mu ölçülür
   - Kabul: evet ise bu hak [docs/05](05-active-directory.md#servis-hesabı-yetkileri) delegasyon tablosuna ve docs/09 ön koşullarına eklenir
@@ -1331,6 +1331,7 @@ Kurallar:
 ---
 
 ## Ek Hedef Sistem: Zimbra
+  - Ölçüm (2026-10-08, gerçek Hogwarts AD): kullanıcı `svc-reset`'i açtı (`OU=Hogwarts`'a `CA;Reset Password;user` + `WP;pwdLastSet;user`, hiçbir grupta değil, birincil grup 513). `ad_account::tests::delegated_reset_works_without_unexpire_password` bu hesapla worker'ın sıfırlama yolunu çalıştırdı → `Ok`, `pwdLastSet` 0. Unexpire-Password **gerekmiyor**; docs/05 tablosu yeterli, docs/09 ön koşullarına ve docs/11 W10'a yazıldı. Bilgi: `pwdLastSet = -1` de kabul edildi (rc 0)
 
 > **Beklemede (kullanıcı kararı, 2026-10-02):** "Zimbra dursun, onu proje bitince bakacağım bir şey." Lab Zimbra'sı bir altyapı kararı ister (ADR-069: üçüncü taraf 10.1 derlemesi ya da ayrı VM) ve bu bölümün ilk kutucuğu ona bağlı; kullanıcı açıkça erteledi, kendi başına seçilmez.
 

@@ -111,6 +111,7 @@
 - AD geri dolum bölümü kapanışı — testler, kapsam, imaj ve sır taraması
 - Sekmeli çalışma alanları bölümü kapanışı — testler, kapsam, imaj ve sır taraması
 - Doğrulama komutu tek sinyal veriyor — iki crate bütün lab ortamlarıyla temiz
+- Parola sıfırlama Unexpire-Password hakkı olmadan çalışıyor (gerçek AD ölçümü)
 
 ### Yeniden düzenleme
 

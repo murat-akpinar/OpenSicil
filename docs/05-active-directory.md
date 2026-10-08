@@ -89,6 +89,8 @@ Delegasyon yönetilen OU'lara verilir, domain köküne verilmez.
 | Domain | Okuma (varsayılan kimliği doğrulanmış kullanıcı izni) | Çakışma kontrolü, katalog |
 | Confidential işaretli eşlenmiş öznitelikler | O öznitelik için okuma izni | Mutabakatta karşılaştırma (ADR-010) |
 
+"Unexpire-Password" hakkı **gerekmez**: yalnızca yukarıdaki "Parolayı sıfırla" + `pwdLastSet` yazma hakkıyla sıfırlama ve `pwdLastSet` 0 gerçek Windows AD'de ölçüldü ([docs/11](11-dogrulama-notlari.md) W10).
+
 Ek sıkılaştırma: Etkileşimli giriş (yerel ve RDP) GPO ile reddedilir; hesap "hassas, devredilemez" işaretlenir.
 
 Kesin delegasyon adımları kurulum dokümanında, lab'da çalıştırılarak yazılacak.
@@ -156,7 +158,7 @@ Kaynak kodundan doğrulanan diğer davranışlar ([docs/11](11-dogrulama-notlari
 |---|---|---|
 | Tek `add`'de parola, UAC 514, `pwdLastSet = 0` | Kabul eder; istemcinin yazdığı 0 korunur | Hesap açma iki dizinde aynı |
 | UAC verilmezse varsayılan | `0x222`, Windows ile aynı | |
-| `pwdLastSet` | Yalnızca 0 ve -1; -1 "Unexpire-Password" hakkı ister | Worker -1 yazmaz |
+| `pwdLastSet` | Yalnızca 0 ve -1; belgeye göre -1 "Unexpire-Password" ister, Hogwarts'ta `pwdLastSet` yazma hakkı yetti (docs/11 W10) | Worker -1 yazmaz |
 | `lastLogonTimestamp` | 4.4.0'dan beri; simple bind dahil ilk girişte yazılır; `msDS-LogonTimeSyncInterval = 0` iken Windows gibi yazmaz | ADR-046 ve açılış kontrolü (ADR-060) lab'da sınanabilir. 2026-10-01: simple bind sonrası özniteliğin dolduğu lab testiyle doğrulandı (`issues_first_password_in_lab_only_to_unused_account`) |
 | `LDAP_MATCHING_RULE_IN_CHAIN` | 4.4.0'dan beri; her adımda tam arama yapar; 4.18'de boş sonuç raporu var | Seçilen sürümde lab'da doğrulanır |
 | `<GUID=…>` | Arama, modify, delete ve rename hedefi olarak çözülür | Worker yine gerçek DN ile yazar (Windows için belgeli değil) |

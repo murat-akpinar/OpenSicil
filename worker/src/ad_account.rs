@@ -981,4 +981,124 @@ mod tests {
         );
         ldap.unbind().await.ok();
     }
+
+    // ADR-019: yalnizca "Reset Password" + pwdLastSet yazma hakki devredilmis bir
+    // hesap (Unexpire-Password yok) sifirlamayi tamamlayabiliyor mu. Yonetici hesabi
+    // yalnizca test kullanicisini acar ve temizler; olcum devredilmis hesapla yapilir.
+    #[tokio::test]
+    #[ignore = "gerçek Windows AD gerektirir: AD_WIN_* + AD_WIN_RESET_USER, AD_WIN_RESET_PASSWORD ile çalıştır"]
+    async fn delegated_reset_works_without_unexpire_password() {
+        let var = |n: &str| std::env::var(n).unwrap_or_else(|_| panic!("{n} ayarlanmalı"));
+        let admin_cfg = ad::AdConfig {
+            urls: ad::parse_urls(&var("AD_WIN_URL")),
+            bind_dn: var("AD_WIN_BIND_DN"),
+            password: var("AD_WIN_PASSWORD"),
+            ca_pem: crate::test_support::read_ca(&var("AD_WIN_CA_FILE")),
+        };
+        let ou = var("AD_WIN_OU");
+        let mut admin = ad::connect(&admin_cfg).await.expect("Windows AD");
+        let base = ad::base_dn(&mut admin).await.unwrap();
+        let domain = base
+            .split(',')
+            .filter_map(|part| part.trim().strip_prefix("DC="))
+            .collect::<Vec<_>>()
+            .join(".");
+        let username = format!("rsttest{}", std::process::id() % 100_000);
+        let dn = account_dn(&cn_for("Rsttest", "Devredilen", None), &ou);
+        let _ = admin.delete(&dn).await; // onceki calismadan kalan
+        let mut writer = AdWriter { ldap: &mut admin };
+        writer
+            .write(&WriteOp::CreateAccount {
+                dn: dn.clone(),
+                attributes: vec![
+                    ("sAMAccountName".to_string(), username.clone()),
+                    (
+                        "userPrincipalName".to_string(),
+                        format!("{username}@{domain}"),
+                    ),
+                ],
+                password: random_password(),
+                account_expires: None,
+            })
+            .await
+            .expect("test hesabı açılmalı");
+        // Sifirlamadan once pwdLastSet bir zaman damgasi olmali; 0 iken olcum anlamsiz.
+        writer
+            .write(&WriteOp::SetFirstPassword {
+                dn: dn.clone(),
+                password: random_password(),
+                change_required: false,
+            })
+            .await
+            .expect("yönetici parolayı yazar");
+        let guid = guid_by_dn(&mut admin, &dn).await.unwrap();
+        let before = find_by_guid(&mut admin, &guid).await.unwrap().unwrap();
+        assert_ne!(
+            before.pwd_last_set.as_deref(),
+            Some("0"),
+            "ön koşul: damga var"
+        );
+
+        let user = var("AD_WIN_RESET_USER");
+        let delegated_cfg = ad::AdConfig {
+            bind_dn: match user.contains('@') || user.contains('=') {
+                true => user,
+                false => format!("{user}@{domain}"),
+            },
+            password: var("AD_WIN_RESET_PASSWORD"),
+            ..admin_cfg
+        };
+        // Olcumun gecerliligi: devredilmis hesap yonetici gruplarinda olmamali.
+        let sam = delegated_cfg
+            .bind_dn
+            .split('@')
+            .next()
+            .unwrap_or_default()
+            .to_string();
+        let groups = ad::search(
+            &mut admin,
+            &base,
+            Scope::Subtree,
+            &format!("(sAMAccountName={})", ldap_escape(&sam)),
+            &["memberOf", "adminCount", "primaryGroupID"],
+        )
+        .await
+        .unwrap();
+        log_error!(
+            "⊞ devredilmiş hesabın grupları: {:?}",
+            groups.first().map(|e| &e.attrs)
+        );
+        let mut delegated = ad::connect(&delegated_cfg)
+            .await
+            .expect("devredilmiş hesap bağlanır");
+        let reset = AdWriter {
+            ldap: &mut delegated,
+        }
+        .write(&WriteOp::ResetPassword { dn: dn.clone() })
+        .await;
+        let after = find_by_guid(&mut admin, &guid).await.unwrap().unwrap();
+        // -1 (suresini kaldir) Unexpire-Password ister; bilgi icin olculur, worker yazmaz.
+        let unexpire = delegated
+            .modify(
+                &dn,
+                vec![Mod::Replace(
+                    b"pwdLastSet".to_vec(),
+                    HashSet::from([b"-1".to_vec()]),
+                )],
+            )
+            .await
+            .map(|r| r.rc);
+        log_error!("⊞ devredilmiş sıfırlama: {reset:?}");
+        log_error!("⊞ devredilmiş pwdLastSet -1 (rc): {unexpire:?}");
+        delegated.unbind().await.ok();
+
+        admin.delete(&dn).await.unwrap().success().unwrap();
+        admin.unbind().await.ok();
+        reset.expect("Unexpire-Password olmadan sıfırlama geçer");
+        assert_eq!(
+            after.pwd_last_set.as_deref(),
+            Some("0"),
+            "pwdLastSet 0 olur"
+        );
+    }
 }
