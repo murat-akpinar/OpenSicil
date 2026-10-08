@@ -1418,7 +1418,7 @@ fn masked(aead_key: &[u8; crate::crypto::KEY_LEN], enc: &[u8], lang: Lang) -> St
     match national_id::decrypt(aead_key, enc) {
         Ok(value) => national_id::mask(&value),
         Err(e) => {
-            eprintln!("identity: kimlik numarası çözülemedi: {e}");
+            log_error!("identity: kimlik numarası çözülemedi: {e}");
             lang.t("person.undecryptable").to_string()
         }
     }

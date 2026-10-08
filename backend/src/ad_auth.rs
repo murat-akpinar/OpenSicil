@@ -210,7 +210,7 @@ async fn connect(cfg: &AdConfig, bind_dn: &str, password: &str) -> Result<Ldap, 
                 return Ok(ldap);
             }
             Err(e) => {
-                eprintln!("ad_auth: {url} bağlanamadı: {e}");
+                log_error!("ad_auth: {url} bağlanamadı: {e}");
                 last = classify(e);
             }
         }

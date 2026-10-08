@@ -719,7 +719,7 @@ mod tests {
                 change_required: true,
             })
             .await;
-        eprintln!("⊞ ad parçası içeren parola: {named:?}");
+        log_error!("⊞ ad parçası içeren parola: {named:?}");
         assert!(
             matches!(named, Err(WriteError::Failed(_))),
             "ad parçası içeren parola reddedilir (ADR-055)"
@@ -749,9 +749,9 @@ mod tests {
             })
             .await;
         let delete = writer.write(&WriteOp::DeleteAccount { dn: guid_dn }).await;
-        eprintln!("⊞ <GUID=…> modify: {modify:?}");
-        eprintln!("⊞ <GUID=…> modifyDN: {rename:?}");
-        eprintln!("⊞ <GUID=…> delete: {delete:?}");
+        log_error!("⊞ <GUID=…> modify: {modify:?}");
+        log_error!("⊞ <GUID=…> modifyDN: {rename:?}");
+        log_error!("⊞ <GUID=…> delete: {delete:?}");
 
         if let Some(left) = dn_by_guid(&mut ldap, &guid).await.unwrap() {
             ldap.delete(&left).await.unwrap().success().unwrap();

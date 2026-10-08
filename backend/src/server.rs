@@ -49,7 +49,7 @@ fn load_config() -> Result<Config, String> {
     // ADR-061 madde 8: token zorunlu — bos deger ucu kapali tutar, uyarilir
     let metrics_token = env_required("METRICS_TOKEN")?.trim().to_string();
     if metrics_token.is_empty() {
-        eprintln!("backend: METRICS_TOKEN boş, metrik ucu kapalı");
+        log_error!("backend: METRICS_TOKEN boş, metrik ucu kapalı");
     }
     Ok(Config {
         database_url,
@@ -81,7 +81,7 @@ pub async fn run() -> ExitCode {
     let app = match startup().await {
         Ok(state) => build_router(state),
         Err(e) => {
-            eprintln!("backend: {e}");
+            log_error!("backend: {e}");
             return ExitCode::FAILURE;
         }
     };
@@ -89,17 +89,17 @@ pub async fn run() -> ExitCode {
     let listener = match tokio::net::TcpListener::bind("0.0.0.0:8000").await {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("backend: 8000 portu dinlenemedi: {e}");
+            log_error!("backend: 8000 portu dinlenemedi: {e}");
             return ExitCode::FAILURE;
         }
     };
 
-    println!("backend: 0.0.0.0:8000 dinleniyor");
+    log_info!("backend: 0.0.0.0:8000 dinleniyor");
     if let Err(e) = axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await
     {
-        eprintln!("backend: sunucu hatası: {e}");
+        log_error!("backend: sunucu hatası: {e}");
         return ExitCode::FAILURE;
     }
     ExitCode::SUCCESS
@@ -123,7 +123,7 @@ async fn prepare_pool(database_url: &str) -> Result<sqlx::PgPool, String> {
         .await
         .map_err(|e| format!("işletme ayarları okunamadı: {e}"))?;
     let common = crate::common_settings::CommonSettings::from_lookup(|n| map.get(n).cloned())?;
-    println!("backend: ortak ayarlar: {common}");
+    log_info!("backend: ortak ayarlar: {common}");
     crate::db::check_time_zone(&pool, &common.time_zone).await?;
     Ok(pool)
 }
@@ -133,9 +133,9 @@ async fn shutdown_signal() {
     match signal(SignalKind::terminate()) {
         Ok(mut sigterm) => {
             sigterm.recv().await;
-            println!("backend: SIGTERM alındı, açık istekler bitiriliyor");
+            log_info!("backend: SIGTERM alındı, açık istekler bitiriliyor");
         }
-        Err(e) => eprintln!("backend: SIGTERM işleyicisi kurulamadı: {e}"),
+        Err(e) => log_error!("backend: SIGTERM işleyicisi kurulamadı: {e}"),
     }
 }
 

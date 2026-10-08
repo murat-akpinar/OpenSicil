@@ -22,10 +22,28 @@ pub async fn log_requests(req: Request, next: Next) -> Response {
     let response = next.run(req).await;
 
     let status = response.status().as_u16();
-    let elapsed_ms = start.elapsed().as_millis();
-    println!("{method} {path} {status} {elapsed_ms}ms ip={client_ip}");
+    let fields = request_fields(method.as_str(), &path, status, &client_ip, start.elapsed());
+    crate::log::emit("INFO", &format!("{method} {path} {status}"), &fields);
 
     response
+}
+
+/// OTel semantic conventions (ADR-113); `event.duration` nanosaniye.
+fn request_fields(
+    method: &str,
+    path: &str,
+    status: u16,
+    client: &str,
+    elapsed: std::time::Duration,
+) -> [(&'static str, String); 5] {
+    use crate::log::quote;
+    [
+        ("http.request.method", quote(method)),
+        ("url.path", quote(path)),
+        ("http.response.status_code", status.to_string()),
+        ("client.address", quote(client)),
+        ("event.duration", elapsed.as_nanos().to_string()),
+    ]
 }
 
 fn real_ip(headers: &HeaderMap) -> String {
@@ -59,6 +77,27 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert("x-real-ip", HeaderValue::from_static("198.51.100.7"));
         assert_eq!(real_ip(&headers), "198.51.100.7");
+    }
+
+    #[test]
+    fn request_line_carries_otel_fields() {
+        let fields = request_fields(
+            "GET",
+            "/identities",
+            200,
+            "203.0.113.5",
+            std::time::Duration::from_millis(3),
+        );
+        let text = crate::log::line("t", "INFO", "GET /identities 200", &fields);
+        for expected in [
+            "\"http.request.method\":\"GET\"",
+            "\"url.path\":\"/identities\"",
+            "\"http.response.status_code\":200",
+            "\"client.address\":\"203.0.113.5\"",
+            "\"event.duration\":3000000",
+        ] {
+            assert!(text.contains(expected), "{expected}: {text}");
+        }
     }
 
     #[test]

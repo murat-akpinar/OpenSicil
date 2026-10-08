@@ -178,7 +178,7 @@ pub async fn connect(cfg: &AdConfig) -> Result<Ldap, WriteError> {
                 }
             }
             Err(e) => {
-                eprintln!("ad: {url} bağlanamadı: {e}");
+                log_error!("ad: {url} bağlanamadı: {e}");
                 last = classify(e);
             }
         }

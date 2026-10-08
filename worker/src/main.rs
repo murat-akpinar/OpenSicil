@@ -1,3 +1,5 @@
+#[macro_use]
+mod log;
 mod ad;
 mod ad_account;
 mod adoption;
@@ -117,15 +119,16 @@ async fn load_operational(pool: &PgPool) -> Result<Operational, String> {
 async fn log_operational_at_startup(pool: &PgPool) {
     match load_operational(pool).await {
         Ok(ops) => {
-            println!(
+            log_info!(
                 "worker: ortak ayarlar: {}; FIRST_LOGIN_CHANGE_REQUIRED={}",
-                ops.common, ops.first_login_change_required
+                ops.common,
+                ops.first_login_change_required
             );
             if ops.write_mode.dry_run {
-                println!("worker: KURU ÇALIŞTIRMA açık — hedefe hiçbir şey yazılmaz (ADR-054)");
+                log_info!("worker: KURU ÇALIŞTIRMA açık — hedefe hiçbir şey yazılmaz (ADR-054)");
             }
         }
-        Err(e) => eprintln!("worker: {e}"),
+        Err(e) => log_error!("worker: {e}"),
     }
 }
 
@@ -152,14 +155,14 @@ async fn request_catalog_refresh_at_startup(pool: &PgPool) {
         Ok(Some(target)) => {
             match read_lane::request(pool, read_lane::CATALOG_REFRESH, target).await {
                 Ok(true) => {
-                    println!("worker: açılışta katalog yenileme isteği okuma şeridine yazıldı")
+                    log_info!("worker: açılışta katalog yenileme isteği okuma şeridine yazıldı")
                 }
-                Ok(false) => println!("worker: katalog yenileme isteği zaten açık"),
-                Err(e) => eprintln!("worker: katalog yenileme isteği yazılamadı: {e}"),
+                Ok(false) => log_info!("worker: katalog yenileme isteği zaten açık"),
+                Err(e) => log_error!("worker: katalog yenileme isteği yazılamadı: {e}"),
             }
         }
-        Ok(None) => eprintln!("worker: AD hedef sistemi bulunamadı, katalog yenileme atlandı"),
-        Err(e) => eprintln!("worker: hedef sistem okunamadı: {e}"),
+        Ok(None) => log_error!("worker: AD hedef sistemi bulunamadı, katalog yenileme atlandı"),
+        Err(e) => log_error!("worker: hedef sistem okunamadı: {e}"),
     }
 }
 
@@ -174,7 +177,7 @@ async fn run_read_lane(pool: PgPool, env: Arc<Env>, stop: Arc<AtomicBool>) {
                 continue;
             }
             Err(e) => {
-                eprintln!("worker: okuma şeridi kuyruğu okunamadı: {e}");
+                log_error!("worker: okuma şeridi kuyruğu okunamadı: {e}");
                 tokio::time::sleep(POLL_INTERVAL).await;
                 continue;
             }
@@ -195,11 +198,11 @@ async fn run_read_lane(pool: PgPool, env: Arc<Env>, stop: Arc<AtomicBool>) {
         // kirasina dusup geri alinmaz.
         let outcome = read_lane::with_lease(&pool, job.id, work).await;
         match &outcome {
-            Ok(text) => println!("worker: okuma şeridi {} bitti: {text}", job.kind),
-            Err(e) => eprintln!("worker: okuma şeridi {} başarısız: {e}", job.kind),
+            Ok(text) => log_info!("worker: okuma şeridi {} bitti: {text}", job.kind),
+            Err(e) => log_error!("worker: okuma şeridi {} başarısız: {e}", job.kind),
         }
         if let Err(e) = read_lane::finish(&pool, job.id, outcome).await {
-            eprintln!("worker: okuma işi sonucu yazılamadı: {e}");
+            log_error!("worker: okuma işi sonucu yazılamadı: {e}");
         }
     }
 }
@@ -344,7 +347,7 @@ fn spawn_sigterm_watcher() -> Result<(Arc<AtomicBool>, Arc<Notify>), String> {
     let (stop_flag, wake_signal) = (Arc::clone(&stop), Arc::clone(&wake));
     tokio::spawn(async move {
         sigterm.recv().await;
-        println!("worker: SIGTERM alındı, eldeki iş bitirilip çıkılıyor");
+        log_info!("worker: SIGTERM alındı, eldeki iş bitirilip çıkılıyor");
         stop_flag.store(true, Ordering::SeqCst);
         wake_signal.notify_one();
     });
@@ -369,12 +372,12 @@ async fn run() -> ExitCode {
     let (env, pool, stop, wake) = match startup().await {
         Ok(parts) => parts,
         Err(e) => {
-            eprintln!("{e}");
+            log_error!("{e}");
             return ExitCode::FAILURE;
         }
     };
     let worker_id = worker_id();
-    println!("worker: {worker_id} başladı, {POLL_INTERVAL:?} aralıkla yoklanıyor");
+    log_info!("worker: {worker_id} başladı, {POLL_INTERVAL:?} aralıkla yoklanıyor");
     let env = Arc::new(env);
     log_operational_at_startup(&pool).await;
     request_catalog_refresh_at_startup(&pool).await;
@@ -391,7 +394,7 @@ async fn run() -> ExitCode {
     let mut next_tick = Instant::now();
     while !stop.load(Ordering::SeqCst) {
         if let Err(e) = heartbeat::touch() {
-            eprintln!("worker: nabız dosyasına yazılamadı: {e}");
+            log_error!("worker: nabız dosyasına yazılamadı: {e}");
         }
         tick_if_due(&pool, &worker_id, &mut next_tick).await;
         let skip = unreachable_targets(&unreachable, Instant::now());
@@ -403,7 +406,7 @@ async fn run() -> ExitCode {
                 continue;
             }
             Ok(None) => {}
-            Err(e) => eprintln!("worker: kuyruk okunamadı: {e}"),
+            Err(e) => log_error!("worker: kuyruk okunamadı: {e}"),
         }
         let _ = tokio::time::timeout(POLL_INTERVAL, wake.notified()).await;
     }
@@ -418,28 +421,28 @@ async fn tick_if_due(pool: &PgPool, worker_id: &str, next_tick: &mut Instant) {
     *next_tick = Instant::now() + TICK_INTERVAL;
     let ops = match load_operational(pool).await {
         Ok(ops) => ops,
-        Err(e) => return eprintln!("worker: zamanlayıcı tiki atlandı: {e}"),
+        Err(e) => return log_error!("worker: zamanlayıcı tiki atlandı: {e}"),
     };
     let time_zone = ops.common.time_zone.as_str();
     // F-19 / ADR-054: mod ve son gorulme veritabanina, dakikada bir (metrik ucu + panel)
     if let Err(e) = heartbeat::record(pool, worker_id, ops.write_mode.dry_run).await {
-        eprintln!("worker: durum satırı yazılamadı: {e}");
+        log_error!("worker: durum satırı yazılamadı: {e}");
     }
     match scheduler::tick(pool, time_zone).await {
         Ok(0) => {}
-        Ok(opened) => println!("worker: zamanlayıcı {opened} geçiş işi açtı"),
-        Err(e) => eprintln!("worker: zamanlayıcı tiki başarısız: {e}"),
+        Ok(opened) => log_info!("worker: zamanlayıcı {opened} geçiş işi açtı"),
+        Err(e) => log_error!("worker: zamanlayıcı tiki başarısız: {e}"),
     }
     // ADR-051/099: gece mutabakati okuma seridine istek olarak yazilir (F-13)
     let slots = ops.map.get(common_settings::SCAN_AT).map(String::as_str);
     let slots = match common_settings::parse_scan_times(slots.unwrap_or_default()) {
         Ok(slots) => slots,
-        Err(e) => return eprintln!("worker: gece taraması açılmadı: {e}"),
+        Err(e) => return log_error!("worker: gece taraması açılmadı: {e}"),
     };
     match scheduler::open_nightly_scans(pool, time_zone, &slots).await {
         Ok(0) => {}
-        Ok(opened) => println!("worker: gece mutabakatı için {opened} okuma işi açıldı"),
-        Err(e) => eprintln!("worker: {e}"),
+        Ok(opened) => log_info!("worker: gece mutabakatı için {opened} okuma işi açıldı"),
+        Err(e) => log_error!("worker: {e}"),
     }
 }
 
@@ -489,7 +492,7 @@ async fn process_job(pool: &PgPool, job: &queue::ClaimedJob, worker_id: &str, en
             false,
         ),
         Err(engine::JobError::Unreachable(reason)) => {
-            eprintln!(
+            log_error!(
                 "worker: iş {} ertelendi, hedefe ulaşılamıyor: {reason}",
                 job.id
             );
@@ -501,7 +504,7 @@ async fn process_job(pool: &PgPool, job: &queue::ClaimedJob, worker_id: &str, en
         }
         // ADR-050: fren; hedefe hicbir sey yazilmadi, is pencerenin acilisini bekler
         Err(engine::JobError::Throttled(blocked)) => {
-            println!("worker: iş {} fren nedeniyle bekliyor: {blocked}", job.id);
+            log_info!("worker: iş {} fren nedeniyle bekliyor: {blocked}", job.id);
             let retry = blocked.retry_after_seconds;
             (
                 queue::defer(pool, job, worker_id, &blocked.job_error(), retry).await,
@@ -509,11 +512,11 @@ async fn process_job(pool: &PgPool, job: &queue::ClaimedJob, worker_id: &str, en
             )
         }
         Err(engine::JobError::NeedsIntervention(reason)) => {
-            eprintln!("worker: iş {} müdahale gerekiyor: {reason}", job.id);
+            log_error!("worker: iş {} müdahale gerekiyor: {reason}", job.id);
             (queue::intervene(pool, job, worker_id, &reason).await, false)
         }
         Err(error) => {
-            eprintln!("worker: iş {} başarısız: {error}", job.id);
+            log_error!("worker: iş {} başarısız: {error}", job.id);
             (
                 queue::fail(pool, job, worker_id, &error.to_string()).await,
                 false,
@@ -521,7 +524,7 @@ async fn process_job(pool: &PgPool, job: &queue::ClaimedJob, worker_id: &str, en
         }
     };
     if let Err(e) = outcome {
-        eprintln!("worker: iş {} sonucu yazılamadı: {e}", job.id);
+        log_error!("worker: iş {} sonucu yazılamadı: {e}", job.id);
     }
     unreachable
 }

@@ -148,7 +148,9 @@ impl WriteOp {
 }
 
 pub fn json_quote(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
+    // Log satiriyla ayni kacis (log.rs); kontrol karakteri de kacirilir
+    let quoted = crate::log::quote(s);
+    quoted[1..quoted.len() - 1].to_string()
 }
 
 fn attribute_names_json(attributes: &[(String, String)]) -> String {

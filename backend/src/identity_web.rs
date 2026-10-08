@@ -60,7 +60,7 @@ pub(crate) fn forbidden(lang: Lang) -> Response {
 }
 
 pub(crate) fn internal(what: &str, e: impl std::fmt::Display) -> Response {
-    eprintln!("web: {what}: {e}");
+    log_error!("web: {what}: {e}");
     StatusCode::INTERNAL_SERVER_ERROR.into_response()
 }
 
@@ -450,11 +450,11 @@ async fn finish_lifecycle(
                 let event = crate::audit::ACCOUNT_MANAGE_REQUESTED;
                 audit_operator(state, op, event, Some(id), detail).await;
             }
-            Err(e) => eprintln!("web: yönetime alma istenemedi (kimlik {id}): {e}"),
+            Err(e) => log_error!("web: yönetime alma istenemedi (kimlik {id}): {e}"),
         }
     }
     if let Err(e) = identity::enqueue_all_targets(&state.pool, id, priority).await {
-        eprintln!("web: iş açılamadı (kimlik {id}): {e}");
+        log_error!("web: iş açılamadı (kimlik {id}): {e}");
     }
     Redirect::to(&format!("/identities/{id}")).into_response()
 }
@@ -727,7 +727,7 @@ async fn enqueue_single(state: &AppState, id: i64) {
     if let Err(e) =
         identity::enqueue_all_targets(&state.pool, id, crate::jobs::Priority::Single).await
     {
-        eprintln!("web: iş açılamadı (kimlik {id}): {e}");
+        log_error!("web: iş açılamadı (kimlik {id}): {e}");
     }
 }
 
@@ -869,7 +869,7 @@ async fn request_names(
     )
     .await;
     if let Err(e) = crate::jobs::request_retry_all(&state.pool, id).await {
-        eprintln!("web: tekrar dene yazılamadı (kimlik {id}): {e}");
+        log_error!("web: tekrar dene yazılamadı (kimlik {id}): {e}");
     }
     Redirect::to(&format!("/identities/{id}")).into_response()
 }
@@ -1141,7 +1141,7 @@ pub(crate) async fn audit_operator(
     };
     if let Err(e) = crate::audit::record(&state.pool, &actor, event_type, identity_id, detail).await
     {
-        eprintln!("web: denetim kaydı yazılamadı ({event_type}): {e}");
+        log_error!("web: denetim kaydı yazılamadı ({event_type}): {e}");
     }
 }
 // --- END FEATURE: identity-registration ---

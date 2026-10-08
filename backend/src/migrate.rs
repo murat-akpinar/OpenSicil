@@ -11,14 +11,14 @@ fn require_env(name: &str) -> Option<String> {
 
 pub async fn run() -> ExitCode {
     let Some(database_url) = require_env("DATABASE_URL") else {
-        eprintln!("migrate: ortam değişkeni eksik: DATABASE_URL");
+        log_error!("migrate: ortam değişkeni eksik: DATABASE_URL");
         return ExitCode::FAILURE;
     };
 
     let pool = match crate::db::connect_pool(&database_url).await {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("migrate: veritabanına bağlanılamadı: {e}");
+            log_error!("migrate: veritabanına bağlanılamadı: {e}");
             return ExitCode::FAILURE;
         }
     };
@@ -26,32 +26,32 @@ pub async fn run() -> ExitCode {
     let (backend_user, worker_user) = match prepare_roles(&pool).await {
         Ok(names) => names,
         Err(e) => {
-            eprintln!("{e}");
+            log_error!("{e}");
             return ExitCode::FAILURE;
         }
     };
 
     if let Err(e) = apply_migrations(&pool).await {
-        eprintln!("{e}");
+        log_error!("{e}");
         return ExitCode::FAILURE;
     }
 
     if let Err(e) = seed_bootstrap_account(&pool).await {
-        eprintln!("{e}");
+        log_error!("{e}");
         return ExitCode::FAILURE;
     }
 
     if let Err(e) = fill_slugs(&pool).await {
-        eprintln!("{e}");
+        log_error!("{e}");
         return ExitCode::FAILURE;
     }
 
     if let Err(e) = grant_service_privileges(&pool, &backend_user, &worker_user).await {
-        eprintln!("migrate: servis rollerine tablo izni verilemedi: {e}");
+        log_error!("migrate: servis rollerine tablo izni verilemedi: {e}");
         return ExitCode::FAILURE;
     }
 
-    println!("migrate: tamamlandı");
+    log_info!("migrate: tamamlandı");
     ExitCode::SUCCESS
 }
 
@@ -71,7 +71,7 @@ async fn fill_slugs(pool: &PgPool) -> Result<(), String> {
         .await
         .map_err(|e| format!("migrate: rol/departman adresleri üretilemedi: {e}"))?;
     if filled > 0 {
-        println!("migrate: {filled} rol/departman adresi üretildi");
+        log_info!("migrate: {filled} rol/departman adresi üretildi");
     }
     Ok(())
 }

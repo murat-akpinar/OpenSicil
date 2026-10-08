@@ -253,9 +253,9 @@ async fn create(
 
 async fn enqueue_after_change(state: &AppState, target: i64) {
     match enqueue_linked(&state.pool, target).await {
-        Ok(n) if n > 0 => println!("web: eşleme değişti, {n} kimlik için iş açıldı"),
+        Ok(n) if n > 0 => log_info!("web: eşleme değişti, {n} kimlik için iş açıldı"),
         Ok(_) => {}
-        Err(e) => eprintln!("web: eşleme sonrası iş açılamadı: {e}"),
+        Err(e) => log_error!("web: eşleme sonrası iş açılamadı: {e}"),
     }
 }
 

@@ -102,7 +102,7 @@ async fn render_operator_home(
             identities,
         }),
         Err(e) => {
-            eprintln!("web: gösterge paneli okunamadı: {e}");
+            log_error!("web: gösterge paneli okunamadı: {e}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
@@ -138,7 +138,7 @@ pub(crate) fn render<T: Template>(tmpl: &T) -> Response {
     match tmpl.render() {
         Ok(body) => Html(body).into_response(),
         Err(e) => {
-            eprintln!("web: şablon render edilemedi: {e}");
+            log_error!("web: şablon render edilemedi: {e}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
@@ -198,7 +198,7 @@ async fn render_login(pool: &PgPool, lang: Lang, error: String) -> Response {
     let settings = match crate::settings::load(pool).await {
         Ok(s) => Some(s),
         Err(e) => {
-            eprintln!("web: ayarlar okunamadı: {e}");
+            log_error!("web: ayarlar okunamadı: {e}");
             None
         }
     };
@@ -271,7 +271,7 @@ async fn local_login(state: &AppState, lang: Lang, form: &LoginForm) -> Response
             return render_login(&state.pool, lang, lang.t1("err.account_locked", minutes)).await;
         }
         Err(e) => {
-            eprintln!("web: giriş kontrolü başarısız: {e}");
+            log_error!("web: giriş kontrolü başarısız: {e}");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     }
@@ -315,7 +315,7 @@ async fn ad_login(state: &AppState, lang: Lang, form: &LoginForm) -> Response {
         // Giriş sessizce başarısız olmaz: ekranda AD'ye ulaşılamadığı yazar,
         // ayrıntı yalnızca sunucu log'una gider, yerel kapı çalışmaya devam eder.
         Err(unavailable) => {
-            eprintln!("web: AD girişi yapılamadı: {unavailable}");
+            log_error!("web: AD girişi yapılamadı: {unavailable}");
             render_login(&state.pool, lang, lang.t("err.ad_unreachable").to_string()).await
         }
     }
@@ -340,7 +340,7 @@ async fn oidc_login(State(state): State<AppState>) -> Response {
     match crate::oidc::login_redirect(&state.pool, &state.aead_key, &redirect_uri).await {
         Ok(url) => Redirect::to(&url).into_response(),
         Err(e) => {
-            eprintln!("web: oidc girişi başlatılamadı: {e}");
+            log_error!("web: oidc girişi başlatılamadı: {e}");
             Redirect::to("/login").into_response()
         }
     }
@@ -359,7 +359,7 @@ async fn oidc_callback(
     Query(query): Query<OidcCallbackQuery>,
 ) -> Response {
     let (Some(code), Some(oidc_state)) = (query.code, query.state) else {
-        eprintln!(
+        log_error!(
             "web: oidc geri dönüşünde eksik parametre (error={:?})",
             query.error
         );
@@ -378,7 +378,7 @@ async fn oidc_callback(
     {
         Ok(result) => establish_oidc_session(&state, Lang::from_headers(&headers), result).await,
         Err(e) => {
-            eprintln!("web: oidc girişi başarısız: {e}");
+            log_error!("web: oidc girişi başarısız: {e}");
             Redirect::to("/login").into_response()
         }
     }
@@ -397,7 +397,7 @@ async fn establish_oidc_session(
         .any(|a| a == crate::oidc::ADMIN_AUTHORITY)
     {
         if let Err(e) = crate::settings::mark_oidc_admin_verified(&state.pool).await {
-            eprintln!("web: oidc admin doğrulaması işaretlenemedi: {e}");
+            log_error!("web: oidc admin doğrulaması işaretlenemedi: {e}");
         }
     }
 
@@ -426,14 +426,14 @@ async fn establish_operator_session(state: &AppState, operator: Operator) -> Res
             return crate::operator_guard::rejection_response(state, &operator, reason).await;
         }
         Err(e) => {
-            eprintln!("web: operatör kimlik durumu okunamadı: {e}");
+            log_error!("web: operatör kimlik durumu okunamadı: {e}");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     }
     let token = match crate::operator_session::create_session(&state.pool, &operator).await {
         Ok(t) => t,
         Err(e) => {
-            eprintln!("web: operatör oturumu oluşturulamadı: {e}");
+            log_error!("web: operatör oturumu oluşturulamadı: {e}");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
@@ -471,7 +471,7 @@ async fn audit_operator_login(state: &AppState, operator: &Operator) {
     )
     .await
     {
-        eprintln!("web: denetim kaydı yazılamadı (operator.login): {e}");
+        log_error!("web: denetim kaydı yazılamadı (operator.login): {e}");
     }
 }
 
@@ -515,7 +515,7 @@ async fn change_password_submit(
         });
     }
     if let Err(e) = crate::bootstrap_account::set_password(&state.pool, &form.new_password).await {
-        eprintln!("web: parola değiştirilemedi: {e}");
+        log_error!("web: parola değiştirilemedi: {e}");
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
     // Denetim satiri yazilamazsa islem geri alinmaz (parola zaten degisti), yalnizca
@@ -578,7 +578,7 @@ async fn render_config(
             ops,
         }),
         Err(e) => {
-            eprintln!("web: ayarlar okunamadı: {e}");
+            log_error!("web: ayarlar okunamadı: {e}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
@@ -653,13 +653,13 @@ async fn config_submit(
     let before = match crate::settings::load(&state.pool).await {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("web: ayarlar okunamadı: {e}");
+            log_error!("web: ayarlar okunamadı: {e}");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
     let input = crate::settings::AppSettingsInput::from(form);
     if let Err(e) = crate::settings::save(&state.pool, &state.aead_key, &input).await {
-        eprintln!("web: ayarlar kaydedilemedi: {e}");
+        log_error!("web: ayarlar kaydedilemedi: {e}");
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
     if let Ok(after) = crate::settings::load(&state.pool).await {
@@ -771,7 +771,7 @@ async fn set_lang(
     if let Err(e) =
         crate::operator_session::set_lang(&state.pool, &token, Lang::from_code(&form.lang)).await
     {
-        eprintln!("web: dil tercihi yazılamadı: {e}");
+        log_error!("web: dil tercihi yazılamadı: {e}");
     }
     let back = headers
         .get(header::REFERER)

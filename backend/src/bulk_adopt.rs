@@ -193,7 +193,7 @@ fn decrypted_national_id(aead_key: &[u8; crate::crypto::KEY_LEN], enc: Option<&[
     match enc.map(|enc| national_id::decrypt(aead_key, enc)) {
         Some(Ok(value)) => value,
         Some(Err(e)) => {
-            eprintln!("bulk_adopt: bulgudaki kimlik numarası çözülemedi: {e}");
+            log_error!("bulk_adopt: bulgudaki kimlik numarası çözülemedi: {e}");
             String::new()
         }
         None => String::new(),
@@ -316,7 +316,7 @@ async fn create_one(
         Ok((id, _)) => Ok(id),
         Err(identity::CreateError::DuplicateNationalId) => Err("err.duplicate_national_id"),
         Err(identity::CreateError::Db(e)) => {
-            eprintln!("web: toplu sahiplenme kimlik açamadı: {e}");
+            log_error!("web: toplu sahiplenme kimlik açamadı: {e}");
             Err("err.bulk_adopt_failed")
         }
     }

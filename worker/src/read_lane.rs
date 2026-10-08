@@ -114,7 +114,7 @@ where
             _ = tokio::time::sleep(every) => match renew(pool, id).await {
                 Ok(true) => {}
                 Ok(false) => return Err("iş kirası elden gitti, okuma bırakıldı".to_string()),
-                Err(e) => eprintln!("worker: okuma işi {id} kirası uzatılamadı: {e}"),
+                Err(e) => log_error!("worker: okuma işi {id} kirası uzatılamadı: {e}"),
             },
         }
     }

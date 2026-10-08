@@ -201,4 +201,5 @@
 - Rol, departman, silme ve içe aktarma POST'ları sonucu yönlendirir, mesaj flash'tan basılır
 - TC kimlik no mutabakat ekranından AD'den toplu doldurulur, değer denetime girmez
 - Kayıp katalog öğesi canlı ikizine devredilir ya da katalogdan kaldırılır
+- Iki servisin log satırları OpenTelemetry alan adlarıyla tek satır JSON olur
 

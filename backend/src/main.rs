@@ -1,3 +1,5 @@
+#[macro_use]
+mod log;
 mod ad_auth;
 mod ad_diff;
 mod assets;
@@ -80,7 +82,7 @@ async fn main() -> ExitCode {
     match parse_command(std::env::args().nth(1).as_deref()) {
         Command::Migrate => migrate::run().await,
         Command::Unknown(other) => {
-            eprintln!("backend: bilinmeyen komut: {other}");
+            log_error!("backend: bilinmeyen komut: {other}");
             ExitCode::FAILURE
         }
         Command::Server => server::run().await,
@@ -117,6 +119,7 @@ mod tests {
             "common_settings.rs",
             "desired_state.rs",
             "crypto.rs",
+            "log.rs",
             "mapping_rules.rs",
             "normalize.rs",
             "scope.rs",

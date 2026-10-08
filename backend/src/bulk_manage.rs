@@ -577,7 +577,7 @@ async fn approve(
         Err(e) => return internal("toplu yönetime alma uygulanamadı", e),
     };
     if let Err(e) = discard(&state.pool, id).await {
-        eprintln!("web: onaylanan toplu yönetime alma partisi silinemedi: {e}");
+        log_error!("web: onaylanan toplu yönetime alma partisi silinemedi: {e}");
     }
     let detail =
         serde_json::json!({ "batch_id": id, "target_system_id": target, "by": batch.by_username });

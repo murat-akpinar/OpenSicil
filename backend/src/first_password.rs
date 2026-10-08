@@ -112,7 +112,7 @@ async fn create(
     let detail = serde_json::json!({ "first_password_id": fp, "target_id": ad });
     audit_operator(&state, &op, FIRST_PASSWORD_REQUESTED, Some(id), detail).await;
     if let Err(e) = crate::jobs::enqueue(&state.pool, id, ad, crate::jobs::Priority::Single).await {
-        eprintln!("web: ilk parola işi açılamadı (kimlik {id}): {e}");
+        log_error!("web: ilk parola işi açılamadı (kimlik {id}): {e}");
     }
     Redirect::to(&format!("/identities/{id}/first-password/{fp}")).into_response()
 }

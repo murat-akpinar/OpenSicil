@@ -1048,11 +1048,14 @@ Kurallar:
 
 > Fazlar arası iş, "Faz" olarak numaralanmaz. Kullanıcı isteği (2026-10-02): "loglar OpenTelemetry standardına uygun olsun, kuran kişiler merkezi SIEM'lerine göndersin." Karar: alan adları OTel semantic conventions, taşıma işi collector'ın — uygulamaya OTel SDK/OTLP eklenmez, ayarlar sekmesine log hedefi girmez (ADR-113).
 
-- [ ] Log satırları JSON olur (iki crate)
+- [x] Log satırları JSON olur (iki crate)
   - Kabul: backend istek log'u tek JSON satırı: `timestamp`, `severity`, `service.name`, `body`, `http.request.method`, `url.path`, `http.response.status_code`, `client.address`, `event.duration`
   - Kabul: worker'ın `println!`/`eprintln!` satırları da aynı biçimden geçer; Türkçe metin `body` alanında kalır
   - Kabul: yeni bağımlılık yok — backend `serde_json`, worker elle kaçış (`writes::json_quote`)
   - Kabul: `jq -c . < log` satır satır ayrıştırıyor; `/api/health` yine loglanmıyor
+  - Not (2026-10-08): yeni ikiz `log.rs` (iki crate'te birebir aynı, ikiz karşılaştırma testine eklendi). `service.name` `concat!("opensicil-", env!("CARGO_PKG_NAME"))` — aynı kaynak, iki crate'te iki değer. Zaman damgası bağımlılıksız (`SystemTime` → gün/takvim dönüşümü, milisaniyeli UTC). İki crate'teki bütün `println!`/`eprintln!` (backend ~70, worker ~35) `log_info!`/`log_error!` oldu; `ERROR` stderr'e, gerisi stdout'a. `writes::json_quote` artık `log::quote`'a gidiyor — denetim satırındaki öznitelik adlarında kontrol karakteri de kaçırılıyor (eskiden yalnızca `"` ve `\`). Severity iki değer (`INFO`/`ERROR`); istek satırı 5xx'te de `INFO`, durum kodu alanda
+  - Doğrulama (2026-10-08, vaultscan): worker **115 test**, backend **254 test** geçti (yeni: `log::line_is_one_json_object_with_escaped_body_and_typed_fields` ve `log::utc_formats_known_instants` iki crate'te, `logging::request_line_carries_otel_fields`). Düşenler yine DC kapalı + lab Keycloak yok. fmt + clippy temiz, audit yalnızca `rsa`
+  - Doğrulama (çalışan yığın, vaultscan): yeniden kuruldu; `GET /login` ve `GET /nope` sonrası `docker compose logs --no-log-prefix backend worker` → **9 satırın 9'u** `jq -c .` ile ayrıştı (backend 4 INFO, worker 4 INFO + 1 ERROR); istek satırı `{"…","body":"GET /nope 404","http.request.method":"GET","url.path":"/nope","http.response.status_code":404,"client.address":"172.21.0.1","event.duration":11950}`; `/api/health` satırı **yok**
 - [ ] Denetim kaydı stdout'a da basılır + `docs/09` toplayıcı bölümü
   - Kabul: `audit_log`'a yazılan satır aynı anda `event.category: "iam"` JSON log satırı olarak çıkar; kişisel veri girmez (docs/07 kuralı)
   - Kabul: `docs/09`'da "Merkezi log / SIEM" bölümü: alan listesi + compose log driver örneği + OTel Collector `filelog` örneği; "OTLP istiyorsanız collector çevirir" notu

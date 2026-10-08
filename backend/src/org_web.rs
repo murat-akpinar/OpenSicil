@@ -55,7 +55,7 @@ impl Notice {
     /// log'a duser, sayfa mesajsiz acilir.
     pub async fn redirect(self, pool: &sqlx::PgPool, op: &Operator, to: &str) -> Response {
         if let Err(e) = self.save(pool, &op.username).await {
-            eprintln!("web: bildirim oturuma yazılamadı ({}): {e}", op.username);
+            log_error!("web: bildirim oturuma yazılamadı ({}): {e}", op.username);
         }
         Redirect::to(to).into_response()
     }
@@ -96,7 +96,7 @@ impl Notice {
             },
             Ok(None) => Notice::default(),
             Err(e) => {
-                eprintln!("web: bekleyen bildirim okunamadı ({username}): {e}");
+                log_error!("web: bekleyen bildirim okunamadı ({username}): {e}");
                 Notice::default()
             }
         }
@@ -608,7 +608,7 @@ async fn pending_view(state: &AppState, owner: Owner, id: i64, op: &Operator) ->
         Ok(Some(p)) => p,
         Ok(None) => return PendingView::default(),
         Err(e) => {
-            eprintln!("web: bekleyen taslak okunamadı: {e}");
+            log_error!("web: bekleyen taslak okunamadı: {e}");
             return PendingView::default();
         }
     };
@@ -632,14 +632,14 @@ async fn recompute(
     let time_zone = match state.common().await {
         Ok(common) => common.time_zone,
         Err(e) => {
-            eprintln!("web: onay anında ortak ayarlar okunamadı: {e}");
+            log_error!("web: onay anında ortak ayarlar okunamadı: {e}");
             return None;
         }
     };
     match change_set::preview(&state.pool, &time_zone, &staged.as_draft(owner, id)).await {
         Ok(impact) => Some(impact),
         Err(e) => {
-            eprintln!("web: onay anında etki yeniden hesaplanamadı: {e}");
+            log_error!("web: onay anında etki yeniden hesaplanamadı: {e}");
             None
         }
     }
@@ -1032,7 +1032,7 @@ async fn publish(
         };
     }
     if let Err(e) = change_set::clear(&state.pool, owner, id).await {
-        eprintln!("web: bekleyen taslak temizlenemedi: {e}");
+        log_error!("web: bekleyen taslak temizlenemedi: {e}");
     }
     let detail = serde_json::json!({
         "action": "saved", "id": id, "name": sub.edit.name, "code": sub.code,
@@ -1093,7 +1093,7 @@ async fn impact_notice(
             (impact, text)
         }
         Err(e) => {
-            eprintln!("web: etki önizlemesi hesaplanamadı: {e}");
+            log_error!("web: etki önizlemesi hesaplanamadı: {e}");
             (Impact::default(), String::new())
         }
     }
@@ -1133,9 +1133,9 @@ fn impact_text(lang: Lang, impact: &Impact, threshold: usize) -> String {
 // Is acilamazsa model yine kaydedilmistir; log'a duser, zamanlayici farki yakalar.
 async fn enqueue_affected(state: &AppState, owner: Owner, id: i64) {
     match org::enqueue_affected(&state.pool, owner, id).await {
-        Ok(n) if n > 0 => println!("web: tanım değişti, {n} kimlik için iş açıldı"),
+        Ok(n) if n > 0 => log_info!("web: tanım değişti, {n} kimlik için iş açıldı"),
         Ok(_) => {}
-        Err(e) => eprintln!("web: etkilenen kimlikler için iş açılamadı: {e}"),
+        Err(e) => log_error!("web: etkilenen kimlikler için iş açılamadı: {e}"),
     }
 }
 

@@ -1782,7 +1782,7 @@ async fn approve(
         Err(e) => return internal("içe aktarma partisi uygulanamadı", e),
     };
     if let Err(e) = discard(&state.pool, id).await {
-        eprintln!("web: uygulanan içe aktarma partisi silinemedi: {e}");
+        log_error!("web: uygulanan içe aktarma partisi silinemedi: {e}");
     }
     let detail = serde_json::json!({ "batch_id": id, "by": batch.by_username });
     audit_operator(&state, &op, crate::audit::IMPORT_APPROVED, None, detail).await;

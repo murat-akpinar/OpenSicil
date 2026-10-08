@@ -242,7 +242,7 @@ pub async fn metrics(State(state): State<AppState>, headers: HeaderMap) -> Respo
         )
             .into_response(),
         Err(e) => {
-            eprintln!("metrics: sayaçlar okunamadı: {e}");
+            log_error!("metrics: sayaçlar okunamadı: {e}");
             (StatusCode::SERVICE_UNAVAILABLE, "unavailable\n").into_response()
         }
     }

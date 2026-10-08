@@ -124,7 +124,7 @@ pub async fn enforce(
         Ok(Some(op)) => op,
         Ok(None) => return next.run(request).await,
         Err(e) => {
-            eprintln!("operator_guard: oturum okunamadı: {e}");
+            log_error!("operator_guard: oturum okunamadı: {e}");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
@@ -139,12 +139,12 @@ pub async fn enforce(
         Ok(Verdict::Allowed) => next.run(request).await,
         Ok(Verdict::Rejected(reason)) => {
             if let Err(e) = crate::operator_session::delete_session(&state.pool, &token).await {
-                eprintln!("operator_guard: oturum silinemedi: {e}");
+                log_error!("operator_guard: oturum silinemedi: {e}");
             }
             rejection_response(&state, &operator, reason).await
         }
         Err(e) => {
-            eprintln!("operator_guard: kimlik durumu okunamadı: {e}");
+            log_error!("operator_guard: kimlik durumu okunamadı: {e}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
@@ -170,7 +170,7 @@ async fn password_change_due(
         Ok(true) => Some(axum::response::Redirect::to("/change-password").into_response()),
         Ok(false) => None,
         Err(e) => {
-            eprintln!("operator_guard: yerel hesap durumu okunamadı: {e}");
+            log_error!("operator_guard: yerel hesap durumu okunamadı: {e}");
             Some(StatusCode::INTERNAL_SERVER_ERROR.into_response())
         }
     }
@@ -196,7 +196,7 @@ pub async fn rejection_response(
     )
     .await
     {
-        eprintln!("operator_guard: denetim kaydı yazılamadı: {e}");
+        log_error!("operator_guard: denetim kaydı yazılamadı: {e}");
     }
     (
         [(

@@ -7,7 +7,7 @@ pub async fn health(State(pool): State<PgPool>) -> StatusCode {
     match sqlx::query("SELECT 1").execute(&pool).await {
         Ok(_) => StatusCode::OK,
         Err(e) => {
-            eprintln!("health: veritabanı kontrolü başarısız: {e}");
+            log_error!("health: veritabanı kontrolü başarısız: {e}");
             StatusCode::SERVICE_UNAVAILABLE
         }
     }
