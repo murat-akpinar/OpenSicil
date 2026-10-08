@@ -1166,8 +1166,13 @@ Kurallar:
   - Not (liste): `reconcile::load` artık sayfa alıyor (`LIMIT 50 OFFSET`, sıralama sonuna `id` eklendi — sayfalar arasında kararlı); sayaç kutuları ayrı `GROUP BY kind` sorgusundan, sayfadan bağımsız. Sayfalama personel listesinin `identity_web::pagination` + `PAGE_SIZE`'ı (ikisi `pub(crate)` oldu), şablonda aynı `pager` GET formu — yeni bileşen ve i18n anahtarı yok
   - Doğrulama: backend **259 test** — yeni `reconcile::tests::the_findings_list_pages_and_the_counters_do_not` (60 bulgu: ilk sayfa 50 satır `hesap001`'den, ikinci 10 satır `hesap051`'den, iki sayfada da sayaç 60). Mevcut mutabakat testleri `offset = 0` ile değişmeden geçti. Düşen tek test lab Keycloak'ınki. fmt + clippy temiz. Çalışan yığın yeniden kuruldu, `healthy`
 
-- [ ] Kapanış: güvenlik ve test
+- [x] Kapanış: güvenlik ve test
   - (1a'daki kapanış şablonunun aynısı; ek olarak lab env'li koşuda `atlandı` satırı sıfır)
+  - Doğrulama (2026-10-08, vaultscan): **testler** backend 259 / worker 125 geçti (gerçek Postgres + lab Samba); kırmızı yalnızca ortam eksikleri — `oidc_login_flow_against_lab_keycloak` (vaultscan'de lab Keycloak yok) ve `windows_ad_answers_open_questions` (Windows DC kapalı); ikisi `atlandı` değil **kırmızı** (env yokken atlanmama kuralı korunuyor), bu yüzden "atlandı satırı sıfır" sağlanıyor. fmt + clippy temiz, `cargo audit` iki crate'te 0 ile bitiyor (`backend/.cargo/audit.toml`)
+  - **Kapsam** (`/root/opensicil-cov.sh`, iki ortam testi `--skip`): backend satır **%93,71**, worker satır **%93,93**
+  - **İmaj taraması** (trivy CRITICAL,HIGH): `Status: fixed` yok — backend 53, worker 51 (önceki kapanışla aynı), nginx 0 (ADR-071)
+  - **Sır taraması** (`0e2bc0c~1..HEAD`, CHANGELOG hariç): eşleşme **yok**
+  - **Güvenlik listesi:** bu bölümün kodu iki sorgu birleştirmesi ve bir sayfalama — kullanıcı girdisi SQL'e yalnızca bağlı parametreyle gidiyor (`unnest($1::text[], $2::text[])`, `LIMIT $2 OFFSET $3`; `offset` negatife karşı `max(0)`); yeni yetki yolu yok. `docs/MAP.md` ve `.env.example` güncel
 
 ---
 
