@@ -981,6 +981,9 @@ pub struct LifecycleInfo {
     pub subordinates: i64,
     /// Kimlik ayrilmis ve etkin devir yoneticisi yok: astlar yoneticisiz kalir
     pub orphaned_subordinates: bool,
+    pub departure_note: String,
+    /// Ayrilmis kimligin hesaplarinin saklama/silme durumu (ADR-111 madde 4)
+    pub deletions: Vec<crate::deletions::Row>,
 }
 
 // Yoneticinin durumu ve devir yoneticisi; etkin yonetici ADR-041 tek atlama.
@@ -1046,14 +1049,15 @@ async fn load_lifecycle(
         bool,
         bool,
         bool,
+        Option<String>,
     );
     let r: Row = sqlx::query_as(
         "SELECT to_char((end_at AT TIME ZONE $2) - interval '1 day', 'YYYY-MM-DD'), \
          handover_manager_id, to_char(suspension_start, 'YYYY-MM-DD'), \
          to_char(suspension_end, 'YYYY-MM-DD'), to_char(suspension_end + 1, 'YYYY-MM-DD'), \
          cancelled, emergency_departure, \
-         NOT EXISTS (SELECT 1 FROM account_links l WHERE l.identity_id = i.id AND l.origin = 'adopted') \
-         FROM identities i WHERE id = $1",
+         NOT EXISTS (SELECT 1 FROM account_links l WHERE l.identity_id = i.id AND l.origin = 'adopted'), \
+         departure_note FROM identities i WHERE id = $1",
     )
     .bind(id)
     .bind(time_zone)
@@ -1076,6 +1080,8 @@ async fn load_lifecycle(
         subordinates: subordinates(pool, id).await?,
         orphaned_subordinates: state == LifecycleState::Departed
             && !handover_effective(pool, time_zone, r.1).await?,
+        departure_note: r.8.unwrap_or_default(),
+        deletions: crate::deletions::load_for(pool, time_zone, Some(id)).await?,
     })
 }
 
@@ -1101,29 +1107,53 @@ pub enum LifecycleChange {
     Rejected(&'static str),
 }
 
+/// Ayrilis formu: son calisma gunu, devir yoneticisi ve serbest metin neden (ADR-111).
+pub struct Departure<'a> {
+    pub end_date: &'a str,
+    pub handover: Option<i64>,
+    pub note: &'a str,
+}
+
+/// AD `description`a girer (ADR-111); tek satir ve kisa tutulur.
+pub const DEPARTURE_NOTE_MAX_CHARS: usize = 200;
+
+/// Saf: bos → None, uzun ya da cok satirli → hata anahtari.
+pub fn departure_note(raw: &str) -> Result<Option<String>, &'static str> {
+    let note = raw.trim();
+    if note.chars().count() > DEPARTURE_NOTE_MAX_CHARS || note.chars().any(char::is_control) {
+        return Err("err.departure_note_invalid");
+    }
+    Ok((!note.is_empty()).then(|| note.to_string()))
+}
+
 // Planli ayrilis: son calisma gunu → ertesi gun 00:00 (ADR-038). Kimlik `ayrildi`
 // iken ileri tarih = geri alma.
 pub async fn set_departure(
     pool: &PgPool,
     time_zone: &str,
     id: i64,
-    end_date: &str,
-    handover: Option<i64>,
+    d: &Departure<'_>,
 ) -> Result<LifecycleChange, sqlx::Error> {
-    if Date::from_iso(end_date).is_none() {
+    if Date::from_iso(d.end_date).is_none() {
         return Ok(LifecycleChange::Rejected("err.end_date_format"));
     }
+    let note = match departure_note(d.note) {
+        Ok(note) => note,
+        Err(key) => return Ok(LifecycleChange::Rejected(key)),
+    };
     let before = load_state(pool, time_zone, id).await?;
     let done = sqlx::query(
         "UPDATE identities SET end_at = (($2::date + 1)::timestamp AT TIME ZONE $3), \
-         handover_manager_id = $4, emergency_departure = FALSE, cancelled = FALSE \
+         handover_manager_id = $4, departure_note = $5, emergency_departure = FALSE, \
+         cancelled = FALSE \
          WHERE id = $1 AND deleted_at IS NULL AND $2::date >= start_date \
          AND ($4::bigint IS NULL OR $4 <> $1)",
     )
     .bind(id)
-    .bind(end_date)
+    .bind(d.end_date)
     .bind(time_zone)
-    .bind(handover)
+    .bind(d.handover)
+    .bind(note)
     .execute(pool)
     .await?;
     if done.rows_affected() != 1 {
@@ -1176,7 +1206,7 @@ pub async fn revert_departure(
 ) -> Result<bool, sqlx::Error> {
     let done = sqlx::query(
         "UPDATE identities SET end_at = NULL, emergency_departure = FALSE, cancelled = FALSE, \
-         start_date = COALESCE($2::date, start_date) \
+         departure_note = NULL, start_date = COALESCE($2::date, start_date) \
          WHERE id = $1 AND deleted_at IS NULL AND end_at IS NOT NULL \
          AND employment_type = 'permanent'",
     )
@@ -1779,6 +1809,35 @@ async fn load_events(pool: &PgPool, time_zone: &str, id: i64) -> Result<Vec<Even
 mod tests {
     use super::*;
 
+    fn dep(end_date: &str, handover: Option<i64>) -> Departure<'_> {
+        Departure {
+            end_date,
+            handover,
+            note: "",
+        }
+    }
+
+    async fn note_of(pool: &PgPool, id: i64) -> Option<String> {
+        sqlx::query_scalar("SELECT departure_note FROM identities WHERE id = $1")
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    #[test]
+    fn departure_note_is_trimmed_single_line_and_bounded() {
+        assert_eq!(departure_note("  "), Ok(None));
+        assert_eq!(departure_note(" istifa "), Ok(Some("istifa".to_string())));
+        assert!(departure_note("a\nb").is_err());
+        let max = "ç".repeat(DEPARTURE_NOTE_MAX_CHARS);
+        assert!(
+            departure_note(&max).is_ok(),
+            "sınır karakterle sayılır, baytla değil"
+        );
+        assert!(departure_note(&format!("{max}x")).is_err());
+    }
+
     fn form() -> IdentityForm {
         IdentityForm {
             given_name: " Ayşe ".to_string(),
@@ -2277,14 +2336,14 @@ mod tests {
             .await
             .unwrap();
         assert!(matches!(
-            set_departure(&pool, tz, id, "2026-08-01", None)
+            set_departure(&pool, tz, id, &dep("2026-08-01", None))
                 .await
                 .unwrap(),
             LifecycleChange::Rejected(_)
         ));
         // son calisma gunu gecmiste: bitis ani (ertesi gun 00:00) gecti → ayrildi
         assert_eq!(
-            set_departure(&pool, tz, id, "2026-09-30", Some(ids[0]))
+            set_departure(&pool, tz, id, &dep("2026-09-30", Some(ids[0])))
                 .await
                 .unwrap(),
             LifecycleChange::Applied
@@ -2293,8 +2352,27 @@ mod tests {
             load_state(&pool, tz, id).await.unwrap(),
             Some(LifecycleState::Departed)
         );
+        // ADR-111: neden ayrilis formuyla yazilir; gecersizi reddedilir, eskisi kalir
+        let noted = Departure {
+            note: " sözleşme bitti ",
+            ..dep("2026-09-30", Some(ids[0]))
+        };
         assert_eq!(
-            set_departure(&pool, tz, id, "2099-01-01", None)
+            set_departure(&pool, tz, id, &noted).await.unwrap(),
+            LifecycleChange::Applied
+        );
+        assert_eq!(note_of(&pool, id).await.as_deref(), Some("sözleşme bitti"));
+        let multi_line = Departure {
+            note: "a\nb",
+            ..dep("2026-09-30", None)
+        };
+        assert_eq!(
+            set_departure(&pool, tz, id, &multi_line).await.unwrap(),
+            LifecycleChange::Rejected("err.departure_note_invalid")
+        );
+        assert_eq!(note_of(&pool, id).await.as_deref(), Some("sözleşme bitti"));
+        assert_eq!(
+            set_departure(&pool, tz, id, &dep("2099-01-01", None))
                 .await
                 .unwrap(),
             LifecycleChange::Reverted,
@@ -2318,7 +2396,7 @@ mod tests {
             "sözleşmelide bitiş kaldırılamaz"
         );
         assert_eq!(
-            set_departure(&pool, tz, id, "2099-05-05", None)
+            set_departure(&pool, tz, id, &dep("2099-05-05", None))
                 .await
                 .unwrap(),
             LifecycleChange::Reverted
@@ -2360,9 +2438,15 @@ mod tests {
             load_state(&pool, tz, ids[1]).await.unwrap(),
             Some(LifecycleState::Departed)
         );
+        sqlx::query("UPDATE identities SET departure_note = 'istifa' WHERE id = $1")
+            .bind(ids[1])
+            .execute(&pool)
+            .await
+            .unwrap();
         assert!(revert_departure(&pool, ids[1], Some("2099-05-05"))
             .await
             .unwrap());
+        assert_eq!(note_of(&pool, ids[1]).await, None, "geri alma nedeni siler");
         assert_eq!(
             load_state(&pool, tz, ids[1]).await.unwrap(),
             Some(LifecycleState::Pending)
@@ -2386,7 +2470,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            set_departure(&pool, tz, ids[0], "2026-09-30", Some(ids[1]))
+            set_departure(&pool, tz, ids[0], &dep("2026-09-30", Some(ids[1])))
                 .await
                 .unwrap(),
             LifecycleChange::Applied

@@ -72,6 +72,7 @@ const ROWS_SQL: &str = "SELECT l.identity_id, l.target_system_id, \
     JOIN target_systems t ON t.id = l.target_system_id \
     WHERE l.mode = 'managed' AND l.deleted_by_us_at IS NULL AND i.deleted_at IS NULL \
       AND i.end_at IS NOT NULL AND i.end_at <= now() AND NOT i.cancelled \
+      AND ($2::bigint IS NULL OR l.identity_id = $2) \
     ORDER BY i.end_at + make_interval(days => t.retention_days), 3, t.id";
 
 /// identity_id, target_id, person, target, departed_on, retention_ends,
@@ -79,8 +80,18 @@ const ROWS_SQL: &str = "SELECT l.identity_id, l.target_system_id, \
 type LinkRow = (i64, i64, String, String, String, String, bool, bool, bool);
 
 pub async fn load(pool: &PgPool, time_zone: &str) -> Result<Vec<Row>, sqlx::Error> {
+    load_for(pool, time_zone, None).await
+}
+
+/// `identity`: yalnizca o kimligin satirlari (kisi sayfasi, ADR-111 madde 4).
+pub async fn load_for(
+    pool: &PgPool,
+    time_zone: &str,
+    identity: Option<i64>,
+) -> Result<Vec<Row>, sqlx::Error> {
     let rows: Vec<LinkRow> = sqlx::query_as(ROWS_SQL)
         .bind(time_zone)
+        .bind(identity)
         .fetch_all(pool)
         .await?;
     Ok(rows
@@ -289,11 +300,13 @@ mod tests {
             .fetch_one(&pool)
             .await
             .unwrap();
-        sqlx::query("UPDATE target_systems SET delete_requires_approval = TRUE WHERE id = $1")
-            .bind(target)
-            .execute(&pool)
-            .await
-            .unwrap();
+        let requires: bool =
+            sqlx::query_scalar("SELECT delete_requires_approval FROM target_systems WHERE id = $1")
+                .bind(target)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(requires, "ADR-111: AD'de saklama sonu onay bekler");
         // ids[0]: 100 gun once ayrildi (90 gun saklama doldu); ids[1]: 10 gun once
         for (id, days) in [(ids[0], 100), (ids[1], 10)] {
             sqlx::query(
@@ -329,6 +342,11 @@ mod tests {
             rows[1].retention_ends
         );
         assert_eq!(awaiting_count(&pool).await.unwrap(), 1);
+        let own = load_for(&pool, "Europe/Istanbul", Some(ids[1]))
+            .await
+            .unwrap();
+        assert_eq!(own.len(), 1, "kişi sayfası yalnızca kendi satırını okur");
+        assert_eq!(own[0].status, IN_RETENTION);
 
         let session = |authority: &'static str| {
             let pool = pool.clone();
@@ -381,6 +399,21 @@ mod tests {
             !page.contains(r#"name="link""#),
             "auditor onay kutusu görmez"
         );
+        // ADR-111 madde 4: kisi sayfasi da hesabin onay bekledigini soyler
+        let person = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/identities/{}", ids[0]))
+                    .header(header::COOKIE, auditor.clone())
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let person = text(person).await;
+        let awaiting = crate::i18n::DEFAULT.t("deletionstatus.awaiting_approval");
+        assert!(person.contains(awaiting), "{person}");
         let r = send("POST", link.clone(), auditor).await;
         assert_eq!(r.status(), StatusCode::FORBIDDEN);
 

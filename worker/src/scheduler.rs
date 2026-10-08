@@ -566,22 +566,8 @@ mod tests {
             .unwrap();
         assert_eq!(
             tick(&pool, "Europe/Istanbul").await.unwrap(),
-            1,
-            "90 gün saklama doldu: silme işi"
-        );
-        sqlx::query("UPDATE jobs SET status = 'succeeded'")
-            .execute(&pool)
-            .await
-            .unwrap();
-        sqlx::query("UPDATE target_systems SET delete_requires_approval = TRUE WHERE id = $1")
-            .bind(seed.ad)
-            .execute(&pool)
-            .await
-            .unwrap();
-        assert_eq!(
-            tick(&pool, "Europe/Istanbul").await.unwrap(),
             0,
-            "onay isteyen hedefte onaysız silme işi açılmaz"
+            "ADR-111: AD varsayılanı onay bekler, onaysız silme işi açılmaz"
         );
         sqlx::query("UPDATE account_links SET deletion_approved = TRUE")
             .execute(&pool)
@@ -591,6 +577,25 @@ mod tests {
             tick(&pool, "Europe/Istanbul").await.unwrap(),
             1,
             "onaylandı"
+        );
+        sqlx::query("UPDATE jobs SET status = 'succeeded'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        // Kurum otomatik silmeyi ayardan acarsa onay aranmaz
+        sqlx::query("UPDATE account_links SET deletion_approved = FALSE")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE target_systems SET delete_requires_approval = FALSE WHERE id = $1")
+            .bind(seed.ad)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            tick(&pool, "Europe/Istanbul").await.unwrap(),
+            1,
+            "90 gün saklama doldu: silme işi"
         );
 
         drop(pool);

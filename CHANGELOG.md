@@ -223,4 +223,5 @@
 - Yazıcı GUID'i yazma hedefi olarak reddeder, sadece-boşsa-yaz kuralı teste bağlanır
 - Veritabanı binary'nin beklediği şemadan eskiyse backend ve worker açılmaz
 - Mutabakat bulgu listesi sayfalanır; manage_diff ölçüldü, sınır altında
+- Ayrılışta AD hesabı onaysız silinmez; ayrılış nedeni açıklamaya eşlenebilir
 

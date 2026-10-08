@@ -409,6 +409,8 @@ struct LifecycleForm {
     #[serde(default)]
     end_date: String,
     #[serde(default)]
+    departure_note: String,
+    #[serde(default)]
     handover_manager_id: String,
     #[serde(default)]
     reason: String,
@@ -473,8 +475,12 @@ async fn departure(
         Err(response) => return *response,
     };
     let handover = opt(&form.handover_manager_id).and_then(|h| h.parse::<i64>().ok());
-    let outcome =
-        identity::set_departure(&state.pool, &time_zone, id, form.end_date.trim(), handover).await;
+    let departure = identity::Departure {
+        end_date: form.end_date.trim(),
+        handover,
+        note: &form.departure_note,
+    };
+    let outcome = identity::set_departure(&state.pool, &time_zone, id, &departure).await;
     let detail =
         serde_json::json!({ "end_date": form.end_date.trim(), "handover_manager_id": handover });
     match outcome {

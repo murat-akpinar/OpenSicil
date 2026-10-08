@@ -49,6 +49,8 @@ pub struct Person {
     pub root_department_name: String,
     /// ADR-018/086: sahiplenilecek AD hesabi; doluysa hesap acilmaz
     pub existing_ad_account_hint: Option<String>,
+    /// Ayrilis nedeni, serbest metin (ADR-111); `{departure_note}` token'i
+    pub departure_note: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -156,6 +158,7 @@ type PersonRow = (
     Option<String>,
     String,
     Option<String>,
+    Option<String>,
 );
 
 async fn load_person(pool: &PgPool, identity_id: i64, time_zone: &str) -> Result<Person, String> {
@@ -164,7 +167,7 @@ async fn load_person(pool: &PgPool, identity_id: i64, time_zone: &str) -> Result
          i.requested_username, i.name_conflict_override, i.mobile_phone, i.national_id_enc, \
          to_char(i.start_date, 'YYYY-MM-DD'), \
          to_char((i.end_at AT TIME ZONE $2) - interval '1 day', 'YYYY-MM-DD'), i.employment_type, \
-         i.existing_ad_account_hint \
+         i.existing_ad_account_hint, i.departure_note \
          FROM identities i JOIN departments d ON d.id = i.department_id WHERE i.id = $1",
     )
     .bind(identity_id)
@@ -189,6 +192,7 @@ async fn load_person(pool: &PgPool, identity_id: i64, time_zone: &str) -> Result
         employment_type: row.13,
         root_department_name: String::new(),
         existing_ad_account_hint: row.14,
+        departure_note: row.15,
     })
 }
 

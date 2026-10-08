@@ -53,7 +53,7 @@ Hepsi kurulum ayarıdır. Tarihler **kurulumun saat dilimiyle** yorumlanır (var
 | Ek rol bitişi | Ayrılışla aynı kural (ADR-020) |
 | Ayrılışta parola sıfırlama | Ayrılıştan 7 gün sonra; acil ayrılışta hemen; `0` = hemen (ADR-033) |
 | AD `accountExpires` | Bitiş tarihi bilindiği anda ertesi gün 00:00 olarak yazılır. Worker o an çalışmıyor olsa bile AD girişi kendisi keser. Bitiş tarihi değişince yeniden yazılır, kaldırılınca (kadroya geçiş, geri alma) **süresiz** yazılır (ADR-059) |
-| Saklama süresi (hedef sistem başına) | AD 90 gün, dolunca silinir; Zimbra otomatik silme yok, onayla (ADR-024) |
+| Saklama süresi (hedef sistem başına) | AD 90 gün, Zimbra; ikisinde de süre dolunca hesap silinmez, "silinmeyi bekliyor" listesinden onayla silinir (ADR-024, ADR-111). AD için otomatik silme ayardan açılabilir |
 | Ayrılan postası | Ayrılış anında kullanıcının kendi yönlendirmesi ve filtresi temizlenir. Otomatik yanıt (açık), devir yöneticisine yönlendirme (**varsayılan kapalı**) ve adres defterinden gizleme bitişten 24 saat sonra, acil ayrılışta hemen yazılır (ADR-045, ADR-049) |
 | Askı | Başlangıç tarihinde 00:00. Askı bitişi iznin **son günüdür**; hesaplar ertesi gün 00:00'da açılır. Tarihsiz askı elle kaldırılır (ADR-053, ADR-059) |
 | Mutabakat raporu | Ayarlanan saatlerde (varsayılan 02:00) ve istendiğinde |
@@ -106,7 +106,7 @@ Stajyer, sözleşmeli ya da dış kaynak personelin kadroya geçmesi yeni kayıt
    - Kurulumda pasif OU tanımlıysa hesap oraya taşınır.
    - Zimbra hesabı girişe kapatılır ve listelerden çıkarılır. Kullanıcının kendi yönlendirmesi ve filtre betiği **hemen** temizlenir (eski değerler bağlantıda saklanır): `locked` hesap posta almaya devam eder ve kişisel adrese yönlendirme kurumsal postayı dışarı akıtırdı. `locked` durumunda 24 saat (ayar) sonra otomatik yanıt yazılır, hesap adres defterinden gizlenir; yönlendirme ayarı açıksa posta devir yöneticisinin bağlı adresine yönlendirilir (ADR-045, ADR-049). Unutulan sözleşme yenilemesi bu yüzden müşterilere "artık çalışmıyor" yanıtı göndermez.
    - Astların etkin yöneticisi devir yöneticisi olur; her ast için iş açılır ve `manager` yeniden yazılır (ADR-041).
-3. AD saklama süresi dolunca AD hesabı silinir. Zimbra hesabı varsayılan olarak silinmez: süresi dolunca "silinmeyi bekliyor" listesine düşer ve onayla silinir. Bütün hesaplar silinince kimlik `silindi` olur ve kişisel verileri temizlenir (ADR-024).
+3. Saklama süresi dolunca hesap varsayılan olarak silinmez — AD'de de, Zimbra'da da: devre dışı ve pasif OU'da kalır, "silinmeyi bekliyor" listesine düşer ve onayla silinir (ADR-111). AD hesabıyla birlikte SID gider; dosya sahiplikleri ve ACL'ler çözülemez hale gelir. Kurum AD için otomatik silmeyi hedefin ayarından açabilir. Bütün hesaplar silinince kimlik `silindi` olur ve kişisel verileri temizlenir (ADR-024).
 
 Otomatik yanıtı ve (ayar açıksa) yönlendirmeyi motor yazar (ADR-045, ADR-049); mailbox devri (paylaşım, dışa aktarma, arşiv) v1'de kurumun işidir, Zimbra'dan yapılır (v2: F-29). Kişi sayfası ayrılış kaydedilince bunu hatırlatır.
 
@@ -139,7 +139,9 @@ Uzun izin, askerlik, ücretsiz izin gibi durumlar içindir.
 
 ## Silme (saklama süresi sonu)
 
-- AD hesabı saklama süresi dolunca kendiliğinden silinir. Zimbra hesabı "silinmeyi bekliyor" listesinden onayla silinir; arşivleme onaydan önce kurumun işidir (ADR-024).
+- Hesap "silinmeyi bekliyor" listesinden onayla silinir; arşivleme onaydan önce kurumun işidir (ADR-024). AD'de de varsayılan budur (ADR-111); hedefte "silme onay ister" kapatılırsa AD hesabı süre dolunca kendiliğinden silinir.
+- Onay gelmedikçe kimlik `ayrıldı`da bekler: kurumun bilinçli saklama kararıdır. Kişi sayfası her hesabın saklama durumunu ve saklama bitişini gösterir; `opensicil_oldest_awaiting_deletion_age_seconds` bekleyişin yaşını basar.
+- Ayrılış formundaki serbest metin neden (`departure_note`) ve son çalışma günü `{departure_note}` ve `{end_date}` token'larıyla AD özniteliğine (genellikle `description`) eşlenebilir; örnek [docs/09](09-kurulum.md#ayrılanın-açıklaması). Bu token'ları taşıyan şablon yalnızca ayrılmış kimlikte çözülür.
 - Son hesabı silen iş kişisel verileri (ad, soyad, kimlik numarası, telefon, sicil no) temizler ve `silindi_anı` yazar; kimlik `silindi` olur (ADR-038).
 - Kimliğin iç ID'si kalır; kullanıcı adı ve e-posta kullanılmış ad kaydına girer. Böylece aynı adres başka birine verilmez; Sistem yöneticisi gerekçeyle serbest bırakabilir (ADR-011, ADR-035).
 - Denetim kayıtları kendi saklama süresine tabidir ([docs/07](07-guvenlik-ve-kvkk.md)).

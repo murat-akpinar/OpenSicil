@@ -531,6 +531,10 @@ fn plain_sources(c: &AdJob<'_>, names: Option<&Names>) -> HashMap<&'static str, 
         ("employment_type", p.employment_type.clone()),
         ("start_date", p.start_date.clone()),
         ("end_date", p.end_date.clone().unwrap_or_default()),
+        (
+            "departure_note",
+            p.departure_note.clone().unwrap_or_default(),
+        ),
     ])
 }
 
@@ -559,7 +563,11 @@ async fn sources(
     } else {
         Some(None)
     };
-    Ok(mapping::Sources { values, manager_dn })
+    Ok(mapping::Sources {
+        values,
+        manager_dn,
+        departed: c.desired.state == LifecycleState::Departed,
+    })
 }
 
 // ADR-128: kimlikte yonetici kayitli degilse OpenSicil'in bu alanda bir degeri
@@ -1275,7 +1283,8 @@ async fn finalize_if_last_account(c: &AdJob<'_>) -> Result<bool, JobError> {
     sqlx::query(
         "UPDATE identities SET deleted_at = now(), given_name = '', surname = '', \
          employee_number = NULL, mobile_phone = NULL, national_id_enc = NULL, \
-         national_id_bidx = NULL, national_id_country = NULL WHERE id = $1 AND deleted_at IS NULL",
+         national_id_bidx = NULL, national_id_country = NULL, departure_note = NULL \
+         WHERE id = $1 AND deleted_at IS NULL",
     )
     .bind(c.job.identity_id)
     .execute(c.pool)
@@ -3022,11 +3031,32 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        sqlx::query("UPDATE identities SET end_at = now() - interval '1 hour' WHERE id = $1")
-            .bind(seed.identity)
-            .execute(&pool)
-            .await
-            .unwrap();
+        // ADR-111: `description` artik ayrilis sablonu; calisirken cozulmez
+        sqlx::query(
+            "UPDATE attribute_mappings SET source_kind = 'template', write_if_empty = FALSE, \
+             source_text = 'Ayrıldı {end_date} — {departure_note}' \
+             WHERE target_system_id = $1 AND target_attribute = 'description'",
+        )
+        .bind(seed.ad)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "UPDATE identities SET end_at = now() - interval '1 hour', departure_note = 'istifa' \
+             WHERE id = $1",
+        )
+        .bind(seed.identity)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let end_date: String = sqlx::query_scalar(
+            "SELECT to_char((end_at AT TIME ZONE 'Europe/Istanbul') - interval '1 day', 'YYYY-MM-DD') \
+             FROM identities WHERE id = $1",
+        )
+        .bind(seed.identity)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         // ADR-050: yalnizca yikici is verme sayacindan etkilenmez — ayrilis dolu
         // verme penceresinde de uygulanir.
         open_window(pool.clone()).await;
@@ -3073,6 +3103,14 @@ mod tests {
         );
         assert!(account.member_of.is_empty(), "{:?}", account.member_of);
         assert!(!account.enabled);
+        let description = ad_account::read_attributes(&mut ldap, &account.dn, &["description"])
+            .await
+            .unwrap();
+        assert_eq!(
+            description["description"][0],
+            format!("Ayrıldı {end_date} — istifa"),
+            "ADR-111: pasif OU, devre dışı ve açıklamada tarih + neden"
+        );
         // ADR-033: G gun sonra parola rastgelelestirilir (bir kez); lab'da G = 0
         sqlx::query("UPDATE target_systems SET password_reset_delay_days = 0 WHERE id = $1")
             .bind(seed.ad)

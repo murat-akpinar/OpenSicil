@@ -97,6 +97,8 @@ pub struct Sources {
     pub values: HashMap<&'static str, String>,
     /// None: etkin yonetici yok (Clear); Some(None): belirsiz; Some(Some(dn)): deger
     pub manager_dn: Option<Option<String>>,
+    /// Kimlik ayrildi mi: ayrilis token'li sablonun kapisi (ADR-111)
+    pub departed: bool,
 }
 
 const TEMPLATE_TOKENS: &[(&str, &str)] = &[
@@ -109,7 +111,17 @@ const TEMPLATE_TOKENS: &[(&str, &str)] = &[
     ("{username}", "username"),
     ("{email}", "email"),
     ("{upn}", "upn"),
+    ("{end_date}", "end_date"),
+    ("{departure_note}", "departure_note"),
 ];
+
+// ADR-111: "Ayrildi {end_date} — {departure_note}" her iste degerlendirilir; ayrilmamis
+// kimlikte cozulseydi calisana "Ayrildi —" yazilirdi. Hedefteki deger korunur.
+const DEPARTURE_TOKENS: &[&str] = &["{end_date}", "{departure_note}"];
+
+fn waits_for_departure(template: &str, departed: bool) -> bool {
+    !departed && DEPARTURE_TOKENS.iter().any(|t| template.contains(t))
+}
 
 fn render_template(template: &str, values: &HashMap<&'static str, String>) -> String {
     let mut out = template.to_string();
@@ -122,7 +134,13 @@ fn render_template(template: &str, values: &HashMap<&'static str, String>) -> St
 pub fn evaluate(row: &MappingRow, s: &Sources) -> Value {
     let raw = match row.source_kind.as_str() {
         "constant" => row.source_text.clone().unwrap_or_default(),
-        "template" => render_template(row.source_text.as_deref().unwrap_or(""), &s.values),
+        "template" => {
+            let template = row.source_text.as_deref().unwrap_or("");
+            if waits_for_departure(template, s.departed) {
+                return Value::Undetermined;
+            }
+            render_template(template, &s.values)
+        }
         "manager_account" => {
             return match &s.manager_dn {
                 None => Value::Clear,
@@ -208,6 +226,7 @@ mod tests {
         Sources {
             values,
             manager_dn: Some(None),
+            departed: false,
         }
     }
 
@@ -257,6 +276,41 @@ mod tests {
         let mut phone = row("mobile", "mobile_phone", None);
         phone.transform = "phone_national".to_string();
         assert_eq!(evaluate(&phone, &s), Value::Set("05321234567".to_string()));
+    }
+
+    #[test]
+    fn departure_template_resolves_only_once_departed() {
+        let note = row(
+            "description",
+            "template",
+            Some("Ayrıldı {end_date} — {departure_note}"),
+        );
+        let mut s = sources();
+        s.values.insert("end_date", "2026-10-31".to_string());
+        s.values.insert("departure_note", "istifa".to_string());
+        assert_eq!(
+            evaluate(&note, &s),
+            Value::Undetermined,
+            "çalışana yazılmaz"
+        );
+        s.departed = true;
+        assert_eq!(
+            evaluate(&note, &s),
+            Value::Set("Ayrıldı 2026-10-31 — istifa".to_string())
+        );
+        s.values.insert("departure_note", String::new());
+        assert_eq!(
+            evaluate(&note, &s),
+            Value::Set("Ayrıldı 2026-10-31 —".to_string()),
+            "boş not boşa çözülür"
+        );
+        let plain = row("displayName", "template", Some("{given} {surname}"));
+        s.departed = false;
+        assert_eq!(
+            evaluate(&plain, &s),
+            Value::Set("Ayşe Yılmaz".to_string()),
+            "ayrılış token'ı yoksa kapı yok"
+        );
     }
 
     #[test]

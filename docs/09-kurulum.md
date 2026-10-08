@@ -144,7 +144,7 @@ Eşik, bağlantısı gözlem modunda olan ya da o hedefte hesabı olmayacak kiml
 | Ayar | Varsayılan | Not |
 |---|---|---|
 | İlk girişte değiştirme işareti (Ayarlar → Yürütme, `FIRST_LOGIN_CHANGE_REQUIRED`) | açık | İşaretli kullanıcı **Zimbra'ya giremez** (AD bind'ı "parola değiştirilmeli" hatasıyla reddeder, Zimbra parola değiştirtemez). **Keycloak** yalnızca federasyon `WRITABLE` modda ve "MSAD User Account Control" mapper'ı ekliyse parola değiştirme ekranı açar; `READ_ONLY` modda düz "geçersiz kimlik bilgisi" der. Kural: personelin ilk girişi domain bilgisayarından ya da `WRITABLE` Keycloak'tan yapılıyorsa **açık** bırakın; ilk giriş yeri webmail ya da `READ_ONLY` Keycloak olan personeliniz varsa **kapatın** (ADR-019, [docs/11](11-dogrulama-notlari.md)). Kapalıysa teslim edilen parola kişi değiştirene kadar geçerlidir; ilk girişte değiştirmeyi kurum kuralı yapın |
-| Saklama süresi, AD | 90 gün | Dolunca hesap otomatik silinir |
+| Saklama süresi, AD | 90 gün, onayla | Dolunca hesap silinmez: devre dışı ve pasif OU'da kalır, "silinmeyi bekliyor" listesinden onaylanır (ADR-111). Otomatik silme hedefin "silme onay ister" ayarı kapatılarak açılır; silinen hesapla SID gider |
 | Saklama süresi, Zimbra | onayla | Otomatik silme kapalı; "silinmeyi bekliyor" listesinden onaylanır (ADR-024) |
 | Ayrılışta parola sıfırlama gecikmesi | 7 gün | `0` = ayrılışta hemen; acil ayrılışta her zaman hemen (ADR-033) |
 | Ayrılan hesabın Zimbra durumu | `locked` | `closed` gönderene hata döndürür; yönlendirme ve yanıt yazılmaz |
@@ -163,6 +163,20 @@ Eşik, bağlantısı gözlem modunda olan ya da o hedefte hesabı olmayacak kiml
 | İzin verilen HTTP metotları | `GET`, `HEAD`, `POST` | Uygulamanın kullandığı küme; gerisi nginx'te 405 alır ve backend'e ulaşmaz |
 
 **Soyad değişimi (v1):** OpenSicil görünen adı ve CN'i günceller; kullanıcı adı ve e-posta değişmez (F-25 v2'dedir). Hesabı AD'de ya da Zimbra'da **elle yeniden adlandırmayın**: kaynak OpenSicil'deki addır, eşlenmiş `mail` bir sonraki işte eski adrese geri yazılır (ADR-012) ve kişi sayfası eski adı gösterir. Yeni soyadla adres gerekiyorsa Zimbra'da takma ad ekleyin; OpenSicil takma adlara dokunmaz.
+
+## Ayrılanın açıklaması
+
+Ayrılış formundaki "Ayrılış nedeni" serbest metindir; kurum kendi ayrımını yazar ("istifa", "sözleşme bitti", "nakil"). Dizine yazılması için varsayılan eşleme satırı **gelmez**, Eşlemeler ekranından kurulur (ADR-111):
+
+| Hedef öznitelik | Kaynak | Şablon |
+|---|---|---|
+| `description` | Şablon | `Ayrıldı {end_date} — {departure_note}` |
+
+- `{end_date}` son çalışma günüdür (`YYYY-MM-DD`), `{departure_note}` formdaki metin; boşsa boşa çözülür.
+- Bu iki token'dan birini taşıyan şablon **yalnızca ayrılmış kimlikte** çözülür. Çalışan kimlikte satır atlanır, hedefteki değere dokunulmaz — `description`ı başka iş için kullanan kurumun çalışan hesapları ezilmez.
+- Geri almada açıklama kendiliğinden temizlenmez (aynı kural: çalışan kimlikte dokunulmaz); dönen kişinin açıklamasını AD'den elle silin.
+- `description` yerine izinli listedeki `extensionAttribute1`–`15` de seçilebilir.
+- Metin AD'de domain kullanıcılarınca okunur: sağlık, disiplin ya da başka özel nitelikli bilgi yazmayın ([docs/07](07-guvenlik-ve-kvkk.md)).
 
 ## AD'den geri dolum
 
