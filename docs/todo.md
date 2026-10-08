@@ -731,7 +731,8 @@ Kurallar:
 > Aşağısı yapılacak iştir ve **sırası bağlayıcıdır**: ilk işaretlenmemiş kutucuktan devam edilir.
 > Sıra: önce sessiz bozulan şey (okuma şeridi kirası), sonra bugünün isteği (işletme ayarları ekrana
 > taşınır, tarama saati onun son kutucuğu), sonra küçük değişmez kuralı, sonra AD geri dolumunun
-> kalanı, sonra loglar, sonra proje taramasının açtığı iki bölüm (tasarım-kod açıkları, ölçekte yavaşlayan yollar).
+> kalanı, sonra loglar, sonra proje taramasının açtığı iki bölüm (tasarım-kod açıkları, ölçekte yavaşlayan yollar),
+> sonra sekmeli çalışma alanları ve etkinlik geçmişi (ADR-134).
 > Bana bağlı olmayan kutucuklar
 > **"Bende değil"** bölümünde, Zimbra ise en sonda durur (ADR-090).
 
@@ -1184,6 +1185,44 @@ Kurallar:
 
 ---
 
+## Sekmeli çalışma alanları ve etkinlik geçmişi (ADR-134)
+
+> Kullanıcı isteği (2026-10-08): "menüler çok kopuk, bağlantılı işler tek pencerede olsun; rapor modülünün içini doldur, aktiviteler geçmişe göre kişi, tarih ve işlem bazlı filtrelenebilsin." Bugün dört Personel listesi yalnızca Raporlar'daki "Listeler" kartından açılıyor, bir hedefin eşleme/yönetime alma/mutabakat/katalog sayfaları arasında ortak gezinme yok, denetim kaydının filtrelenebilir bir görünümü hiç yok.
+>
+> Her kutucuğun tarayıcı yarısı çalışan yığında (vaultscan) görülür; oturum izni yoksa "Ertelenen" diye yazılır, kod yarısı bekletilmez.
+
+- [ ] Ortak sekme şeridi + kenar çubuğu yeni düzende (ADR-134 madde 1–2)
+  - Kabul: tek askama parçası `tabs.html`; sekmeler düz `<a>`, etkin olan `aria-current="page"`; JS ve yeni bağımlılık yok
+  - Kabul: kenar çubuğu 7 madde — Ana sayfa · Personel · Organizasyon · Mutabakat · Uygulamalar · Raporlar · Ayarlar; Roller ve Departmanlar "Organizasyon" altında iki sekme
+  - Kabul: hiçbir rota değişmez — yer imleri, 303 yönlendirmeleri (ADR-126) ve testlerdeki yollar aynen çalışır; menüde etkin madde alt sayfada da (ör. `/roles/5`) doğru işaretlenir
+  - Kabul: TR/EN birlikte, iki temada, dar ekranda sekme şeridi yatay kayar (sayfa taşmaz — `ui-shots` ölçüm 1)
+- [ ] Personel çalışma alanı: dört liste ve içe aktarma sekmeye girer (ADR-134 madde 2–3)
+  - Kabul: `/identities`, `/imports`, `/upcoming`, `/interventions`, `/deletions`, `/used-names` aynı başlık + aynı sekme şeridini taşır
+  - Kabul: müdahale ve silinmeyi bekleyen sekmeleri bekleyen sayıyı rozetle gösterir; sayı sayfanın kendi sorgusundan gelir, sekme başına ek sorgu yalnızca o sayılar için ve tek ifadede
+  - Kabul: Raporlar'daki "Listeler" kartı kalkar
+- [ ] Uygulama çalışma alanı: hedefin sayfaları tek sekme şeridinde (ADR-134 madde 2)
+  - Kabul: `/targets/{id}` (Genel + Katalog), `/targets/{id}/mappings`, `/targets/{id}/manage`, `/targets/{id}/reconcile` aynı hedef başlığını ve sekmeleri taşır; Mutabakat menüsünden girilen sayfa da aynı şeridi gösterir
+  - Kabul: `auditor`ın göremeyeceği sekme (ör. yazma ekranı) şeritte de görünmez — yetki kuralı sekmeden önce
+- [ ] Raporlar: etkinlik geçmişi, filtreli (ADR-134 madde 4–5)
+  - Kabul: `GET /reports/activity` — filtreler kişi, işlemi yapan (operatör ya da "sistem"), tarih aralığı (varsayılan son 7 gün), işlem (beş kategori ya da tek olay türü), hedef sistem, sonuç; hepsi GET parametresi, adres paylaşılabilir
+  - Kabul: niyet + sonuç satırı tek satırda; sonucu olmayan niyet "sonucu bilinmiyor" rozetiyle
+  - Kabul: ikon/kategori panelin `glyph_for`'undan, etiket i18n'den — ikinci bir eşleme yazılmaz; `audit.rs`'teki olay etiketi tamlık testi geçmeye devam eder
+  - Kabul: sayfalama `identity_web::pagination` + `PAGE_SIZE`; kişi sayfası ve paneldeki akışa "tümünü gör" bağlantısı filtre dolu gelir
+  - Kabul: `auditor` görür; sayfada yazma eylemi yok; filtre değerleri yalnızca bağlı parametreyle SQL'e gider, geçersiz tarih/kimlik 400 değil boş filtre + uyarı
+  - Kabul: önce ölçüm — `load-lab.sh` sonrası satır sayısında en ağır filtre (yalnızca tarih, 90 gün) 5 sn altında mı; değilse indeks migration'ı, ölçmeden indeks yok
+  - Kabul: testler — her filtre tek başına ve birlikte, sayfa sınırı, yetkisiz 403, niyet/sonuç birleştirmesi
+- [ ] Etkinlik geçmişi CSV dışa aktarma (ADR-134 madde 4)
+  - Kabul: aynı filtrelerle `?format=csv`, ekrandaki sıra ve kolonlar; `= + - @` ile başlayan hücre kaçırılır (CSV enjeksiyonu), test bunu sınar
+  - Kabul: dışa aktarmanın kendisi denetime girer (kim, hangi filtreyle, kaç satır)
+- [ ] Raporlar: yetki dökümü (ADR-134 madde 6)
+  - Kabul: rol → kişiler ve hedef grubu → kişiler; erişim gözden geçirmesi için CSV; yalnızca var olan tablolardan
+- [ ] Raporlar: ayrılmış ama açık hesaplar (ADR-134 madde 6)
+  - Kabul: `ayrıldı` kimliğin hedefte hâlâ etkin görünen hesabı (son mutabakat bulgusuna göre) ve kaç gündür açık olduğu; ADR-051 metriğiyle aynı tanım, ikinci bir tanım yazılmaz
+- [ ] Kapanış: güvenlik ve test
+  - (1a'daki kapanış şablonunun aynısı; ek olarak `ui-shots` iki tema × iki genişlikte bulgu yok)
+
+---
+
 ## Bende değil: kullanıcı kararı, terminali veya ölçümü bekleyen kutucuklar
 
 > Üçü de yazılı ve hazır; ilerlemesi bana bağlı değil (biri kullanıcının terminalini, biri gerçek AD'de ikinci bir servis hesabını, biri eksik gelen spec'i bekliyor). Sıranın sonunda duruyorlar ki "ilk işaretlenmemiş kutucuktan devam et" kuralı yapılabilir işe denk gelsin. Engeli kalkan kutucuk yukarıdaki sıraya taşınır.
@@ -1213,13 +1252,11 @@ Kurallar:
   - Not: replikasyon sorusu (W9) ikinci bir DC istiyor; bu lab'da ölçülemez, kapsam dışı bırakıldı
 
 
-### Raporlar: tek sayfa akışı (ADR-119 C) — spec bekliyor
+### Raporlar: tek sayfa akışı (ADR-119 C) — ADR-134'e taşındı
 
-- [ ] Raporlar: tek sayfa akışı (ADR-119 C)
-  - **Engel:** spec eksik geldi — altı raporun adı ve kutucukların davranışı gelmedi. Kullanıcı metni tamamlanmadan başlanmaz
+- Raporlar: tek sayfa akışı (ADR-119 C) — **yerine geçti:** spec 2026-10-08'de geldi, iş "Sekmeli çalışma alanları ve etkinlik geçmişi (ADR-134)" bölümünde
+  - **Engel (eski):** spec eksik geldi — altı raporun adı ve kutucukların davranışı gelmedi. Kullanıcı metni tamamlanmadan başlanmaz
   - Kabul: rapor seçilince başka sayfaya gidilmiyor, içerik kutucukların altında açılıyor; Mutabakat ve Listeler kartları kalkıyor; altı rapor tek satırda kutucuk
-- [ ] Kapanış: güvenlik ve test
-  - (1a'daki kapanış şablonunun aynısı)
 
 ---
 

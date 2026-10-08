@@ -44,6 +44,7 @@
 - Denetim kaydının stdout kopyası todo'da kapanır
 - Güvenlik kontrol listesi teste bağlanır, kanıtı olmayan maddeler kutucuğa döner
 - Eşleme düzeltmesi ve iş göstergesi kutuları Windows AD'ye ertelendi
+- Sekmeli çalışma alanları ve filtreli etkinlik geçmişi todo'ya girdi (ADR-134)
 
 ### Düzeltmeler
 
