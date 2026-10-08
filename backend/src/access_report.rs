@@ -168,7 +168,9 @@ struct Params {
 }
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/reports/access", get(page))
+    Router::new()
+        .route("/reports/access", get(page))
+        .route("/reports/departed", get(departed_page))
 }
 
 async fn page(
@@ -231,6 +233,74 @@ async fn page(
         .into_response()
 }
 // --- END FEATURE: access-report ---
+
+// --- START FEATURE: departed-open-report ---
+// Ayrilmis ama acik hesaplar (ADR-134 madde 6): ADR-052 metriginin sayidigi
+// baglantilarin kendisi — kosul `metrics::departed_unclosed_from!`, ikinci tanim
+// yok. Son mutabakat bulgusu hedefte hesabin ne gorundugunu soyler.
+
+/// identity_id, kisi, sicil, hedef, hesap, ayrilis gunu, kac gundur acik,
+/// uygulanan durum (bos = hic uygulanmadi), son taramada gorunen
+type DepartedRow = (
+    i64,
+    String,
+    String,
+    String,
+    String,
+    String,
+    i64,
+    String,
+    String,
+);
+
+const DEPARTED_SQL: &str = concat!(
+    "SELECT i.id, btrim(i.given_name || ' ' || i.surname), coalesce(i.employee_number, ''), \
+     t.name, coalesce(f.account_name, l.external_id), \
+     to_char(i.end_at AT TIME ZONE $1, 'YYYY-MM-DD'), \
+     floor(EXTRACT(EPOCH FROM now() - i.end_at) / 86400)::bigint, \
+     coalesce(l.applied_state, ''), \
+     CASE WHEN f.id IS NULL THEN 'unscanned' WHEN f.kind = 'missing' THEN 'missing' \
+          WHEN f.enabled THEN 'enabled' ELSE 'disabled' END ",
+    crate::metrics::departed_unclosed_from!(),
+    " ORDER BY i.end_at, 2, t.id"
+);
+
+#[derive(Template)]
+#[template(path = "departed_open.html")]
+struct DepartedTemplate {
+    lang: Lang,
+    shell: Shell,
+    tabs: Tabs,
+    rows: Vec<DepartedRow>,
+}
+
+async fn departed_page(
+    OperatorSession(op): OperatorSession,
+    State(state): State<AppState>,
+) -> Response {
+    if !allowed(&op, &crate::shell::AUTHORITY_ORDER) {
+        return forbidden(op.lang);
+    }
+    let tz = match state.time_zone().await {
+        Ok(tz) => tz,
+        Err(response) => return *response,
+    };
+    let rows = match sqlx::query_as(DEPARTED_SQL)
+        .bind(&tz)
+        .fetch_all(&state.pool)
+        .await
+    {
+        Ok(rows) => rows,
+        Err(e) => return internal("ayrılmış ama açık hesaplar okunamadı", e),
+    };
+    render(&DepartedTemplate {
+        lang: op.lang,
+        shell: Shell::of(&op),
+        tabs: Tabs::new(op.lang, "nav.reports", &REPORT_TABS, "/reports/departed"),
+        rows,
+    })
+}
+// --- END FEATURE: departed-open-report ---
 
 #[cfg(test)]
 mod tests {
@@ -401,6 +471,96 @@ mod tests {
         );
         let none = crate::test_support::operator_cookie(&pool, "denetci", &[]).await;
         assert_eq!(get("/reports/access", none).await.0, StatusCode::FORBIDDEN);
+
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
+    /// Rapor metrikle ayni kumeyi listeler: bir saatten yeni ayrilis ve
+    /// kapatilmis baglanti disarida; son bulgu "etkin" diye basilir.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn departed_open_lists_what_the_metric_counts() {
+        use axum::body::Body;
+        use axum::http::{header, Request, StatusCode};
+        use tower::ServiceExt;
+
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        let [ayse, ali] = crate::test_support::seed_two_identities(&pool).await;
+        // Ayse 3 gun once ayrildi, hesap AD'de etkin; Ali 30 dk once (metrik
+        // henuz saymaz); ikinci hedefte Ayse'nin baglantisi kapatilmis
+        sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
+            "UPDATE identities SET end_at = now() - interval '3 days 2 hours' WHERE id = {ayse}; \
+             UPDATE identities SET end_at = now() - interval '30 minutes' WHERE id = {ali}; \
+             INSERT INTO target_systems (kind, name, delete_requires_approval) VALUES ('zimbra', 'İkinci AD', FALSE); \
+             INSERT INTO account_links (identity_id, target_system_id, external_id, origin, mode, applied_state) \
+               SELECT {ayse}, id, 'g-ayse', 'provisioned', 'managed', 'active' FROM target_systems WHERE kind = 'ad'; \
+             INSERT INTO account_links (identity_id, target_system_id, external_id, origin, mode, applied_state) \
+               SELECT {ayse}, id, 'g-ayse2', 'provisioned', 'managed', 'departed' FROM target_systems WHERE name = 'İkinci AD'; \
+             INSERT INTO account_links (identity_id, target_system_id, external_id, origin, mode, applied_state) \
+               SELECT {ali}, id, 'g-ali', 'provisioned', 'managed', 'active' FROM target_systems WHERE kind = 'ad'; \
+             INSERT INTO read_jobs (kind, target_system_id, status, finished_at) \
+               SELECT 'reconcile', id, 'succeeded', now() FROM target_systems WHERE kind = 'ad'; \
+             INSERT INTO reconcile_findings (target_system_id, read_job_id, kind, external_id, account_name, enabled, identity_id) \
+               SELECT target_system_id, id, 'managed', 'g-ayse', 'ayse.yilmaz', TRUE, {ayse} FROM read_jobs;"
+        )))
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let rows: Vec<DepartedRow> = sqlx::query_as(DEPARTED_SQL)
+            .bind("Europe/Istanbul")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        let s = crate::metrics::snapshot(&pool, (50, 50, 50)).await.unwrap();
+        assert_eq!(rows.len() as i64, s.departed_unclosed, "metrikle aynı küme");
+        assert_eq!(rows.len(), 1);
+        let (id, _, _, _, account, _, days, applied, seen) = &rows[0];
+        assert_eq!(
+            (
+                *id,
+                account.as_str(),
+                *days,
+                applied.as_str(),
+                seen.as_str()
+            ),
+            (ayse, "ayse.yilmaz", 3, "active", "enabled")
+        );
+
+        let app = crate::web::routes()
+            .with_state(crate::web::test_state(pool.clone(), "https://localhost"));
+        let get = |cookie: String| {
+            let app = app.clone();
+            async move {
+                let res = app
+                    .oneshot(
+                        Request::builder()
+                            .uri("/reports/departed")
+                            .header(header::COOKIE, cookie)
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                let status = res.status();
+                let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+                    .await
+                    .unwrap();
+                (status, String::from_utf8(body.to_vec()).unwrap())
+            }
+        };
+        let auditor = crate::test_support::operator_cookie(&pool, "denetci", &["auditor"]).await;
+        let (status, page) = get(auditor).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(page.contains(&format!("href=\"/identities/{ayse}\"")));
+        assert!(!page.contains(&format!("href=\"/identities/{ali}\"")));
+        assert!(page.contains("3 gün") && page.contains("ayse.yilmaz"));
+        assert!(
+            page.contains(r#"href="/reports/departed" aria-current="page""#),
+            "{page}"
+        );
+        let none = crate::test_support::operator_cookie(&pool, "denetci", &[]).await;
+        assert_eq!(get(none).await.0, StatusCode::FORBIDDEN);
 
         crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
     }

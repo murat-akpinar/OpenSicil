@@ -233,4 +233,5 @@
 - Raporlar'a filtreli etkinlik geçmişi girdi (kişi, yapan, tarih, işlem, hedef, sonuç)
 - Etkinlik geçmişi aynı filtrelerle CSV olarak indirilir, indirme denetime girer
 - Raporlar'a yetki dökümü girdi (rol ve grup başına kişiler, CSV)
+- Raporlar'a ayrılmış ama açık hesaplar girdi (metrikle tek tanım)
 

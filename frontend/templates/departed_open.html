@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}{{ lang.t("nav.departed_open") }} — OpenSicil{% endblock %}
+{% block content %}
+{% include "tabs.html" %}
+{# ADR-134 madde 6: ADR-052 metriginin saydigi baglantilar. Yazma eylemi yok. #}
+<div class="page-head">
+  <div>
+    <h1 class="h1">{{ lang.t("nav.departed_open") }}</h1>
+    <p class="sub">{{ lang.t("departed.sub") }}</p>
+  </div>
+</div>
+
+{% if rows.is_empty() %}
+<div class="empty">
+  <span class="ico-tile ico-tile-lg"><i class="ico ico-check" aria-hidden="true"></i></span>
+  <p class="empty-hint">{{ lang.t("departed.empty") }}</p>
+</div>
+{% else %}
+<div class="card tbl-scroll p-0">
+  <table class="tbl">
+    <thead><tr>
+      <th>{{ lang.t("field.person") }}</th>
+      <th>{{ lang.t("field.target") }}</th>
+      <th>{{ lang.t("reconcile.account") }}</th>
+      <th>{{ lang.t("deletions.departed_on") }}</th>
+      <th>{{ lang.t("departed.days_open") }}</th>
+      <th>{{ lang.t("person.applied") }}</th>
+      <th>{{ lang.t("departed.seen") }}</th>
+    </tr></thead>
+    <tbody>
+    {% for (id, person, employee_number, target, account, departed_on, days, applied, seen) in rows %}
+      <tr>
+        <td><a class="link" href="/identities/{{ id }}">{{ person }}</a>{% if !employee_number.is_empty() %} <span class="code">{{ employee_number }}</span>{% endif %}</td>
+        <td>{{ target }}</td>
+        <td class="code">{{ account }}</td>
+        <td class="whitespace-nowrap">{{ departed_on }}</td>
+        <td class="whitespace-nowrap">{{ lang.t1("departed.days_n", days) }}</td>
+        <td class="muted">{% if applied.is_empty() %}—{% else %}{{ lang.key("state", applied) }}{% endif %}</td>
+        <td><span class="badge badge-{% if seen == "enabled" %}warn{% else if seen == "disabled" %}ok{% else %}info{% endif %}">{{ lang.key("departedseen", seen) }}</span></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

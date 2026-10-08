@@ -43,9 +43,10 @@ const CSV_LIMIT: i64 = 100_000;
 
 /// Raporlar calisma alaninin sekmeleri (ADR-134 madde 2); ayrilmis ama acik
 /// raporu kendi kutucugunda eklenir.
-pub(crate) const REPORT_TABS: [(&str, &str); 3] = [
+pub(crate) const REPORT_TABS: [(&str, &str); 4] = [
     ("/reports/activity", "nav.activity"),
     ("/reports/access", "nav.access"),
+    ("/reports/departed", "nav.departed_open"),
     ("/reports", "reports.coverage"),
 ];
 

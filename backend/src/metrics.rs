@@ -42,15 +42,28 @@ pub struct Snapshot {
 
 const COUNTER_CLASSES: [&str; 3] = ["destructive", "grant", "first_password"];
 
-pub async fn snapshot(pool: &PgPool, limits: (u32, u32, u32)) -> Result<Snapshot, sqlx::Error> {
-    let departed_unclosed: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM account_links l JOIN identities i ON i.id = l.identity_id \
+/// ADR-052 "ayrilmis ama kapatilamamis" tek tanim: metrik ve rapor (ADR-134
+/// madde 6) ayni kosulu okur. Bulgu (`f`) yalnizca rapor icin; hedef+hesap
+/// tekil oldugundan sayimi degistirmez.
+macro_rules! departed_unclosed_from {
+    () => {
+        "FROM account_links l \
+         JOIN identities i ON i.id = l.identity_id \
+         JOIN target_systems t ON t.id = l.target_system_id \
+         LEFT JOIN reconcile_findings f \
+           ON f.target_system_id = l.target_system_id AND f.external_id = l.external_id \
          WHERE l.mode = 'managed' AND l.deleted_by_us_at IS NULL AND i.deleted_at IS NULL \
            AND i.end_at IS NOT NULL AND i.end_at <= now() - interval '1 hour' \
-           AND COALESCE(l.applied_state, '') NOT IN ('departed', 'deleted')",
-    )
-    .fetch_one(pool)
-    .await?;
+           AND COALESCE(l.applied_state, '') NOT IN ('departed', 'deleted')"
+    };
+}
+pub(crate) use departed_unclosed_from;
+
+pub async fn snapshot(pool: &PgPool, limits: (u32, u32, u32)) -> Result<Snapshot, sqlx::Error> {
+    let departed_unclosed: i64 =
+        sqlx::query_scalar(concat!("SELECT count(*) ", departed_unclosed_from!()))
+            .fetch_one(pool)
+            .await?;
     let (needs_intervention, oldest_open_job_age): (i64, i64) = sqlx::query_as(
         "SELECT count(*) FILTER (WHERE status = 'needs_intervention'), \
            COALESCE(EXTRACT(EPOCH FROM now() - min(created_at) \
