@@ -22,13 +22,28 @@ pub async fn check_schema_ready(pool: &PgPool) -> Result<(), String> {
         return Err("migrations hiç çalıştırılmamış".to_string());
     }
 
-    let failed_migrations: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations WHERE success = false")
-            .fetch_one(pool)
-            .await
-            .map_err(|e| format!("migration durumu okunamadı: {e}"))?;
+    let (failed_migrations, applied): (i64, i64) = sqlx::query_as(
+        "SELECT COUNT(*) FILTER (WHERE NOT success), \
+                COALESCE(MAX(version) FILTER (WHERE success), 0) FROM _sqlx_migrations",
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|e| format!("migration durumu okunamadı: {e}"))?;
 
-    schema_readiness(failed_migrations)
+    schema_readiness(failed_migrations)?;
+    schema_current(applied, crate::common_settings::SCHEMA_VERSION)
+}
+
+/// ADR-061: eski semaya karsi acilmak sessiz bozulmadir (eksik kolona yazan sorgu ilk
+/// istekte duser); daha yeni sema geri donus icin kabul edilir.
+fn schema_current(applied: i64, expected: i64) -> Result<(), String> {
+    if applied < expected {
+        Err(format!(
+            "şema eski: veritabanında migration {applied}, binary {expected} bekliyor — önce migrate"
+        ))
+    } else {
+        Ok(())
+    }
 }
 
 fn schema_readiness(failed_migrations: i64) -> Result<(), String> {
@@ -60,6 +75,16 @@ mod tests {
             "NameErr: best match of:\n"
         );
         assert_eq!(pg_text("8 OU, 20 grup"), "8 OU, 20 grup");
+    }
+
+    #[test]
+    fn older_schema_is_refused_newer_is_accepted() {
+        assert!(schema_current(33, 34).is_err());
+        assert!(schema_current(34, 34).is_ok());
+        assert!(
+            schema_current(35, 34).is_ok(),
+            "geri dönüşte yeni şema kabul"
+        );
     }
 
     #[test]
@@ -118,6 +143,16 @@ mod tests {
             .await
             .expect("migrations tablosu oluşturulamadı");
 
+        let old = check_schema_ready(&pool).await;
+        assert!(
+            old.as_ref().is_err_and(|e| e.contains("şema eski")),
+            "boş migrations tablosu eski şemadır: {old:?}"
+        );
+        sqlx::query("INSERT INTO _sqlx_migrations (version, success) VALUES ($1, true)")
+            .bind(crate::common_settings::SCHEMA_VERSION)
+            .execute(&pool)
+            .await
+            .expect("güncel migration satırı eklenemedi");
         let ready = check_schema_ready(&pool).await;
         assert!(
             ready.is_ok(),

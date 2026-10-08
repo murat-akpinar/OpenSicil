@@ -55,6 +55,10 @@ pub fn check(name: &str, raw: &str) -> Result<String, String> {
     }
 }
 
+/// ADR-061 madde 3: binary'nin bekledigi en yuksek migration (`backend/migrations/NNNN_*`).
+/// Veritabani bundan eskiyse servis acilmaz; backend testi sabiti dizinle karsilastirir.
+pub const SCHEMA_VERSION: i64 = 34;
+
 /// Gece taramasinin saatleri (ADR-124 kurallari, yeri ADR-131). Worker okur; backend
 /// kayitta ayni kurali cagirdigi icin ikiz dosyada.
 pub const SCAN_AT: &str = "RECONCILE_SCAN_AT";

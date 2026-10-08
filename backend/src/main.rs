@@ -111,6 +111,18 @@ mod tests {
         }
     }
 
+    // ADR-061: sema surumu sabiti migration dizinindeki en yuksek numarayla ayni;
+    // yeni migration acip sabiti unutmak bu testi kirar.
+    #[test]
+    fn schema_version_matches_the_newest_migration() {
+        let newest = std::fs::read_dir("migrations")
+            .expect("migrations dizini okunamadı")
+            .filter_map(|e| e.ok()?.file_name().to_str()?.get(..4)?.parse::<i64>().ok())
+            .max()
+            .expect("migration yok");
+        assert_eq!(common_settings::SCHEMA_VERSION, newest);
+    }
+
     // ADR-070: paylasilan crate yok, iki crate'te birebir ayni dosyalar var.
     // Docker build context'inde worker dizini yoktur; orada test atlanir.
     #[test]

@@ -214,4 +214,5 @@
 - Worker yazmadan önce hesabın ve grubun yönetilen kapsamda olduğunu AD'den denetler
 - Operatör kendi kimlik kaydında rol değiştiremez
 - Yazıcı GUID'i yazma hedefi olarak reddeder, sadece-boşsa-yaz kuralı teste bağlanır
+- Veritabanı binary'nin beklediği şemadan eskiyse backend ve worker açılmaz
 
