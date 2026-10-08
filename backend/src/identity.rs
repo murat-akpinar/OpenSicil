@@ -327,23 +327,57 @@ pub async fn similar_name_exists(
 
 /// Ad-soyadi (Turkce harf duyarsiz) ayni olan silinmemis ilk kimlik:
 /// (id, "Ad Soyad", sicil no). CSV onizlemesi "olasi mukerrer" listesi icin (ADR-042).
+// Ad karsilastirmasinin tek kaynagi: Turkce buyuk harfler katlanir, sonra kucuk harf.
+macro_rules! folded {
+    ($column:literal) => {
+        concat!("lower(translate(", $column, ", 'IİıŞĞÜÖÇ', 'iiişğüöç'))")
+    };
+}
+
 pub async fn similar_person(
     pool: &PgPool,
     given_name: &str,
     surname: &str,
 ) -> Result<Option<(i64, String, String)>, sqlx::Error> {
-    sqlx::query_as(
-        "SELECT id, given_name || ' ' || surname, COALESCE(employee_number, '') \
-         FROM identities WHERE deleted_at IS NULL \
-         AND lower(translate(given_name, 'IİıŞĞÜÖÇ', 'iiişğüöç')) \
-           = lower(translate($1, 'IİıŞĞÜÖÇ', 'iiişğüöç')) \
-         AND lower(translate(surname, 'IİıŞĞÜÖÇ', 'iiişğüöç')) \
-           = lower(translate($2, 'IİıŞĞÜÖÇ', 'iiişğüöç')) ORDER BY id LIMIT 1",
-    )
-    .bind(given_name)
-    .bind(surname)
-    .fetch_optional(pool)
-    .await
+    let found = similar_people(pool, &[(given_name.to_string(), surname.to_string())]).await?;
+    Ok(found.into_iter().next().flatten())
+}
+
+/// Toplu hali (CSV onizlemesi): her ad-soyad icin en kucuk id'li silinmemis eslesme,
+/// girdiyle ayni sirada. Tek sorgu — satir basina sorgu 20.000 kimlikte 1.000 satiri
+/// 16 sn'de tariyordu (2026-10-08 olcumu).
+pub async fn similar_people(
+    pool: &PgPool,
+    names: &[(String, String)],
+) -> Result<Vec<Option<(i64, String, String)>>, sqlx::Error> {
+    let (given, surname): (Vec<&str>, Vec<&str>) =
+        names.iter().map(|(g, s)| (g.as_str(), s.as_str())).unzip();
+    let rows: Vec<(i64, i64, String, String)> = sqlx::query_as(concat!(
+        "SELECT DISTINCT ON (n.idx) n.idx, i.id, i.given_name || ' ' || i.surname, \
+         COALESCE(i.employee_number, '') \
+         FROM unnest($1::text[], $2::text[]) WITH ORDINALITY AS n(given, surname, idx) \
+         JOIN identities i ON i.deleted_at IS NULL \
+          AND ",
+        folded!("i.given_name"),
+        " = ",
+        folded!("n.given"),
+        " AND ",
+        folded!("i.surname"),
+        " = ",
+        folded!("n.surname"),
+        " ORDER BY n.idx, i.id"
+    ))
+    .bind(&given)
+    .bind(&surname)
+    .fetch_all(pool)
+    .await?;
+    let mut found = vec![None; names.len()];
+    for (idx, id, person, number) in rows {
+        if let Some(slot) = usize::try_from(idx - 1).ok().and_then(|i| found.get_mut(i)) {
+            *slot = Some((id, person, number));
+        }
+    }
+    Ok(found)
 }
 
 // Her hedef icin kimlik bazli is (ADR-016); connector'i olmayan hedefte

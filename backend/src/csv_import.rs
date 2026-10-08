@@ -1075,21 +1075,27 @@ async fn possible_duplicates(
     pool: &PgPool,
     rows: &[RowPlan],
 ) -> Result<Vec<Duplicate>, sqlx::Error> {
-    let mut found = Vec::new();
-    for row in rows.iter().filter(|r| r.action == Action::New) {
-        let similar = identity::similar_person(pool, &row.new.given_name, &row.new.surname).await?;
-        if let Some((existing_id, existing_person, existing_number)) = similar {
-            found.push(Duplicate {
+    let new: Vec<&RowPlan> = rows.iter().filter(|r| r.action == Action::New).collect();
+    let names: Vec<(String, String)> = new
+        .iter()
+        .map(|r| (r.new.given_name.clone(), r.new.surname.clone()))
+        .collect();
+    let similar = identity::similar_people(pool, &names).await?;
+    Ok(new
+        .into_iter()
+        .zip(similar)
+        .filter_map(|(row, similar)| {
+            let (existing_id, existing_person, existing_number) = similar?;
+            Some(Duplicate {
                 line: row.line,
                 employee_number: row.employee_number.clone(),
                 person: row.person.clone(),
                 existing_id,
                 existing_person,
                 existing_number,
-            });
-        }
-    }
-    Ok(found)
+            })
+        })
+        .collect())
 }
 
 // ---- uygulama: tek transaction (ADR-018 "hatali satir varsa hicbiri"nin yazma yarisi) ----

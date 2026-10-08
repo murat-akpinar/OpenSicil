@@ -71,6 +71,7 @@
 ### Performans
 
 - Rol ve departman yayımı işleri tek sorguyla açar (20.000 kimlikte 79 sn → 3 sn)
+- CSV önizlemesi olası mükerrerleri tek sorguda bulur (20.000 satırda 314 sn → 0,3 sn)
 
 ### Testler
 
