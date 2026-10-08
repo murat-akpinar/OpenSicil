@@ -431,6 +431,36 @@ async fn resolve_names(
     }
 }
 
+// --- START FEATURE: write-scope-guard ---
+// docs/07 + ADR-052: kapsam yazma aninda, AD'den okunan gercek DN'e bakilarak da
+// denetlenir — katalog satirina ya da GUID'e guvenilmez (satir veritabanina elle
+// yazilmis ya da hesap kapsam disina tasinmis olabilir). Ihlal mudahaledir, hedefe
+// yazilmaz.
+// ponytail: ic ice yonetici grubu (adminCount, SID) tespiti LDAP okumasi ister,
+// katalog taramasinda kalir; yazma aninda yalnizca kapsam (DN) denetlenir.
+fn scope_of(c: &AdJob<'_>) -> Result<ad::ManagedScope, JobError> {
+    ad::parse_scope(|n| c.env.settings.get(n).cloned()).map_err(JobError::Failed)
+}
+
+/// Saf: hesap kullanici OU'lari ya da pasif OU altinda, grup grup OU'lari altinda olmali.
+fn out_of_scope(scope: &ad::ManagedScope, dn: &str, group: bool) -> Option<String> {
+    let inside = match group {
+        true => ad::under_any(dn, &scope.group_ous),
+        false => {
+            ad::under_any(dn, &scope.user_ous)
+                || scope
+                    .passive_ou
+                    .as_ref()
+                    .is_some_and(|p| ad::under_any(dn, std::slice::from_ref(p)))
+        }
+    };
+    (!inside).then(|| {
+        let what = if group { "grup" } else { "hesap" };
+        format!("{what} yönetilen kapsamın dışında, yazılmadı (ADR-052): {dn}")
+    })
+}
+// --- END FEATURE: write-scope-guard ---
+
 async fn catalog_guid(pool: &PgPool, item_id: i64) -> Result<Option<String>, JobError> {
     sqlx::query_scalar(
         "SELECT external_id FROM catalog_items WHERE id = $1 AND missing_since IS NULL",
@@ -864,6 +894,7 @@ async fn add_memberships(
     member_dn: &str,
 ) -> Result<usize, JobError> {
     let mut added = 0;
+    let scope = scope_of(c)?;
     for item in &c.desired.memberships {
         let Some(guid) = catalog_guid(c.pool, *item).await? else {
             continue; // kayip katalog ogesi: islem uretilmez (docs/03)
@@ -871,6 +902,9 @@ async fn add_memberships(
         let Some(group_dn) = ad_account::dn_by_guid(ldap, &guid).await? else {
             continue;
         };
+        if let Some(why) = out_of_scope(&scope, &group_dn, true) {
+            return Err(JobError::NeedsIntervention(why));
+        }
         let op = WriteOp::AddMember {
             group_dn,
             member_dn: member_dn.to_string(),
@@ -944,6 +978,9 @@ async fn reconcile_existing(
             link.external_id
         ));
     };
+    if let Some(why) = out_of_scope(&scope_of(c)?, &account.dn, false) {
+        return Err(JobError::NeedsIntervention(why));
+    }
     let state = state_name(c.desired.state);
     let transition = link.applied_state.as_deref() != Some(state);
     let plan = plan_existing(c, ldap, link, &account, enabled).await?;
@@ -1376,10 +1413,14 @@ async fn change_memberships(
     add: bool,
 ) -> Result<usize, JobError> {
     let mut changed = 0;
+    let scope = scope_of(c)?;
     for guid in guids {
         let Some(group_dn) = ad_account::dn_by_guid(ldap, guid).await? else {
             continue;
         };
+        if let Some(why) = out_of_scope(&scope, &group_dn, true) {
+            return Err(JobError::NeedsIntervention(why));
+        }
         let member_dn = member_dn.to_string();
         let (op, class) = if add {
             (
@@ -1546,6 +1587,25 @@ async fn sync_attributes(c: &AdJob<'_>, ldap: &mut Ldap, dn: &str) -> Result<Str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn writes_stay_inside_the_managed_scope() {
+        let scope = ad::ManagedScope {
+            user_ous: vec!["OU=Personel,DC=x".into()],
+            passive_ou: Some("OU=Pasif,DC=x".into()),
+            group_ous: vec!["OU=Gruplar,DC=x".into()],
+        };
+        assert!(out_of_scope(&scope, "CN=a,OU=Personel,DC=x", false).is_none());
+        assert!(out_of_scope(&scope, "CN=a,OU=Pasif,DC=x", false).is_none());
+        assert!(out_of_scope(&scope, "CN=a,CN=Users,DC=x", false).is_some());
+        assert!(out_of_scope(&scope, "CN=GG,OU=Gruplar,DC=x", true).is_none());
+        let why = out_of_scope(&scope, "CN=Domain Admins,CN=Users,DC=x", true).unwrap();
+        assert!(
+            why.contains("grup") && why.contains("CN=Domain Admins"),
+            "{why}"
+        );
+        assert!(out_of_scope(&scope, "CN=a,OU=Personel,DC=x", true).is_some());
+    }
     use crate::test_support;
 
     // Lab senaryolari freni sinamaz; sayaclar bol tutulur (fren testi counters.rs'te).
@@ -2515,6 +2575,25 @@ mod tests {
 
         let again = run_job(&pool, &job, &env(false)).await.unwrap();
         assert!(again.contains("zaten uyumlu"), "{again}");
+        // write-scope-guard: kapsam baska OU'ya daralinca ayni hesap yazilmaz, mudahale
+        let mut narrowed = settings.clone();
+        narrowed.insert(
+            "AD_MANAGED_USER_OUS".into(),
+            "OU=Baska,DC=opensicil,DC=lab".into(),
+        );
+        let outside = run_job(
+            &pool,
+            &job,
+            &EngineEnv {
+                settings: &narrowed,
+                ..env(false)
+            },
+        )
+        .await;
+        assert!(
+            matches!(&outside, Err(JobError::NeedsIntervention(w)) if w.contains("kapsamın dışında")),
+            "{outside:?}"
+        );
         let intents: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM audit_log WHERE operation_class IS NOT NULL")
                 .fetch_one(&pool)

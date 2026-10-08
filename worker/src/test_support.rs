@@ -216,6 +216,19 @@ pub async fn configure_lab_ad(
     .execute(pool)
     .await
     .expect("AD ayarı yazılamadı");
+    // Yazma aninda kapsam denetlenir (write-scope-guard): lab kapsami seed.sh'in agaci
+    set_setting(
+        pool,
+        "AD_MANAGED_USER_OUS",
+        "OU=Personel,DC=opensicil,DC=lab",
+    )
+    .await;
+    set_setting(
+        pool,
+        "AD_MANAGED_GROUP_OUS",
+        "OU=Gruplar,DC=opensicil,DC=lab",
+    )
+    .await;
     crate::ad::AdConfig {
         urls: crate::ad::parse_urls(url),
         bind_dn: bind_dn.to_string(),
