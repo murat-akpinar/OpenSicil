@@ -5,6 +5,7 @@
 
 # --- gezinme ve kabuk ---
 nav.identities = "Personel"
+nav.identity_list = "Liste"
 nav.upcoming = "Yaklaşan bitişler"
 nav.roles = "Roller"
 nav.departments = "Departmanlar"
@@ -54,11 +55,9 @@ identities.window_departed = "Son {} günde ayrılan {} kişi listeleniyor."
 identities.window_changed = "Son {} günde görevi değişen {} kişi listeleniyor."
 
 # --- raporlar ---
-reports.sub = "Hesap kapsamı, tarihli listeler ve bekleyen işler."
-reports.lists = "Listeler"
+reports.sub = "Hesap kapsamı ve bekleyen işler."
 reports.pending = "Bekleyen iş"
 reports.pending_foot = "{} müdahale · {} silme onayı · {} sahiplenme"
-reports.lists_hint = "Tarihe bağlı işler ve ad kayıtları."
 reports.managed = "Yönetilen hesap"
 reports.observed_n = "{} gözlemde"
 reports.coverage = "Hesap kapsamı"

@@ -5,6 +5,7 @@
 
 # --- navigation and shell ---
 nav.identities = "Personnel"
+nav.identity_list = "List"
 nav.upcoming = "Upcoming ends"
 nav.roles = "Roles"
 nav.departments = "Departments"
@@ -54,11 +55,9 @@ identities.window_departed = "Last {} days: showing {} people who left."
 identities.window_changed = "Last {} days: showing {} people whose role changed."
 
 # --- reports ---
-reports.sub = "Account coverage, dated lists and pending work."
-reports.lists = "Lists"
+reports.sub = "Account coverage and pending work."
 reports.pending = "Pending work"
 reports.pending_foot = "{} interventions · {} deletion approvals · {} adoptions"
-reports.lists_hint = "Date-driven work and name records."
 reports.managed = "Managed accounts"
 reports.observed_n = "{} observed"
 reports.coverage = "Account coverage"

@@ -1379,6 +1379,7 @@ pub struct ColumnGuide {
 #[derive(Template)]
 #[template(path = "import.html")]
 struct ImportTemplate {
+    tabs: crate::shell::Tabs,
     lang: Lang,
     shell: Shell,
     notice: Notice,
@@ -1472,8 +1473,12 @@ fn keys_of(state: &AppState) -> Keys<'_> {
 }
 
 async fn render_page(state: &AppState, op: &Operator, notice: Notice) -> Response {
-    match list_pending(&state.pool).await {
-        Ok(pending) => render(&ImportTemplate {
+    match tokio::try_join!(
+        list_pending(&state.pool),
+        crate::identity_web::personnel_tabs(&state.pool, op.lang, "/imports")
+    ) {
+        Ok((pending, tabs)) => render(&ImportTemplate {
+            tabs,
             lang: op.lang,
             shell: Shell::of(op),
             notice,

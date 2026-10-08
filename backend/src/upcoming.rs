@@ -85,6 +85,7 @@ struct DaysQuery {
 #[derive(Template)]
 #[template(path = "upcoming.html")]
 struct UpcomingTemplate {
+    tabs: crate::shell::Tabs,
     shell: Shell,
     lang: Lang,
     days: i32,
@@ -101,8 +102,12 @@ async fn page(
         Err(response) => return *response,
     };
     let days = q.days.unwrap_or(DEFAULT_DAYS).clamp(1, MAX_DAYS);
-    match list(&state.pool, &time_zone, days).await {
-        Ok(rows) => render(&UpcomingTemplate {
+    match tokio::try_join!(
+        list(&state.pool, &time_zone, days),
+        crate::identity_web::personnel_tabs(&state.pool, op.lang, "/upcoming")
+    ) {
+        Ok((rows, tabs)) => render(&UpcomingTemplate {
+            tabs,
             lang: op.lang,
             shell: Shell::of(&op),
             days,

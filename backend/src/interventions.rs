@@ -110,6 +110,7 @@ fn row_from(lang: Lang, r: JobRow) -> Row {
 #[derive(Template)]
 #[template(path = "interventions.html")]
 struct InterventionsTemplate {
+    tabs: crate::shell::Tabs,
     lang: Lang,
     shell: Shell,
     rows: Vec<Row>,
@@ -125,8 +126,12 @@ async fn page(OperatorSession(op): OperatorSession, State(state): State<AppState
         Ok(tz) => tz,
         Err(response) => return *response,
     };
-    match load(&state.pool, op.lang, &time_zone).await {
-        Ok(rows) => render(&InterventionsTemplate {
+    match tokio::try_join!(
+        load(&state.pool, op.lang, &time_zone),
+        crate::identity_web::personnel_tabs(&state.pool, op.lang, "/interventions")
+    ) {
+        Ok((rows, tabs)) => render(&InterventionsTemplate {
+            tabs,
             lang: op.lang,
             shell: Shell::of(&op),
             rows,

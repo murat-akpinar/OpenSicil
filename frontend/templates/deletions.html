@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ lang.t("nav.deletions") }} — OpenSicil{% endblock %}
 {% block content %}
+{% include "tabs.html" %}
 {# ADR-024: saklama suresi dolan hesaplar; onay isteyen hedefte silme burada onaylanir #}
 <div class="page-head">
   <div>

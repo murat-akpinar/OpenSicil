@@ -1,5 +1,5 @@
 {# ADR-134 madde 1: calisma alani sekme seridi. JS yok; her sekme kendi adresi.
    Dar ekranda serit yatay kayar, sayfa tasmaz. #}
 <nav class="tabs" aria-label="{{ tabs.label }}">
-  {% for t in tabs.items %}<a class="tab" href="{{ t.href }}"{% if t.current %} aria-current="page"{% endif %}>{{ t.label }}</a>{% endfor %}
+  {% for t in tabs.items %}<a class="tab" href="{{ t.href }}"{% if t.current %} aria-current="page"{% endif %}>{{ t.label }}{% if t.count > 0 %} <span class="badge badge-warn">{{ t.count }}</span>{% endif %}</a>{% endfor %}
 </nav>

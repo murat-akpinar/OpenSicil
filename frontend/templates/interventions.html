@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ lang.t("nav.interventions") }} — OpenSicil{% endblock %}
 {% block content %}
+{% include "tabs.html" %}
 {# Kendi verisi olmayan liste: `jobs` + `identities` + `target_systems` #}
 <div class="page-head">
   <div>

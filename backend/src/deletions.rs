@@ -110,26 +110,42 @@ pub async fn load_for(
         .collect())
 }
 
-/// Onay bekleyen hesap sayisi ve en eskisinin yasi (saniye; saklama bitisinden
-/// bu yana) — ADR-024 / F-19 metrikleri, rapor kapagi sayiyi okur.
-pub async fn awaiting(pool: &PgPool) -> Result<(i64, i64), sqlx::Error> {
-    sqlx::query_as(
-        "SELECT count(*), \
-           COALESCE(EXTRACT(EPOCH FROM max(now() - (i.end_at + make_interval(days => t.retention_days))))::bigint, 0) \
-         FROM account_links l \
+/// Onay bekleyen satirin kosulu tek kaynakta: metrik ve sekme rozeti ayni sayiyi okur.
+macro_rules! awaiting_from {
+    () => {
+        "FROM account_links l \
          JOIN identities i ON i.id = l.identity_id \
          JOIN target_systems t ON t.id = l.target_system_id \
          WHERE l.mode = 'managed' AND l.deleted_by_us_at IS NULL AND i.deleted_at IS NULL \
            AND i.end_at IS NOT NULL AND NOT i.cancelled AND NOT l.deletion_approved \
            AND t.delete_requires_approval \
-           AND i.end_at + make_interval(days => t.retention_days) <= now()",
-    )
+           AND i.end_at + make_interval(days => t.retention_days) <= now()"
+    };
+}
+
+/// Onay bekleyen hesap sayisi ve en eskisinin yasi (saniye; saklama bitisinden
+/// bu yana) — ADR-024 / F-19 metrikleri, rapor kapagi sayiyi okur.
+pub async fn awaiting(pool: &PgPool) -> Result<(i64, i64), sqlx::Error> {
+    sqlx::query_as(concat!(
+        "SELECT count(*), \
+           COALESCE(EXTRACT(EPOCH FROM max(now() - (i.end_at + make_interval(days => t.retention_days))))::bigint, 0) ",
+        awaiting_from!()
+    ))
     .fetch_one(pool)
     .await
 }
 
-pub async fn awaiting_count(pool: &PgPool) -> Result<i64, sqlx::Error> {
-    Ok(awaiting(pool).await?.0)
+/// Personel seridinin iki rozeti tek ifadede (ADR-134 madde 2): mudahale
+/// bekleyen is ve onay bekleyen silme.
+pub async fn pending_counts(pool: &PgPool) -> Result<(i64, i64), sqlx::Error> {
+    sqlx::query_as(concat!(
+        "SELECT (SELECT count(*) FROM jobs WHERE status = $1), (SELECT count(*) ",
+        awaiting_from!(),
+        ")"
+    ))
+    .bind(crate::identity::INTERVENTION_STATUS)
+    .fetch_one(pool)
+    .await
 }
 
 /// Yalnizca gercekten onay bekleyen satir onaylanir (saklama dolmus, hedef onay
@@ -161,6 +177,7 @@ pub async fn approve(pool: &PgPool, pairs: &[(i64, i64)]) -> Result<Vec<(i64, i6
 #[derive(Template)]
 #[template(path = "deletions.html")]
 struct DeletionsTemplate {
+    tabs: crate::shell::Tabs,
     lang: Lang,
     shell: Shell,
     rows: Vec<Row>,
@@ -181,8 +198,12 @@ async fn render_page(
         Ok(tz) => tz,
         Err(response) => return *response,
     };
-    match load(&state.pool, &time_zone).await {
-        Ok(rows) => render(&DeletionsTemplate {
+    match tokio::try_join!(
+        load(&state.pool, &time_zone),
+        crate::identity_web::personnel_tabs(&state.pool, op.lang, "/deletions")
+    ) {
+        Ok((rows, tabs)) => render(&DeletionsTemplate {
+            tabs,
             lang: op.lang,
             shell: Shell::of(op),
             rows,
@@ -341,7 +362,7 @@ mod tests {
             "{}",
             rows[1].retention_ends
         );
-        assert_eq!(awaiting_count(&pool).await.unwrap(), 1);
+        assert_eq!(pending_counts(&pool).await.unwrap().1, 1);
         let own = load_for(&pool, "Europe/Istanbul", Some(ids[1]))
             .await
             .unwrap();
@@ -398,6 +419,16 @@ mod tests {
         assert!(
             !page.contains(r#"name="link""#),
             "auditor onay kutusu görmez"
+        );
+        // ADR-134: Personel seridi, etkin sekme silme, rozet bekleyen sayisini tasir
+        let tab = format!(
+            r#"<a class="tab" href="/deletions" aria-current="page">{} <span class="badge badge-warn">1</span></a>"#,
+            crate::i18n::DEFAULT.t("nav.deletions")
+        );
+        assert!(page.contains(&tab), "{page}");
+        assert!(
+            page.contains(r#"<a class="tab" href="/interventions">"#),
+            "mudahale sekmesi rozetsiz (sifir is)"
         );
         // ADR-111 madde 4: kisi sayfasi da hesabin onay bekledigini soyler
         let person = app
@@ -460,7 +491,7 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(audited, 1);
-        assert_eq!(awaiting_count(&pool).await.unwrap(), 0);
+        assert_eq!(pending_counts(&pool).await.unwrap().1, 0);
         let rows = load(&pool, "Europe/Istanbul").await.unwrap();
         assert_eq!(rows[0].status, APPROVED);
 

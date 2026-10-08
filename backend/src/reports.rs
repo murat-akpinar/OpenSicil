@@ -1,9 +1,8 @@
 // --- START FEATURE: reports ---
-// Raporlar girisi: hesap kapsami, yaklasan bitisler, kullanilmis adlar,
-// silinmeyi bekleyenler ve mudahale bekleyen isler tek sayfada toplanir. Kendi
-// verisi yok — var olan ekranlara giden bir kapak; menudeki dagınık maddeler
-// yerine mockup'taki tek "Raporlar" satirini karsilar. Okuma her operatorde
-// (auditor dahil).
+// Raporlar girisi: hesap kapsami, yaklasan bitisler ve bekleyen is ozeti. Kendi
+// verisi yok — var olan ekranlara giden bir kapak. Dort liste (yaklasan,
+// kullanilmis adlar, silme, mudahale) Personel seridinde (ADR-134 madde 3).
+// Okuma her operatorde (auditor dahil).
 //
 // Mutabakat burada degil: ADR-123 ile kendi menu maddesine ve `/reconcile`
 // sayfasina tasindi. "Bekleyen is" kutusu sahiplenmeyi bekleyen hesabi yine
@@ -19,7 +18,6 @@ use axum::extract::State;
 use axum::response::Response;
 use axum::routing::get;
 use axum::Router;
-use sqlx::PgPool;
 
 use crate::i18n::Lang;
 use crate::identity_web::{internal, OperatorSession};
@@ -35,13 +33,9 @@ pub struct Summary {
     pub pending: i64,
     /// Kuyrugun kirilimi, hazir cumle: sablon uc sayiyi tek tek dizmesin
     pub pending_foot: String,
-    pub interventions: i64,
-    pub deletions: i64,
     /// Yaklasan bitisler ve pencerenin gun sayisi
     pub upcoming: i64,
     pub upcoming_days: i32,
-    /// Serbest birakilmamis kullanilmis ad
-    pub used_names: i64,
     /// ADR-130: butun hedeflerin toplami ve hedef basina kirilim
     pub managed: i64,
     pub observed: i64,
@@ -80,13 +74,12 @@ async fn page(OperatorSession(op): OperatorSession, State(state): State<AppState
     // Sayilar gidilecek ekranlarin kendi yardimcilarindan okunur, kopya SQL yok:
     // rozet "3" diyorsa liste uc satir gostermek zorunda.
     let loaded = tokio::try_join!(
-        counts(&state.pool),
+        crate::deletions::pending_counts(&state.pool),
         crate::reconcile::unadopted(&state.pool),
-        crate::deletions::awaiting_count(&state.pool),
         crate::upcoming::list(&state.pool, &time_zone, crate::upcoming::DEFAULT_DAYS),
         crate::bulk_manage::coverage(&state.pool),
     );
-    let (counts, unadopted, deletions, upcoming, coverage) = match loaded {
+    let ((interventions, deletions), unadopted, upcoming, coverage) = match loaded {
         Ok(loaded) => loaded,
         Err(e) => return internal("raporlar sayfası okunamadı", e),
     };
@@ -95,20 +88,17 @@ async fn page(OperatorSession(op): OperatorSession, State(state): State<AppState
         lang: op.lang,
         shell: Shell::of(&op),
         summary: Summary {
-            pending: counts.interventions + deletions + unadopted,
+            pending: interventions + deletions + unadopted,
             pending_foot: op.lang.tn(
                 "reports.pending_foot",
                 &[
-                    &counts.interventions.to_string(),
+                    &interventions.to_string(),
                     &deletions.to_string(),
                     &unadopted.to_string(),
                 ],
             ),
-            interventions: counts.interventions,
-            deletions,
             upcoming: upcoming.len() as i64,
             upcoming_days: crate::upcoming::DEFAULT_DAYS,
-            used_names: counts.used_names,
             managed: coverage.iter().map(|c| c.managed).sum(),
             observed: coverage.iter().map(|c| c.observed).sum(),
             coverage: coverage.into_iter().map(|c| row(&op.lang, c)).collect(),
@@ -129,27 +119,6 @@ fn row(lang: &Lang, c: crate::bulk_manage::Coverage) -> CoverageRow {
     }
 }
 
-struct Counts {
-    interventions: i64,
-    used_names: i64,
-}
-
-/// Kendi yardimcisi olmayan iki sayi tek sorguda. Silme ve yaklasan bitis
-/// kendi modullerinden gelir (`deletions::awaiting_count`, `upcoming::list`):
-/// kosullari kopyalamak, ekranla rozetin sessizce ayrisma yolu olurdu.
-async fn counts(pool: &PgPool) -> Result<Counts, sqlx::Error> {
-    let row: (i64, i64) = sqlx::query_as(
-        "SELECT (SELECT count(*) FROM jobs WHERE status = $1), \
-                (SELECT count(*) FROM used_names WHERE released_at IS NULL)",
-    )
-    .bind(crate::identity::INTERVENTION_STATUS)
-    .fetch_one(pool)
-    .await?;
-    Ok(Counts {
-        interventions: row.0,
-        used_names: row.1,
-    })
-}
 // --- END FEATURE: reports ---
 
 #[cfg(test)]
@@ -160,11 +129,8 @@ mod tests {
         Summary {
             pending: 26,
             pending_foot: String::new(),
-            interventions: 1,
-            deletions: 2,
             upcoming: 0,
             upcoming_days: 30,
-            used_names: 0,
             managed: 12,
             observed: 3,
             coverage: vec![CoverageRow {
@@ -190,9 +156,9 @@ mod tests {
     /// Ozet kutusundaki sayi uc ayri listenin toplami; tek bir sayfasi yok, bu
     /// yuzden kutu baglanti olmamali. Eskiden `/interventions`e gidiyordu:
     /// "26 bekleyen is" diyen kutu bir mudahale varken bos liste aciyordu.
-    /// Her bilesen kendi satirinda, kendi sayisi ve kendi adresiyle durur.
+    /// Listeler Personel seridinde, kendi rozetleriyle (ADR-134 madde 3).
     #[test]
-    fn the_pending_box_is_not_a_link_and_each_list_carries_its_own_count() {
+    fn the_pending_box_is_not_a_link_and_the_lists_card_is_gone() {
         let page = page(summary());
         let before = page
             .split_once(crate::i18n::DEFAULT.t("reports.pending"))
@@ -202,15 +168,11 @@ mod tests {
             before.rfind("<div class=\"sum-box") > before.rfind("<a class=\"sum-box"),
             "toplam kutusu baglanti olmamali"
         );
-        let row = page
-            .split_once(r#"href="/interventions""#)
-            .expect("mudahale satiri yok")
-            .1;
-        let row = row.split_once("</a>").expect("satir kapanmamis").0;
-        assert!(
-            row.contains(">1<") && !row.contains(">26<"),
-            "mudahale satiri kendi sayisini gostermeli: {row}"
-        );
+        for list in ["/interventions", "/deletions", "/used-names"] {
+            // Menunun `data-match` oneki sayfada; aranan kartin baglantisi
+            let link = format!("href=\"{list}\"");
+            assert!(!page.contains(&link), "{list} Personel seridinde olmali");
+        }
     }
 
     /// ADR-130: kapsam satiri "kaci yonetiliyor, kaci gozlemde" der ve

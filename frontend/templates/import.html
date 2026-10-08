@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ lang.t("nav.imports") }} — OpenSicil{% endblock %}
 {% block content %}
+{% include "tabs.html" %}
 {# F-17: CSV ile toplu kimlik ice aktarma (ADR-018/023). Dosya tarayicida okunup
    metin alanina konur (app.js data-csv-into); sunucu siradan form alir. #}
 <div class="page-head">

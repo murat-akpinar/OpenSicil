@@ -89,6 +89,8 @@ pub struct Tab {
     pub href: String,
     pub label: &'static str,
     pub current: bool,
+    /// Bekleyen is rozeti; 0 ise basilmaz
+    pub count: i64,
 }
 
 impl Tabs {
@@ -107,6 +109,7 @@ impl Tabs {
                     href: href.to_string(),
                     label: lang.t(key),
                     current: *href == current,
+                    count: 0,
                 })
                 .collect(),
         }

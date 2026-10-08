@@ -89,6 +89,7 @@ pub fn routes() -> Router<AppState> {
 #[derive(Template)]
 #[template(path = "used_names.html")]
 struct UsedNamesTemplate {
+    tabs: crate::shell::Tabs,
     shell: Shell,
     lang: Lang,
     names: Vec<UsedName>,
@@ -101,8 +102,12 @@ async fn render_page(state: &AppState, op: &Operator, error: String) -> Response
         Ok(tz) => tz,
         Err(response) => return *response,
     };
-    match list(&state.pool, &time_zone).await {
-        Ok(names) => render(&UsedNamesTemplate {
+    match tokio::try_join!(
+        list(&state.pool, &time_zone),
+        crate::identity_web::personnel_tabs(&state.pool, op.lang, "/used-names")
+    ) {
+        Ok((names, tabs)) => render(&UsedNamesTemplate {
+            tabs,
             lang: op.lang,
             shell: Shell::of(op),
             names,

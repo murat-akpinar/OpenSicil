@@ -16,7 +16,7 @@ use crate::cookie::{get_cookie, OPERATOR_SESSION_COOKIE_NAME};
 use crate::i18n::Lang;
 use crate::identity::{self, FormOptions, IdentityForm, PersonPage};
 use crate::operator_session::Operator;
-use crate::shell::Shell;
+use crate::shell::{Shell, Tabs};
 use crate::web::{render, AppState};
 
 const REGISTER_AUTHORITIES: &[&str] = &["hr", "admin"];
@@ -87,6 +87,29 @@ pub fn routes() -> Router<AppState> {
 /// tam liste burada ve sayfali (N-03: 20.000 kimlik tek sayfaya basilamaz).
 pub(crate) const PAGE_SIZE: i64 = 50;
 
+/// Personel calisma alaninin sekmeleri (ADR-134 madde 2–3); rozetler mudahale
+/// ve silme sekmelerinde.
+const PERSONNEL_TABS: [(&str, &str); 6] = [
+    ("/identities", "nav.identity_list"),
+    ("/imports", "nav.imports"),
+    ("/upcoming", "nav.upcoming"),
+    ("/interventions", "nav.interventions"),
+    ("/deletions", "nav.deletions"),
+    ("/used-names", "nav.used_names"),
+];
+
+pub(crate) async fn personnel_tabs(
+    pool: &sqlx::PgPool,
+    lang: Lang,
+    current: &str,
+) -> Result<Tabs, sqlx::Error> {
+    let (interventions, deletions) = crate::deletions::pending_counts(pool).await?;
+    let mut tabs = Tabs::new(lang, "nav.identities", &PERSONNEL_TABS, current);
+    tabs.items[3].count = interventions;
+    tabs.items[4].count = deletions;
+    Ok(tabs)
+}
+
 /// Sorgu dizesindeki sayisal parametre. Formdaki "Tumu" secenegi `role=` diye
 /// bos gelir ve serde `Option<i64>`u 400 ile reddeder; ayristirilamayan deger
 /// "filtre yok" sayilir. Elle yazilan `?days=abc` de sayfayi kirmaz.
@@ -142,6 +165,7 @@ pub struct SortHead {
 struct IdentitiesTemplate {
     lang: Lang,
     shell: Shell,
+    tabs: Tabs,
     rows: Vec<identity::Listed>,
     q: String,
     total: i64,
@@ -229,6 +253,7 @@ async fn list_page(
     let picked = match tokio::try_join!(
         crate::org::list_departments(&state.pool),
         crate::org::list_roles(&state.pool),
+        personnel_tabs(&state.pool, op.lang, "/identities"),
     ) {
         Ok(lists) => lists,
         Err(e) => return internal("filtre listeleri okunamadı", e),
@@ -271,6 +296,7 @@ async fn list_page(
         roles,
         heads,
         filtered,
+        tabs: picked.2,
         window_note: match window {
             Some(w) => op.lang.tn(
                 window_text_key(w),
