@@ -103,17 +103,25 @@ pub async fn must_change_password(pool: &PgPool) -> Result<bool, sqlx::Error> {
     Ok(row.0)
 }
 
+/// Eski parolayla acilmis yerel oturumlar da duser: sizan parolanin dogal care
+/// rotasyonudur ve 8 saatlik oturum onu atlatmamali (ADR-059, guvenlik denetimi
+/// OS-07). Degistiren yerel oturumsa cagiran yenisini acar.
 pub async fn set_password(pool: &PgPool, new_password: &str) -> Result<(), String> {
     let hash = crate::auth::hash_password(new_password)?;
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
     sqlx::query(
         "UPDATE bootstrap_account SET password_hash = $1, must_change_password = FALSE, \
          failed_attempts = 0, locked_until = NULL WHERE id = TRUE",
     )
     .bind(hash)
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .map_err(|e| format!("parola güncellenemedi: {e}"))?;
-    Ok(())
+    sqlx::query("DELETE FROM operator_sessions WHERE auth_source = 'local'")
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("yerel oturumlar silinemedi: {e}"))?;
+    tx.commit().await.map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -155,8 +163,32 @@ mod tests {
         );
         assert!(must_change_password(&pool).await.unwrap());
 
+        let local = crate::operator_session::Operator {
+            subject: "local:admin".to_string(),
+            username: BOOTSTRAP_USERNAME.to_string(),
+            email: String::new(),
+            authorities: vec![crate::oidc::ADMIN_AUTHORITY.to_string()],
+            auth_source: crate::operator_session::AuthSource::Local,
+            lang: crate::i18n::DEFAULT,
+        };
+        let old = crate::operator_session::create_session(&pool, &local)
+            .await
+            .unwrap();
+        let ad = crate::test_support::operator_cookie(&pool, "ad.admin", &["admin"]).await;
         set_password(&pool, "yeni-guclu-parola").await.unwrap();
         assert!(!must_change_password(&pool).await.unwrap());
+        // Guvenlik denetimi OS-07: eski parolanin oturumu duser, baskalari kalir
+        let valid = |token: String| {
+            let pool = pool.clone();
+            async move {
+                crate::operator_session::validate_session(&pool, &token)
+                    .await
+                    .unwrap()
+                    .is_some()
+            }
+        };
+        assert!(!valid(old).await, "eski yerel oturum");
+        assert!(valid(ad.split_once('=').unwrap().1.to_string()).await);
         assert_eq!(
             check("admin", "yeni-guclu-parola").await.unwrap(),
             LoginOutcome::Ok

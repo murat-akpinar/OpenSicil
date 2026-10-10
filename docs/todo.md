@@ -770,7 +770,9 @@ Kurallar:
   - Not: rapordaki "zamanlayıcıda geçiş döngüsü ayrı işlemde" önerisi yapılmadı: sınırla taşma imkânsızlaştı; özette "önerilen"
   - Not: `SCHEMA_VERSION` (ikiz `common_settings.rs`) 37'ye çıktı; ilk vaultscan koşusu sabiti unuttuğumu `schema_version_matches_the_newest_migration` ile yakaladı
   - Doğrulama (2026-10-10, vaultscan): `scripts/test-all.sh` → backend **285/285** (`org` testi `i32::MAX`, 36501 ve -1'i `err.days_range` ile reddeder, 36500 kaydedilir, doğrudan `UPDATE` CHECK'e takılır), fmt + clippy + audit temiz; worker 131/133, iki kırmızı kapalı Windows AD
-- [ ] OS-07: Break-glass parolası değişince eski yerel oturumlar düşer
+- [x] OS-07: Break-glass parolası değişince eski yerel oturumlar düşer
+  - Kabul: `bootstrap_account::set_password` parolayla aynı transaction'da `auth_source = 'local'` oturumlarını siler; AD/OIDC oturumları kalır. Değiştiren yerel oturumsa yeni çerezle `/config`'e döner, eski çerez `/login`'e gider
+  - Doğrulama (2026-10-10, vaultscan): `scripts/test-all.sh` → backend **285/285** (`bootstrap_account` testi eski yerel oturumun düştüğünü, AD admin oturumunun kaldığını; `full_bootstrap_login_and_config_flow` yeni çerezle devam edip eskisinin `/login`'e gittiğini doğrular), fmt + clippy + audit temiz; worker 131/133, iki kırmızı kapalı Windows AD
 
 ---
 

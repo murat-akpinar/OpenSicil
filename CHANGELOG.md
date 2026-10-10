@@ -76,6 +76,7 @@
 - Kendi kaydı kuralı oturum eşleşmesini kullanır ve departmanı da kapsar
 - Okuma şeridi kendi eşlememizin AD'ye yazdığı değeri AD değişikliği saymaz
 - Hedef sistemin gün ayarları 0–36500 ile sınırlı, worker zamanlayıcısı taşmaz
+- Break-glass parolası değişince eski yerel oturumlar düşer
 
 ### Geri alınanlar
 

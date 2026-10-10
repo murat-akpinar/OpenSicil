@@ -545,6 +545,13 @@ async fn change_password_submit(
         serde_json::json!({}),
     )
     .await;
+    // set_password yerel oturumlarin hepsini dusurdu; degistiren yereldeyse devam etsin
+    if operator.auth_source == AuthSource::Local {
+        return match crate::operator_session::create_session(&state.pool, &operator).await {
+            Ok(token) => with_operator_cookie(&token, Redirect::to("/config")),
+            Err(e) => internal("operatör oturumu yenilenemedi", e),
+        };
+    }
     Redirect::to("/config").into_response()
 }
 
@@ -1405,6 +1412,15 @@ mod tests {
             .unwrap();
         assert_eq!(response.status(), StatusCode::SEE_OTHER);
         assert_eq!(location_of(&response), "/config");
+        // OS-07: eski parolanin oturumu dustu, degistiren yeni oturumla devam eder
+        let old_cookie = cookie;
+        let cookie = set_cookie_value(&response);
+        let response = app
+            .clone()
+            .oneshot(get_request("/config", Some(&old_cookie)))
+            .await
+            .unwrap();
+        assert_eq!(location_of(&response), "/login", "eski oturum geçmez");
 
         // Artik Yapilandirma sayfasina girilebiliyor, henuz sir kayitli degil.
         let response = app
