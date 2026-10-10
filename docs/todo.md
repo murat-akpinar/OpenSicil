@@ -756,7 +756,10 @@ Kurallar:
   - Kabul: ayrılış, acil ayrılış, geri alma, kayıt iptali, askı ve askı kaldırma kendi kaydında 403; takvim değişmez. Başkasının kaydında aynen çalışır
   - Not: altı işleyicinin ortak yetki satırı `refuse_lifecycle`'a taşındı (yetki + `operator_guard::is_own_record`). `operator_guard` yalnızca tarih geçtikten sonra reddettiği için planlanmış ayrılış önceden geri alınabiliyordu
   - Doğrulama (2026-10-10, vaultscan): `scripts/test-all.sh` → backend **285/285** (yeni test `an_operator_cannot_touch_their_own_departure_or_suspension` tam router + `operator_guard` katmanıyla: altı yol 403, takvim yerinde, başkasının ayrılışı 303), fmt + clippy + audit temiz; worker 130/132, iki kırmızı kapalı Windows AD
-- [ ] OS-04: Kendi kaydı kuralı operator_guard'la aynı eşleşmeyi kullanır ve departmanı da kapsar
+- [x] OS-04: Kendi kaydı kuralı operator_guard'la aynı eşleşmeyi kullanır ve departmanı da kapsar
+  - Kabul: UPN biçimli oturum adı (`ik.operatoru@corp.example`, Entra ID'nin `preferred_username`'i) kendi kaydına ek rol veremez; kendi departmanını düzenleme formuyla değiştiremez (403)
+  - Not: `identity::own_role_change` artık `operator_guard::is_own_record`'u çağırıyor; kendi `lower(username) = lower($2)` eşleşmesi silindi. Düzenleme için (birincil rol, departman) çifti verilir
+  - Doğrulama (2026-10-10, vaultscan): `scripts/test-all.sh` → backend **285/285** (`an_operator_cannot_change_roles_on_their_own_record` departman ve UPN biçimli oturum senaryolarıyla genişledi), fmt + clippy + audit temiz; worker 130/132, iki kırmızı kapalı Windows AD
 - [ ] OS-05: Okuma şeridi OpenSicil'in kendi eşlemeyle yazdığı değeri AD değişikliği saymaz (ADR-138)
 - [ ] OS-06: Hedef sistemin gün ayarları sınırlı; aşırı değer worker zamanlayıcısını kilitlemez
 - [ ] OS-07: Break-glass parolası değişince eski yerel oturumlar düşer

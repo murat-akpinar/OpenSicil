@@ -744,7 +744,13 @@ async fn edit_submit(
         Ok(n) => n,
         Err(key) => return form_error(&state, &op, form, key, FormMode::Edit(id)).await,
     };
-    if let Some(refused) = refuse_own_role_change(&state, &op, id, Some(new.primary_role_id)).await
+    if let Some(refused) = refuse_own_role_change(
+        &state,
+        &op,
+        id,
+        Some((new.primary_role_id, new.department_id)),
+    )
+    .await
     {
         return refused;
     }
@@ -800,14 +806,14 @@ async fn refuse_lifecycle(state: &AppState, op: &Operator, id: i64) -> Option<Re
     }
 }
 
-/// docs/07: kendi kaydinda rol degisikligi 403; okunamazsa 500. None: devam.
+/// docs/07: kendi kaydinda rol ya da departman degisikligi 403; okunamazsa 500. None: devam.
 async fn refuse_own_role_change(
     state: &AppState,
     op: &Operator,
     id: i64,
-    new_primary: Option<i64>,
+    edit: Option<(i64, i64)>,
 ) -> Option<Response> {
-    match identity::own_role_change(&state.pool, id, &op.username, new_primary).await {
+    match identity::own_role_change(&state.pool, id, &op.username, edit).await {
         Ok(false) => None,
         Ok(true) => Some(forbidden(op.lang)),
         Err(e) => Some(internal("rol değişikliği sahibi okunamadı", e)),
@@ -1492,12 +1498,13 @@ mod tests {
                     .status()
             }
         };
-        let edit = |primary: i64| {
+        let edit_in = |dept: i64, primary: i64| {
             format!(
                 "given_name=Ay%C5%9Fe&surname=Y%C4%B1lmaz&department_id={dept}&primary_role_id={primary}\
                  &employment_type=permanent&start_date=2026-10-01"
             )
         };
+        let edit = |primary: i64| edit_in(dept, primary);
 
         let assign = format!("role_id={additional}");
         assert_eq!(
@@ -1514,6 +1521,31 @@ mod tests {
             StatusCode::SEE_OTHER,
             "rolü değiştirmeyen düzenleme serbest"
         );
+        // Guvenlik denetimi OS-04: departman da korunur; UPN bicimli ad da eslesir
+        let other_dept: i64 = sqlx::query_scalar(
+            "INSERT INTO departments (name, code, slug) VALUES ('Başka', 'BS', 'baska') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            post(format!("/identities/{own}/edit"), edit_in(other_dept, role)).await,
+            StatusCode::FORBIDDEN,
+            "kendi departmanı"
+        );
+        let upn =
+            crate::test_support::operator_cookie(&pool, "ik.operatoru@corp.example", &["hr"]).await;
+        let r = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                &format!("/identities/{own}/roles"),
+                &format!("role_id={additional}"),
+                &upn,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::FORBIDDEN, "UPN biçimli oturum");
         // Baskasinin kaydinda engel yok; kendi kaydindaki ek rol de kaldirilamaz
         assert_eq!(
             post(format!("/identities/{other}/roles"), assign).await,

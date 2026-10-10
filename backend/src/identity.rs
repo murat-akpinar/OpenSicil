@@ -789,26 +789,31 @@ pub async fn unassigned_role_count(pool: &PgPool) -> Result<i64, sqlx::Error> {
 
 /// Yer tutucu rolun id'si: toplu sahiplenme formunun varsayilani. Migration
 /// seed'ler; tek satirdir (kismi tekil indeks).
-/// docs/07: operator kendi kimlik kaydinda rol degistiremez (kendine yetki grubu
-/// veren rol atayamaz). Eslesme kullanici adiyla, buyuk-kucuk harf duyarsiz.
-/// `new_primary` verilirse yalnizca birincil rol degisiyorsa true.
+/// docs/07, ADR-005: operator kendi kimlik kaydinda rolunu ve departmanini
+/// degistiremez (kendine yetki grubu ya da OU veren degisiklik). Eslesme oturum
+/// reddiyle ayni (`operator_guard::is_own_record`). `edit` (birincil rol,
+/// departman) verilirse yalnizca biri degisiyorsa true; None: her rol islemi.
 pub async fn own_role_change(
     pool: &PgPool,
     id: i64,
     username: &str,
-    new_primary: Option<i64>,
+    edit: Option<(i64, i64)>,
 ) -> Result<bool, sqlx::Error> {
-    let own: Option<bool> = sqlx::query_scalar(
-        "SELECT COALESCE(lower(username) = lower($2), false) \
-           AND ($3::bigint IS NULL OR primary_role_id <> $3) \
-         FROM identities WHERE id = $1",
+    if !crate::operator_guard::is_own_record(pool, id, username).await? {
+        return Ok(false);
+    }
+    let Some((primary, department)) = edit else {
+        return Ok(true);
+    };
+    let changed: Option<bool> = sqlx::query_scalar(
+        "SELECT primary_role_id <> $2 OR department_id <> $3 FROM identities WHERE id = $1",
     )
     .bind(id)
-    .bind(username)
-    .bind(new_primary)
+    .bind(primary)
+    .bind(department)
     .fetch_optional(pool)
     .await?;
-    Ok(own == Some(true))
+    Ok(changed == Some(true))
 }
 
 /// Degismez kural: `mode = 'managed'` baglantinin kimliginde yer tutucu rol olmaz.
