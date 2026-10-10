@@ -437,7 +437,14 @@ async fn establish_operator_session(state: &AppState, operator: Operator) -> Res
         Err(response) => return *response,
     };
     // ADR-059 madde 1: ayrilmis/askidaki operator oturum acamaz
-    match crate::operator_guard::check_operator(&state.pool, &time_zone, &operator.username).await {
+    match crate::operator_guard::check_operator(
+        &state.pool,
+        &time_zone,
+        &operator.username,
+        operator.auth_source,
+    )
+    .await
+    {
         Ok(crate::operator_guard::Verdict::Allowed) => {}
         Ok(crate::operator_guard::Verdict::Rejected(reason)) => {
             return crate::operator_guard::rejection_response(state, &operator, reason).await;
@@ -1388,6 +1395,16 @@ mod tests {
         crate::migrate::seed_bootstrap_account(&pool)
             .await
             .expect("bootstrap hesabı seed edilemedi");
+        // OS-11: `admin` adli askidaki kimlik break-glass girisini kilitlemez;
+        // akisin geri kalani bu kayit varken yurur.
+        let ids = crate::test_support::seed_two_identities(&pool).await;
+        sqlx::query(
+            "UPDATE identities SET username = 'admin', suspension_start = current_date WHERE id = $1",
+        )
+        .bind(ids[0])
+        .execute(&pool)
+        .await
+        .unwrap();
         // Gercek router: "parolayi degistirmeden baska ekran yok" kurali ara
         // katmanda (operator_guard), rotalarin kendisinde degil (ADR-095 madde 3).
         let app = crate::server::build_router(test_state(pool.clone(), "https://localhost"));

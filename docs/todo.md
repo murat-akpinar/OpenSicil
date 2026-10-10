@@ -793,7 +793,10 @@ Kurallar:
   - Kabul: ayrılışa dokunmayan yazma (ad değişikliği, aynı değerle `cancelled`) onayı bırakır
   - Not: kural migration 0038'deki tetikleyicide (`identities_departure_changed`) — `end_at`'i yazan beş backend yolu ayrı ayrı yamanmadı, gelecekteki yol da kaçamaz. `SCHEMA_VERSION` 38
   - Doğrulama (2026-10-10, vaultscan): `scripts/test-all.sh` → TEMİZ: backend **285/285**, worker **133/133**, fmt + clippy + audit iki crate'te temiz. `awaiting_accounts_are_listed_and_approved_with_authority` onaydan sonra ad değişikliğinin onayı bıraktığını, `revert_departure`'ın kaldırdığını ve yeni ayrılışın yeniden onay beklediğini sınar; migration çıkarılınca test `!approved_now()` satırında kırmızı
-- [ ] OS-11: `admin` adlı kimlik break-glass girişini kilitleyemez
+- [x] OS-11: `admin` adlı kimlik break-glass girişini kilitleyemez
+  - Kabul: yerel (break-glass) oturum, adıyla eşleşen kimliğin yaşam döngüsüne bakılmadan açılır ve sürer; `operator_guard::check_operator` `auth_source = Local` ise `Allowed` döner. AD/OIDC operatörleri için ret aynen sürer
+  - Not: rapordaki "`admin` kullanıcı adını ayır" önerisi yapılmadı — muafiyet kilitlenmeyi kapatıyor; özette "önerilen"
+  - Doğrulama (2026-10-10, vaultscan): `scripts/test-all.sh` → TEMİZ: backend **285/285**, worker **133/133**, fmt + clippy + audit iki crate'te temiz. `full_bootstrap_login_and_config_flow` askıdaki `admin` kimliği varken baştan sona yürür; `matches_username_case_insensitively_and_by_upn_local_part` askıdaki kişi için yerel oturumun geçtiğini sınar
 - [ ] OS-12: CSV ayrıştırıcı satır sınırını belleği şişirmeden uygular
 - [ ] OS-13: Tek çakışan AD mail'i ya da sAMAccountName gece doldurmasını ve AD değişiklik senkronunu durdurmaz
 - [ ] OS-14: Kaçışlı virgüllü RDN yönetilen OU kapsamını atlatamaz

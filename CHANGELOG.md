@@ -80,6 +80,7 @@
 - Uç nokta değişince saklı sır yeni adrese gitmez, AD adresi yalnızca LDAPS
 - Değişiklik seti onayı admin'in gördüğü taslağa bağlı
 - Geri alınan ya da değişen ayrılış hesap silme onayını sıfırlar
+- Admin adlı kimlik break-glass girişini kilitleyemez
 
 ### Geri alınanlar
 

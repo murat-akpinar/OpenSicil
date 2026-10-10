@@ -4,7 +4,9 @@
 // durumuna bakilir; `ayrildi`, `askida` (ve `silindi`) ise istek reddedilir,
 // oturum sonlandirilir. Eslesme ADR-005: preferred_username'in `@` oncesi
 // kimligin kullanici adiyla, tamami UPN ile buyuk/kucuk harf duyarsiz.
-// Eslesen kimligi olmayan (break-glass) operator etkilenmez.
+// Yerel break-glass hesabi hic etkilenmez: adi (`admin`) kimlik tablosunda
+// bir kayitla eslesebilir ve o kaydi askiya almak tek acil durum kapisini
+// kilitlerdi (guvenlik denetimi OS-11).
 
 use axum::extract::{Request, State};
 use axum::http::{header, HeaderMap, StatusCode};
@@ -14,6 +16,7 @@ use sqlx::PgPool;
 
 use crate::cookie::{clear_cookie_header, get_cookie, OPERATOR_SESSION_COOKIE_NAME};
 use crate::desired_state::{lifecycle_state, Clock, Date, LifecycleState, Timeline};
+use crate::operator_session::AuthSource;
 use crate::web::AppState;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -118,7 +121,11 @@ pub async fn check_operator(
     pool: &PgPool,
     time_zone: &str,
     preferred_username: &str,
+    auth_source: AuthSource,
 ) -> Result<Verdict, sqlx::Error> {
+    if auth_source == AuthSource::Local {
+        return Ok(Verdict::Allowed);
+    }
     let rows: Vec<TimelineRow> = sqlx::query_as(timeline_sql!(own_record_match!()))
         .bind(preferred_username)
         .bind(time_zone)
@@ -159,7 +166,14 @@ pub async fn enforce(
         Ok(tz) => tz,
         Err(response) => return *response,
     };
-    match check_operator(&state.pool, &time_zone, &operator.username).await {
+    match check_operator(
+        &state.pool,
+        &time_zone,
+        &operator.username,
+        operator.auth_source,
+    )
+    .await
+    {
         Ok(Verdict::Allowed) => next.run(request).await,
         Ok(Verdict::Rejected(reason)) => {
             if let Err(e) = crate::operator_session::delete_session(&state.pool, &token).await {
@@ -270,7 +284,8 @@ mod tests {
             .await
             .unwrap();
 
-        let check = |name: &'static str| check_operator(&pool, "Europe/Istanbul", name);
+        let check =
+            |name: &'static str| check_operator(&pool, "Europe/Istanbul", name, AuthSource::Ad);
         assert_eq!(
             check("AYSE.YILMAZ@corp.example").await.unwrap(),
             Verdict::Rejected(LifecycleState::Departed)
@@ -329,8 +344,15 @@ mod tests {
             check("ali.kaya").await.unwrap(),
             Verdict::Rejected(LifecycleState::Suspended)
         );
+        assert_eq!(
+            check_operator(&pool, "Europe/Istanbul", "ali.kaya", AuthSource::Local)
+                .await
+                .unwrap(),
+            Verdict::Allowed,
+            "yerel break-glass oturumu kimlik durumuna bakmaz (OS-11)"
+        );
         assert!(
-            check_operator(&pool, "Mars/Olympus", "ali.kaya")
+            check_operator(&pool, "Mars/Olympus", "ali.kaya", AuthSource::Ad)
                 .await
                 .is_err(),
             "bilinmeyen saat dilimi hata"
