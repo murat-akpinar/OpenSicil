@@ -765,7 +765,11 @@ Kurallar:
   - Kabul: sandbox'taki `{employee_number}9` döngüsü ve sabit `givenName` taramada 0 kimlik değiştirir; varsayılan eşlemelerle ADR-138 aynen çalışır
   - Not: rapordaki savunma derinliği önerileri (bu özniteliklerde sabit/şablonu eşleme ekranında reddetmek, okuma şeridi rol/departman değişikliğini eşik üstünde onaya göndermek, `MAPPING_CHANGED` denetimine `source_text` yazmak) yapılmadı; özette "önerilen"
   - Doğrulama (2026-10-10, vaultscan): `scripts/test-all.sh` → worker **131/133** (yeni saf test `only_a_faithful_mapping_lets_the_read_lane_take_a_field`; `a_directory_side_change_reaches_the_identity_on_the_next_scan` sabit `givenName` + `{employee_number}9` taramasıyla genişledi, 0 kimlik değişir), iki kırmızı kapalı Windows AD; backend 285/285, fmt + clippy + audit iki crate'te temiz
-- [ ] OS-06: Hedef sistemin gün ayarları sınırlı; aşırı değer worker zamanlayıcısını kilitlemez
+- [x] OS-06: Hedef sistemin gün ayarları sınırlı; aşırı değer worker zamanlayıcısını kilitlemez
+  - Kabul: saklama süresi ve parola gecikmesi 0–36500 gün (`org::MAX_TARGET_DAYS`); dışı `err.days_range` ile reddedilir, form `max` taşır, DB CHECK de kabul etmez (0037; var olan aşırı değer önce 36500'e indirilir)
+  - Not: rapordaki "zamanlayıcıda geçiş döngüsü ayrı işlemde" önerisi yapılmadı: sınırla taşma imkânsızlaştı; özette "önerilen"
+  - Not: `SCHEMA_VERSION` (ikiz `common_settings.rs`) 37'ye çıktı; ilk vaultscan koşusu sabiti unuttuğumu `schema_version_matches_the_newest_migration` ile yakaladı
+  - Doğrulama (2026-10-10, vaultscan): `scripts/test-all.sh` → backend **285/285** (`org` testi `i32::MAX`, 36501 ve -1'i `err.days_range` ile reddeder, 36500 kaydedilir, doğrudan `UPDATE` CHECK'e takılır), fmt + clippy + audit temiz; worker 131/133, iki kırmızı kapalı Windows AD
 - [ ] OS-07: Break-glass parolası değişince eski yerel oturumlar düşer
 
 ---

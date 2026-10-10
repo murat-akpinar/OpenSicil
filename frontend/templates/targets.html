@@ -70,11 +70,11 @@
       </div>
       <div>
         <label class="label" for="rd-{{ v.target.id }}">{{ lang.t("targets.retention_days") }}</label>
-        <input class="input" type="number" min="0" id="rd-{{ v.target.id }}" name="retention_days" value="{{ v.target.retention_days }}">
+        <input class="input" type="number" min="0" id="rd-{{ v.target.id }}" max="36500" name="retention_days" value="{{ v.target.retention_days }}">
       </div>
       <div>
         <label class="label" for="pr-{{ v.target.id }}">{{ lang.t("targets.password_reset_delay") }}</label>
-        <input class="input" type="number" min="0" id="pr-{{ v.target.id }}" name="password_reset_delay_days" value="{{ v.target.password_reset_delay_days }}">
+        <input class="input" type="number" min="0" id="pr-{{ v.target.id }}" max="36500" name="password_reset_delay_days" value="{{ v.target.password_reset_delay_days }}">
       </div>
     </div>
     <div class="space-y-3 border-t border-line pt-4">

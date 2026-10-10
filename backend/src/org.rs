@@ -1032,10 +1032,16 @@ pub fn read_job_open(status: &str) -> bool {
     status == "queued" || status == "running"
 }
 
+/// Hedefin gun ayarlarinin ust siniri (100 yil; 0037'deki CHECK ile ayni).
+/// Sinirsiz deger worker'da `end_at + gun` tasmasi yapip zamanlayici tikini
+/// her seferinde geri aliyordu; ayrilanlar kapanmiyordu (guvenlik denetimi OS-06).
+pub const MAX_TARGET_DAYS: i32 = 36_500;
+
 // ADR-024: saklama ve silme onayi hedef basina; konteyner ayni hedefin OU/COS'u (FK).
 pub async fn save_target(pool: &PgPool, t: &TargetRow) -> Result<(), SaveError> {
-    if t.retention_days < 0 || t.password_reset_delay_days < 0 {
-        return Err(SaveError::Invalid("err.negative_days"));
+    let days = 0..=MAX_TARGET_DAYS;
+    if !days.contains(&t.retention_days) || !days.contains(&t.password_reset_delay_days) {
+        return Err(SaveError::Invalid("err.days_range"));
     }
     sqlx::query(
         "UPDATE target_systems SET provision_account_default = $2, default_container_item_id = $3, \
@@ -1472,6 +1478,25 @@ mod tests {
         target.default_container_item_id = Some(catalog.personel_ou);
         save_target(&pool, &target).await.unwrap();
         assert_eq!(list_targets(&pool).await.unwrap()[0].retention_days, 30);
+        // Guvenlik denetimi OS-06: gun ayarlari sinirli, DB de kabul etmez
+        for (retention, delay) in [(i32::MAX, 7), (30, MAX_TARGET_DAYS + 1), (-1, 7)] {
+            target.retention_days = retention;
+            target.password_reset_delay_days = delay;
+            assert!(
+                matches!(
+                    save_target(&pool, &target).await,
+                    Err(SaveError::Invalid("err.days_range"))
+                ),
+                "{retention}/{delay}"
+            );
+        }
+        target.retention_days = MAX_TARGET_DAYS;
+        target.password_reset_delay_days = MAX_TARGET_DAYS;
+        save_target(&pool, &target).await.unwrap();
+        let bypass = sqlx::query("UPDATE target_systems SET retention_days = 2147483647")
+            .execute(&pool)
+            .await;
+        assert!(bypass.is_err(), "CHECK kısıtı");
         let options = catalog_options(&pool).await.unwrap();
         assert_eq!(options.containers.len(), 4);
         assert_eq!(options.memberships.len(), 8);

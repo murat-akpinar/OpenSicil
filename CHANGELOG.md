@@ -75,6 +75,7 @@
 - Operatör kendi ayrılışını ve askısını işleyemez, uzatamaz, geri alamaz
 - Kendi kaydı kuralı oturum eşleşmesini kullanır ve departmanı da kapsar
 - Okuma şeridi kendi eşlememizin AD'ye yazdığı değeri AD değişikliği saymaz
+- Hedef sistemin gün ayarları 0–36500 ile sınırlı, worker zamanlayıcısı taşmaz
 
 ### Geri alınanlar
 
