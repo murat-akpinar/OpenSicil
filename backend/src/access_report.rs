@@ -18,7 +18,7 @@ use sqlx::PgPool;
 
 use crate::activity::{csv_cell, REPORT_TABS};
 use crate::i18n::Lang;
-use crate::identity_web::{allowed, audit_operator, forbidden, internal, OperatorSession};
+use crate::identity_web::{audit_operator, internal, OperatorSession};
 use crate::shell::{Shell, Tabs};
 use crate::web::{render, AppState};
 
@@ -178,9 +178,6 @@ async fn page(
     State(state): State<AppState>,
     Query(p): Query<Params>,
 ) -> Response {
-    if !allowed(&op, &crate::shell::AUTHORITY_ORDER) {
-        return forbidden(op.lang);
-    }
     let tz = match state.time_zone().await {
         Ok(tz) => tz,
         Err(response) => return *response,
@@ -278,9 +275,6 @@ async fn departed_page(
     OperatorSession(op): OperatorSession,
     State(state): State<AppState>,
 ) -> Response {
-    if !allowed(&op, &crate::shell::AUTHORITY_ORDER) {
-        return forbidden(op.lang);
-    }
     let tz = match state.time_zone().await {
         Ok(tz) => tz,
         Err(response) => return *response,

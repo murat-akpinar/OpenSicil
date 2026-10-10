@@ -110,6 +110,13 @@ async fn render_operator_home(
 // --- END FEATURE: oidc-login ---
 
 #[derive(Template)]
+#[template(path = "no_permission.html")]
+struct NoPermissionTemplate {
+    lang: Lang,
+    shell: Shell,
+}
+
+#[derive(Template)]
 #[template(path = "change_password.html")]
 struct ChangePasswordTemplate {
     lang: Lang,
@@ -223,6 +230,13 @@ async fn login_form(
         if let Ok(Some(operator)) =
             crate::operator_session::validate_session(&state.pool, &token).await
         {
+            // ADR-095 madde 2: girer ama panel ve kisi listesi gormez
+            if !crate::identity_web::has_any_authority(&operator) {
+                return render(&NoPermissionTemplate {
+                    lang: operator.lang,
+                    shell: Shell::of(&operator),
+                });
+            }
             return render_operator_home(
                 &state,
                 operator.lang,
@@ -782,7 +796,7 @@ struct LangForm {
 
 // Secici tercihi oturum satirina yazar ve gelinen sayfaya geri doner (ADR-089).
 async fn set_lang(
-    OperatorSession(_op): OperatorSession,
+    crate::identity_web::AnySession(_op): crate::identity_web::AnySession,
     State(state): State<AppState>,
     headers: HeaderMap,
     Form(form): Form<LangForm>,
@@ -995,6 +1009,67 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert!(body.contains("name=\"password\""), "{body}");
 
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
+    // Guvenlik denetimi OS-01: yetkisiz oturum okuma ekranlarini da goremez
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn session_without_authority_sees_no_operator_screen() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        let ids = crate::test_support::seed_two_identities(&pool).await;
+        sqlx::query("UPDATE identities SET mobile_phone = '+905550001122' WHERE id = $1")
+            .bind(ids[0])
+            .execute(&pool)
+            .await
+            .unwrap();
+        let app = crate::server::build_router(test_state(pool.clone(), "https://localhost"));
+        let plain = crate::test_support::operator_cookie(&pool, "plain", &[]).await;
+        let get = |uri: String, cookie: String| {
+            let app = app.clone();
+            async move {
+                let response = app.oneshot(get_request(&uri, Some(&cookie))).await.unwrap();
+                let status = response.status();
+                let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .unwrap();
+                (status, String::from_utf8(body.to_vec()).unwrap())
+            }
+        };
+
+        let person = format!("/identities/{}", ids[0]);
+        for uri in [
+            "/identities",
+            &person,
+            "/search?q=Ay",
+            "/used-names",
+            "/deletions",
+            "/imports",
+            "/reports/access",
+        ] {
+            let (status, body) = get(uri.to_string(), plain.clone()).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{uri}");
+            assert!(!body.contains("+905550001122"), "{uri}");
+        }
+        let (status, body) = get("/".to_string(), plain.clone()).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains(crate::i18n::DEFAULT.t("home.no_permission")));
+        assert!(body.contains("action=\"/logout\""), "çıkış kabukta");
+        let response = app
+            .clone()
+            .oneshot(form_request("POST", "/lang", "lang=en", Some(&plain)))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+
+        // Kontrol: tek yetki yeter
+        let hr = crate::test_support::operator_cookie(&pool, "ik", &["hr"]).await;
+        let (status, body) = get(person, hr).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains("+905550001122"));
+
+        drop(app);
         drop(pool);
         crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
     }
@@ -1825,6 +1900,12 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        let response = app
+            .clone()
+            .oneshot(get_request("/identities", Some(&plain_cookie)))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN, "okuma ekranı da");
 
         // 4) ADR-095 madde 5: ayrilmis operator bu kapida da reddedilir.
         let ids = crate::test_support::seed_two_identities(&pool).await;

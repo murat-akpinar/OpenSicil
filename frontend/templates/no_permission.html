@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}OpenSicil{% endblock %}
+{% block content %}
+{# ADR-095 madde 2: yonetim grubunda olmayan kullanici girer ama hicbir ekrani goremez #}
+<section class="hero">
+  <span class="ico-tile ico-tile-lg"><i class="ico ico-shield" aria-hidden="true"></i></span>
+  <div class="hero-text">
+    <h1 class="h1">{{ lang.t1("home.welcome", shell.username) }}</h1>
+    <p class="sub">{{ lang.t("home.no_permission") }}</p>
+  </div>
+</section>
+{% endblock %}

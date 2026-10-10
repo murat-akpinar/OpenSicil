@@ -628,6 +628,7 @@ authority.auditor = "Auditor"
 # --- dashboard (ADR-076, ADR-096 item 3) ---
 home.welcome = "Welcome, {}"
 home.welcome_sub = "Run identity and access management from here."
+home.no_permission = "Your account is in no OpenSicil management group, so there is no screen for you. Ask your system administrator for access."
 dash.total_identities = "Total identities"
 dash.joined = "Joined"
 dash.departed = "Departed"

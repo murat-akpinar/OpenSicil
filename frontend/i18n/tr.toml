@@ -628,6 +628,7 @@ authority.auditor = "Denetçi"
 # --- gösterge paneli (ADR-076, ADR-096 madde 3) ---
 home.welcome = "Hoş geldiniz, {}"
 home.welcome_sub = "Kimlik ve erişim yönetimini buradan yürütün."
+home.no_permission = "Hesabınız hiçbir OpenSicil yönetim grubunda değil; görebileceğiniz ekran yok. Yetki için sistem yöneticinize başvurun."
 dash.total_identities = "Toplam kimlik"
 dash.joined = "İşe giren"
 dash.departed = "Ayrılan"

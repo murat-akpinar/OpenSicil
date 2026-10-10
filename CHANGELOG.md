@@ -70,6 +70,7 @@
 - Veritabanı imajı gosu'suz ve postgres kullanıcısıyla başlıyor, imaj taraması temiz
 - Worker AD CA sertifikasını okuyabiliyor (ad_ca_pem kolon yetkisi eksikti)
 - Raporlardaki bekleyen iş kutusu dolu olan ilk listeye gider
+- Yetkisi olmayan oturum hiçbir operatör ekranını okuyamaz
 
 ### Geri alınanlar
 

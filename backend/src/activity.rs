@@ -25,8 +25,8 @@ use sqlx::{PgPool, Postgres};
 use crate::dashboard::{glyph_for, EVENT_TYPES};
 use crate::i18n::Lang;
 use crate::identity_web::{
-    allowed, audit_operator, empty_as_none, forbidden, internal, pagination, urlencode, Choice,
-    OperatorSession, PAGE_SIZE,
+    audit_operator, empty_as_none, internal, pagination, urlencode, Choice, OperatorSession,
+    PAGE_SIZE,
 };
 use crate::shell::{Shell, Tabs};
 use crate::web::{render, AppState};
@@ -525,11 +525,6 @@ async fn page(
     State(state): State<AppState>,
     Query(p): Query<Params>,
 ) -> Response {
-    // Denetim kaydi bugun her yetkiye okunuyor (panel akisi, kisi sayfasi);
-    // yetkisi olmayan oturum (ADR-095: gruba uye olmayan AD kullanicisi) okuyamaz.
-    if !allowed(&op, &crate::shell::AUTHORITY_ORDER) {
-        return forbidden(op.lang);
-    }
     let tz = match state.time_zone().await {
         Ok(tz) => tz,
         Err(response) => return *response,

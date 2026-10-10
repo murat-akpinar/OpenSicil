@@ -32,7 +32,10 @@ impl IntoResponse for NoOperatorSession {
     }
 }
 
-impl FromRequestParts<AppState> for OperatorSession {
+/// Yetkisi olmayan oturumu da kabul eder; yalnizca dil secici kullanir.
+pub struct AnySession(pub Operator);
+
+impl FromRequestParts<AppState> for AnySession {
     type Rejection = NoOperatorSession;
 
     async fn from_request_parts(
@@ -42,10 +45,34 @@ impl FromRequestParts<AppState> for OperatorSession {
         let token =
             get_cookie(&parts.headers, OPERATOR_SESSION_COOKIE_NAME).ok_or(NoOperatorSession)?;
         match crate::operator_session::validate_session(&state.pool, &token).await {
-            Ok(Some(operator)) => Ok(OperatorSession(operator)),
+            Ok(Some(operator)) => Ok(AnySession(operator)),
             _ => Err(NoOperatorSession),
         }
     }
+}
+
+impl FromRequestParts<AppState> for OperatorSession {
+    type Rejection = Response;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let AnySession(operator) = AnySession::from_request_parts(parts, state)
+            .await
+            .map_err(IntoResponse::into_response)?;
+        // ADR-095 madde 2: yonetim grubunda olmayan kullanici girer ama hicbir
+        // ekrani goremez. Handler basina degil burada: okuma ekranlari tek tek
+        // unutuluyordu (guvenlik denetimi OS-01).
+        if !has_any_authority(&operator) {
+            return Err(forbidden(operator.lang));
+        }
+        Ok(OperatorSession(operator))
+    }
+}
+
+pub(crate) fn has_any_authority(operator: &Operator) -> bool {
+    allowed(operator, &crate::shell::AUTHORITY_ORDER)
 }
 
 pub(crate) fn allowed(operator: &Operator, any_of: &[&str]) -> bool {

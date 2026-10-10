@@ -738,6 +738,24 @@ Kurallar:
 
 ---
 
+## Güvenlik denetimi: orta bulgular (2026-10-10)
+
+> Cloudflare `security-audit` skill'i tam denetim modunda koştu (`~/security-audit-skill/opensicil/run-1/`): 15 doğrulanmış bulgu (7 orta, 8 düşük). Kullanıcı isteği: ortalar rapordaki sırayla düzeltilir. Her kutucuk sandbox'taki yeniden üretimi bir regresyon testine çevirir.
+
+- [x] OS-01: Yetkisi olmayan oturum hiçbir operatör ekranını okuyamaz (ADR-095 madde 2)
+  - Kabul: yetki listesi bilinen yetkilerden hiçbirini içermeyen oturum `/identities`, kişi sayfası, `/search`, `/used-names`, `/deletions`, `/imports` için 403 alır; kural tek yerde, `OperatorSession` çıkarıcısında
+  - Kabul: `/` bu oturuma panel yerine "yetkiniz yok" sayfasını verir (çıkış düğmesi kabukta); `/lang` çalışır
+  - Not: `access_report` ve `activity`'deki handler başı "herhangi bir yetki" kontrolleri çıkarıcıya taşındığı için silindi. Rapordaki "kullanılmış adlar yalnızca Sistem yöneticisine" önerisi uygulanmadı: kod ve sekme düzeni (ADR-134) listeyi her operatöre açıyor, docs/07 tablosu yalnızca yöneticiyi yazıyor — çelişki özette "önerilen" olarak duruyor
+  - Doğrulama (2026-10-10, vaultscan): `scripts/test-all.sh` → backend **283/283** (lab Samba + lab Keycloak dahil; yeni test `session_without_authority_sees_no_operator_screen` tam router ve `operator_guard` katmanıyla, lab AD testi `/identities` 403'ünü de bakıyor), fmt + clippy + audit iki crate'te temiz. Worker 130/132: iki kırmızı Windows AD testi (`No route to host`, Hogwarts DC kapalı), worker'a dokunulmadı
+- [ ] OS-02: CSV içe aktarma operatörün kendi kaydında rol, departman ve ayrılış tarihini değiştiremez (ADR-005)
+- [ ] OS-03: Operatör kendi ayrılışını ve askısını işleyemez, uzatamaz, geri alamaz (ADR-005)
+- [ ] OS-04: Kendi kaydı kuralı operator_guard'la aynı eşleşmeyi kullanır ve departmanı da kapsar
+- [ ] OS-05: Okuma şeridi OpenSicil'in kendi eşlemeyle yazdığı değeri AD değişikliği saymaz (ADR-138)
+- [ ] OS-06: Hedef sistemin gün ayarları sınırlı; aşırı değer worker zamanlayıcısını kilitlemez
+- [ ] OS-07: Break-glass parolası değişince eski yerel oturumlar düşer
+
+---
+
 ## Okuma şeridinde yarıda kalan iş geri alınır (ADR-062'nin okuma şeridi karşılığı)
 
 > Tarama sırasında bulundu (2026-10-03): `read_jobs`'ta kira yok. `read_lane::claim` satırı `running` yapıyor, `finish` bitiriyor; arada worker ölürse satır **sonsuza dek** `running` kalıyor ve `read_jobs_open_idx` (kısmi tekil indeks) o tür + hedef için ikinci iş açtırmıyor. Sonuç: gece mutabakatı her gece sessizce düşüyor (`open_nightly_scans` `ON CONFLICT DO NOTHING`), ekrandaki "Yeniden tara" da aynı çatışmaya düşüp `rows_affected`'a bakmadığı için (`backend/src/reconcile.rs:140`) çalışmış görünüyor. Tetikleyici egzotik değil: tarama sürerken worker'ı yeniden kurmak (grace sonunda SIGKILL), host yeniden başlaması, OOM. Varyantı 2026-10-03'te yaşandı (NUL baytı yüzünden sonuç satırı yazılamıyor, iş sonsuza dek `running` kalıyordu — `db::pg_text` o tetikleyiciyi kapattı, yapısal delik durdu). Yazma şeridinde aynı sorun ADR-062 ile çözülmüş; yeni karar gerekmiyor, aynı desen okuma şeridine uygulanır.
