@@ -74,6 +74,7 @@
 - CSV içe aktarma operatörün kendi kaydında rol, departman ve ayrılış değiştiremez
 - Operatör kendi ayrılışını ve askısını işleyemez, uzatamaz, geri alamaz
 - Kendi kaydı kuralı oturum eşleşmesini kullanır ve departmanı da kapsar
+- Okuma şeridi kendi eşlememizin AD'ye yazdığı değeri AD değişikliği saymaz
 
 ### Geri alınanlar
 

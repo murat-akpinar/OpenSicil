@@ -530,6 +530,46 @@ fn update_sql(field: &str) -> &'static str {
     }
 }
 
+/// Okuma seridi alani, onu besleyen AD oznitelikleri ve alanin kendi esleme kaynagi.
+const READ_LANE_SOURCES: [(&str, &[&str], &str); 6] = [
+    ("given_name", &["givenName"], "given_name"),
+    ("surname", &["sn"], "surname"),
+    (
+        "employee_number",
+        &["employeeID", "employeeNumber"],
+        "employee_number",
+    ),
+    (
+        "mobile_phone",
+        &["mobile", "telephoneNumber"],
+        "mobile_phone",
+    ),
+    ("department", &["department"], "department_name"),
+    ("role", &["title"], "title"),
+];
+
+/// ADR-138: AD'deki deger ancak eslememiz o ozniteligi kimligin ayni alanindan,
+/// degistirmeden yaziyorsa "AD'de yapilmis degisiklik" olabilir. Sabit, sablon,
+/// baska alan ya da harf/ascii donusumu bizim yankimizdir; alinirsa role_admin
+/// eslemeyle IK alanlarini degistirir, `{employee_number}9` her taramada uzar
+/// (guvenlik denetimi OS-05). Telefon bicim donusumu yazimdan sonra ayni numaraya
+/// cozulur (`writable_phone`), yanki degildir.
+/// Satir: (hedef oznitelik, kaynak, donusum).
+pub fn echoed_fields(mappings: &[(String, String, String)]) -> Vec<&'static str> {
+    READ_LANE_SOURCES
+        .iter()
+        .filter(|(field, attributes, own)| {
+            mappings.iter().any(|(attribute, kind, transform)| {
+                let faithful = kind == own
+                    && (transform == "none"
+                        || (*field == "mobile_phone" && transform.starts_with("phone_")));
+                attributes.contains(&attribute.as_str()) && !faithful
+            })
+        })
+        .map(|(field, _, _)| *field)
+        .collect()
+}
+
 /// Bulgular yazildiktan sonra cagrilir. Doner: AD'den degisiklik alinan kimlik sayisi.
 pub async fn take_ad_changes(
     pool: &PgPool,
@@ -541,6 +581,15 @@ pub async fn take_ad_changes(
         .fetch_all(pool)
         .await
         .map_err(|e| format!("AD değişiklik adayları okunamadı: {e}"))?;
+    let mappings: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT target_attribute, source_kind, transform FROM attribute_mappings \
+         WHERE target_system_id = $1",
+    )
+    .bind(target)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("eşlemeler okunamadı: {e}"))?;
+    let echoed = echoed_fields(&mappings);
     let mut tx: Transaction<'_, Postgres> = pool.begin().await.map_err(|e| e.to_string())?;
     let mut changed_ids: Vec<i64> = Vec::new();
     for row in &rows {
@@ -552,6 +601,9 @@ pub async fn take_ad_changes(
         let (new, ours) = (ad_side(row, ""), ad_side(row, "i_"));
         let mut taken = 0;
         for (field, to, from) in ad_changes(old, &new, &ours) {
+            if echoed.contains(&field) {
+                continue;
+            }
             let node = match field {
                 "department" => Some(row.get::<Option<i64>, _>("department_id")),
                 "role" => Some(row.get::<Option<i64>, _>("role_id")),
@@ -1135,6 +1187,41 @@ mod tests {
         );
     }
 
+    #[test]
+    fn only_a_faithful_mapping_lets_the_read_lane_take_a_field() {
+        let row = |a: &str, k: &str, t: &str| (a.to_string(), k.to_string(), t.to_string());
+        assert!(echoed_fields(&[]).is_empty(), "eşleme yok: AD'nin değeri");
+        let defaults = [
+            row("givenName", "given_name", "none"),
+            row("sn", "surname", "none"),
+            row("displayName", "template", "none"),
+            row("department", "department_name", "none"),
+            row("title", "title", "none"),
+            row("employeeID", "employee_number", "none"),
+            row("mobile", "mobile_phone", "phone_national"),
+        ];
+        assert!(echoed_fields(&defaults).is_empty(), "varsayılan eşlemeler");
+        let echoes = [
+            row("title", "constant", "none"),
+            row("department", "template", "none"),
+            row("employeeNumber", "template", "none"),
+            row("mobile", "constant", "none"),
+            row("givenName", "given_name", "lower"),
+            row("sn", "given_name", "none"),
+        ];
+        assert_eq!(
+            echoed_fields(&echoes),
+            [
+                "given_name",
+                "surname",
+                "employee_number",
+                "mobile_phone",
+                "department",
+                "role"
+            ]
+        );
+    }
+
     // ADR-138 uctan uca: ilk taramada taban yok; ikinci taramada yalnizca AD'de
     // degisen alan kimlige yazilir, iki tarafta degisen alana dokunulmaz.
     #[tokio::test]
@@ -1276,6 +1363,39 @@ mod tests {
             .await,
             0,
             "AD değişmedi: tekrar alınmaz"
+        );
+
+        // Guvenlik denetimi OS-05: eslememizin AD'ye yazdigi deger yanki, alinmaz
+        sqlx::query(
+            "INSERT INTO attribute_mappings (target_system_id, target_attribute, source_kind, source_text) \
+             VALUES ($1, 'employeeID', 'template', '{employee_number}9'), \
+                    ($1, 'givenName', 'constant', 'Mallory') \
+             ON CONFLICT (target_system_id, target_attribute) DO UPDATE \
+             SET source_kind = EXCLUDED.source_kind, source_text = EXCLUDED.source_text",
+        )
+        .bind(seed.ad)
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            scan(accounts(
+                "Mallory",
+                "+905322222222",
+                "000000001009",
+                "Kaya-AD"
+            ))
+            .await,
+            0,
+            "sabit ve şablon yankısı alınmaz"
+        );
+        assert_eq!(
+            fields(seed.identity).await,
+            (
+                "Ayşegül".into(),
+                "Yılmaz".into(),
+                Some("00000000100".into()),
+                Some("+905322222222".into())
+            )
         );
 
         drop(pool);

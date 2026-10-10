@@ -760,7 +760,11 @@ Kurallar:
   - Kabul: UPN biçimli oturum adı (`ik.operatoru@corp.example`, Entra ID'nin `preferred_username`'i) kendi kaydına ek rol veremez; kendi departmanını düzenleme formuyla değiştiremez (403)
   - Not: `identity::own_role_change` artık `operator_guard::is_own_record`'u çağırıyor; kendi `lower(username) = lower($2)` eşleşmesi silindi. Düzenleme için (birincil rol, departman) çifti verilir
   - Doğrulama (2026-10-10, vaultscan): `scripts/test-all.sh` → backend **285/285** (`an_operator_cannot_change_roles_on_their_own_record` departman ve UPN biçimli oturum senaryolarıyla genişledi), fmt + clippy + audit temiz; worker 130/132, iki kırmızı kapalı Windows AD
-- [ ] OS-05: Okuma şeridi OpenSicil'in kendi eşlemeyle yazdığı değeri AD değişikliği saymaz (ADR-138)
+- [x] OS-05: Okuma şeridi OpenSicil'in kendi eşlemeyle yazdığı değeri AD değişikliği saymaz (ADR-138)
+  - Kabul: okuma şeridi alanını besleyen AD özniteliği (givenName, sn, employeeID/employeeNumber, mobile/telephoneNumber, department, title) kimliğin aynı alanından ve dönüşümsüz eşlenmiyorsa (sabit, şablon, başka alan, `lower`/`ascii`) o alan AD'den alınmaz; telefon biçim dönüşümleri yankı sayılmaz
+  - Kabul: sandbox'taki `{employee_number}9` döngüsü ve sabit `givenName` taramada 0 kimlik değiştirir; varsayılan eşlemelerle ADR-138 aynen çalışır
+  - Not: rapordaki savunma derinliği önerileri (bu özniteliklerde sabit/şablonu eşleme ekranında reddetmek, okuma şeridi rol/departman değişikliğini eşik üstünde onaya göndermek, `MAPPING_CHANGED` denetimine `source_text` yazmak) yapılmadı; özette "önerilen"
+  - Doğrulama (2026-10-10, vaultscan): `scripts/test-all.sh` → worker **131/133** (yeni saf test `only_a_faithful_mapping_lets_the_read_lane_take_a_field`; `a_directory_side_change_reaches_the_identity_on_the_next_scan` sabit `givenName` + `{employee_number}9` taramasıyla genişledi, 0 kimlik değişir), iki kırmızı kapalı Windows AD; backend 285/285, fmt + clippy + audit iki crate'te temiz
 - [ ] OS-06: Hedef sistemin gün ayarları sınırlı; aşırı değer worker zamanlayıcısını kilitlemez
 - [ ] OS-07: Break-glass parolası değişince eski yerel oturumlar düşer
 
