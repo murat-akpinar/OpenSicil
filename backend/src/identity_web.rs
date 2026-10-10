@@ -520,8 +520,8 @@ async fn departure(
     Path(id): Path<i64>,
     Form(form): Form<LifecycleForm>,
 ) -> Response {
-    if !allowed(&op, REGISTER_AUTHORITIES) {
-        return forbidden(op.lang);
+    if let Some(refused) = refuse_lifecycle(&state, &op, id).await {
+        return refused;
     }
     let time_zone = match state.time_zone().await {
         Ok(tz) => tz,
@@ -573,8 +573,8 @@ async fn emergency(
     Path(id): Path<i64>,
     Form(form): Form<LifecycleForm>,
 ) -> Response {
-    if !allowed(&op, REGISTER_AUTHORITIES) {
-        return forbidden(op.lang);
+    if let Some(refused) = refuse_lifecycle(&state, &op, id).await {
+        return refused;
     }
     let Some(reason) = opt(&form.reason) else {
         return bad(op.lang.t("err.emergency_reason_required"));
@@ -605,8 +605,8 @@ async fn revert(
     Path(id): Path<i64>,
     Form(form): Form<LifecycleForm>,
 ) -> Response {
-    if !allowed(&op, REGISTER_AUTHORITIES) {
-        return forbidden(op.lang);
+    if let Some(refused) = refuse_lifecycle(&state, &op, id).await {
+        return refused;
     }
     let return_day = opt(&form.return_day);
     if return_day.is_some_and(|d| crate::desired_state::Date::from_iso(d).is_none()) {
@@ -636,8 +636,8 @@ async fn cancel(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Response {
-    if !allowed(&op, REGISTER_AUTHORITIES) {
-        return forbidden(op.lang);
+    if let Some(refused) = refuse_lifecycle(&state, &op, id).await {
+        return refused;
     }
     match identity::cancel_registration(&state.pool, id).await {
         Ok(true) => {
@@ -664,8 +664,8 @@ async fn suspend(
     Path(id): Path<i64>,
     Form(form): Form<LifecycleForm>,
 ) -> Response {
-    if !allowed(&op, REGISTER_AUTHORITIES) {
-        return forbidden(op.lang);
+    if let Some(refused) = refuse_lifecycle(&state, &op, id).await {
+        return refused;
     }
     let end = opt(&form.suspension_end);
     match identity::set_suspension(&state.pool, id, form.suspension_start.trim(), end).await {
@@ -692,8 +692,8 @@ async fn lift(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Response {
-    if !allowed(&op, REGISTER_AUTHORITIES) {
-        return forbidden(op.lang);
+    if let Some(refused) = refuse_lifecycle(&state, &op, id).await {
+        return refused;
     }
     match identity::lift_suspension(&state.pool, id).await {
         Ok(true) => {
@@ -784,6 +784,20 @@ async fn edit_submit(
     .await;
     enqueue_single(&state, id).await;
     Redirect::to(&format!("/identities/{id}")).into_response()
+}
+
+/// ADR-005: yasam dongusu yetkisi; operator kendi ayrilisini ve askisini
+/// isleyemez, uzatamaz, geri alamaz (guvenlik denetimi OS-03). operator_guard
+/// yalnizca tarih gectikten sonra reddeder. None: devam.
+async fn refuse_lifecycle(state: &AppState, op: &Operator, id: i64) -> Option<Response> {
+    if !allowed(op, REGISTER_AUTHORITIES) {
+        return Some(forbidden(op.lang));
+    }
+    match crate::operator_guard::is_own_record(&state.pool, id, &op.username).await {
+        Ok(false) => None,
+        Ok(true) => Some(forbidden(op.lang)),
+        Err(e) => Some(internal("kimlik sahibi okunamadı", e)),
+    }
 }
 
 /// docs/07: kendi kaydinda rol degisikligi 403; okunamazsa 500. None: devam.
@@ -1520,6 +1534,66 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(primary, role);
+
+        drop(app);
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
+    /// Guvenlik denetimi OS-03 (ADR-005): planlanmis ayrilis ve aski henuz
+    /// islemediginde operator_guard reddetmez; kendi kaydi kurali burada tutar.
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn an_operator_cannot_touch_their_own_departure_or_suspension() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        let [own, other] = crate::test_support::seed_two_identities(&pool).await;
+        sqlx::query(
+            "UPDATE identities SET username = 'IK.Operatoru', end_at = now() + interval '5 days', \
+             suspension_start = current_date + 3 WHERE id = $1",
+        )
+        .bind(own)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let app =
+            crate::server::build_router(crate::web::test_state(pool.clone(), "https://localhost"));
+        let hr = operator_cookie(&pool, &["hr"]).await;
+        let post = |uri: String, body: &'static str| {
+            let (app, hr) = (app.clone(), hr.clone());
+            async move {
+                app.oneshot(request("POST", &uri, body, &hr))
+                    .await
+                    .unwrap()
+                    .status()
+            }
+        };
+
+        for (path, body) in [
+            ("revert", ""),
+            ("departure", "end_date=2099-12-31"),
+            ("emergency", "reason=x"),
+            ("cancel", ""),
+            ("suspension", "suspension_start=2099-01-01"),
+            ("suspension/lift", ""),
+        ] {
+            let status = post(format!("/identities/{own}/{path}"), body).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{path}");
+        }
+        let (kept_end, kept_suspension): (bool, bool) = sqlx::query_as(
+            "SELECT end_at < now() + interval '6 days', suspension_start IS NOT NULL \
+             FROM identities WHERE id = $1",
+        )
+        .bind(own)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(kept_end && kept_suspension, "takvim yerinde");
+        let status = post(
+            format!("/identities/{other}/departure"),
+            "end_date=2099-12-31",
+        )
+        .await;
+        assert_eq!(status, StatusCode::SEE_OTHER, "başkasının ayrılışı serbest");
 
         drop(app);
         drop(pool);

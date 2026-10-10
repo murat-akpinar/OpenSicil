@@ -72,6 +72,7 @@
 - Raporlardaki bekleyen iş kutusu dolu olan ilk listeye gider
 - Yetkisi olmayan oturum hiçbir operatör ekranını okuyamaz
 - CSV içe aktarma operatörün kendi kaydında rol, departman ve ayrılış değiştiremez
+- Operatör kendi ayrılışını ve askısını işleyemez, uzatamaz, geri alamaz
 
 ### Geri alınanlar
 

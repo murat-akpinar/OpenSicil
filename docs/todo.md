@@ -752,7 +752,10 @@ Kurallar:
   - Kabul: aynı satırda yalnızca ad değişiyorsa geçer; başka operatör aynı satırı uygular
   - Not: eşleşme `operator_guard::is_own_record` — oturum reddiyle aynı SQL (`own_record_match!`, `@` öncesi kullanıcı adı ya da UPN); OS-04 formları da buna bağlayacak
   - Doğrulama (2026-10-10, vaultscan): `scripts/test-all.sh` → backend **284/284** (yeni test `an_operator_cannot_change_access_on_their_own_record_by_file`: kullanıcı adı ve UPN biçimli operatör reddedilir, başka operatör ve yalnızca ad değişikliği geçer), fmt + clippy + audit temiz; worker 130/132, iki kırmızı yine kapalı Windows AD
-- [ ] OS-03: Operatör kendi ayrılışını ve askısını işleyemez, uzatamaz, geri alamaz (ADR-005)
+- [x] OS-03: Operatör kendi ayrılışını ve askısını işleyemez, uzatamaz, geri alamaz (ADR-005)
+  - Kabul: ayrılış, acil ayrılış, geri alma, kayıt iptali, askı ve askı kaldırma kendi kaydında 403; takvim değişmez. Başkasının kaydında aynen çalışır
+  - Not: altı işleyicinin ortak yetki satırı `refuse_lifecycle`'a taşındı (yetki + `operator_guard::is_own_record`). `operator_guard` yalnızca tarih geçtikten sonra reddettiği için planlanmış ayrılış önceden geri alınabiliyordu
+  - Doğrulama (2026-10-10, vaultscan): `scripts/test-all.sh` → backend **285/285** (yeni test `an_operator_cannot_touch_their_own_departure_or_suspension` tam router + `operator_guard` katmanıyla: altı yol 403, takvim yerinde, başkasının ayrılışı 303), fmt + clippy + audit temiz; worker 130/132, iki kırmızı kapalı Windows AD
 - [ ] OS-04: Kendi kaydı kuralı operator_guard'la aynı eşleşmeyi kullanır ve departmanı da kapsar
 - [ ] OS-05: Okuma şeridi OpenSicil'in kendi eşlemeyle yazdığı değeri AD değişikliği saymaz (ADR-138)
 - [ ] OS-06: Hedef sistemin gün ayarları sınırlı; aşırı değer worker zamanlayıcısını kilitlemez
