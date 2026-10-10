@@ -499,6 +499,36 @@ mod tests {
         let page = text(send("POST", String::new(), hr).await).await;
         assert!(page.contains(crate::i18n::DEFAULT.t("deletions.none_selected")));
 
+        // OS-10: onay o ayrilisa ait; ayrilisa dokunmayan yazma onayi birakir,
+        // geri alma kaldirir ve sonraki ayrilis yeniden onay bekler
+        let approved_now = || async {
+            sqlx::query_scalar::<_, bool>(
+                "SELECT deletion_approved FROM account_links WHERE identity_id = $1",
+            )
+            .bind(ids[0])
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        };
+        sqlx::query("UPDATE identities SET given_name = 'Yeni', cancelled = FALSE WHERE id = $1")
+            .bind(ids[0])
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(approved_now().await);
+        assert!(crate::identity::revert_departure(&pool, ids[0], None)
+            .await
+            .unwrap());
+        assert!(!approved_now().await);
+        sqlx::query("UPDATE identities SET end_at = now() - interval '100 days' WHERE id = $1")
+            .bind(ids[0])
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(pending_counts(&pool).await.unwrap().1, 1);
+        let rows = load(&pool, "Europe/Istanbul").await.unwrap();
+        assert_eq!(rows[0].status, AWAITING);
+
         drop(app);
         drop(pool);
         crate::test_support::drop_temp_db(&admin_pool, &db_name).await;

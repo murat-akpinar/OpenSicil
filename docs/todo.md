@@ -788,7 +788,11 @@ Kurallar:
   - Kabul: rol/departman sayfasındaki onay ve ret formu taslağın belirtecini (`pending_at`, mikrosaniye) taşır; belirteç bekleyen taslakla uyuşmazsa ya da yoksa karar verilmez, sayfa `err.change_set_changed` ile yeni taslağı gösterir
   - Kabul: onaydan sonra yalnızca onaylanan taslak silinir (`change_set::clear` belirteçle); yayım sırasında kaydedilen yeni taslak bekler
   - Doğrulama (2026-10-10, vaultscan): `scripts/test-all.sh` → TEMİZ: backend **285/285**, worker **133/133**, fmt + clippy + audit iki crate'te temiz. `over_threshold_edit_waits_as_draft_until_an_admin_approves` sandbox senaryosunu sınar (A görülür, B kaydedilir, A belirteçli ve belirteçsiz onay B'yi yayımlamaz; yeniden bakınca B onaylanır; belirteçsiz red taslağı atmaz); belirteç kontrolü çıkarılınca test kırmızı
-- [ ] OS-10: Geri alınan ayrılış hesap silme onayını sıfırlar
+- [x] OS-10: Geri alınan ayrılış hesap silme onayını sıfırlar
+  - Kabul: `identities.end_at` ya da `cancelled` değişince (geri alma, tarih değişikliği, acil ayrılış, kayıt iptali, CSV) kimliğin `account_links.deletion_approved` bayrakları aynı işlemde `FALSE` olur; sonraki ayrılışın saklaması dolunca hesap yeniden "onay bekliyor"a düşer ve onaysız silme işi açılmaz
+  - Kabul: ayrılışa dokunmayan yazma (ad değişikliği, aynı değerle `cancelled`) onayı bırakır
+  - Not: kural migration 0038'deki tetikleyicide (`identities_departure_changed`) — `end_at`'i yazan beş backend yolu ayrı ayrı yamanmadı, gelecekteki yol da kaçamaz. `SCHEMA_VERSION` 38
+  - Doğrulama (2026-10-10, vaultscan): `scripts/test-all.sh` → TEMİZ: backend **285/285**, worker **133/133**, fmt + clippy + audit iki crate'te temiz. `awaiting_accounts_are_listed_and_approved_with_authority` onaydan sonra ad değişikliğinin onayı bıraktığını, `revert_departure`'ın kaldırdığını ve yeni ayrılışın yeniden onay beklediğini sınar; migration çıkarılınca test `!approved_now()` satırında kırmızı
 - [ ] OS-11: `admin` adlı kimlik break-glass girişini kilitleyemez
 - [ ] OS-12: CSV ayrıştırıcı satır sınırını belleği şişirmeden uygular
 - [ ] OS-13: Tek çakışan AD mail'i ya da sAMAccountName gece doldurmasını ve AD değişiklik senkronunu durdurmaz
