@@ -235,20 +235,35 @@ fn problem(key: &'static str, detail: impl ToString) -> Problem {
 pub fn parse(text: &str) -> Result<Table, Problem> {
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let delim = delimiter(text.lines().next().unwrap_or(""));
-    let records = records(text, delim).map_err(|key| problem(key, ""))?;
-    let mut filled = records
-        .into_iter()
+    // Kayitlar tek tek okunur: bos satir tutulmaz, satir siniri asilinca dosyanin
+    // gerisi ayristirilmaz (guvenlik denetimi OS-12: once hepsini Vec'e almak
+    // girdinin ~140 kati bellek ayiriyordu).
+    let mut filled = Records::new(text, delim)
         .enumerate()
-        .filter(|(_, cells)| cells.iter().any(|c| !c.trim().is_empty()))
-        .map(|(i, cells)| (i + 1, cells));
+        .map(|(i, record)| {
+            record.map(|cells| (i + 1, cells)).map_err(|key| {
+                let line = if key == RAGGED_ROW {
+                    (i + 1).to_string()
+                } else {
+                    String::new()
+                };
+                problem(key, line)
+            })
+        })
+        .filter(|r| {
+            r.as_ref().map_or(true, |(_, cells)| {
+                cells.iter().any(|c| !c.trim().is_empty())
+            })
+        });
     let (_, header) = filled
         .next()
-        .ok_or_else(|| problem("err.import_empty", ""))?;
+        .ok_or_else(|| problem("err.import_empty", ""))??;
     let columns = columns_of(&header)?;
     let mut rows = Vec::new();
-    for (line, cells) in filled {
+    for record in filled {
+        let (line, cells) = record?;
         if cells.len() != columns.len() {
-            return Err(problem("err.import_ragged_row", line));
+            return Err(problem(RAGGED_ROW, line));
         }
         if rows.len() == MAX_ROWS {
             return Err(problem("err.import_too_many_rows", MAX_ROWS));
@@ -270,36 +285,58 @@ fn delimiter(first_line: &str) -> char {
         .unwrap_or(',')
 }
 
-fn records(text: &str, delim: char) -> Result<Vec<Vec<String>>, &'static str> {
-    let (mut rows, mut row, mut cell) = (Vec::new(), Vec::new(), String::new());
-    let mut quoted = false;
-    let mut chars = text.chars().peekable();
-    while let Some(c) = chars.next() {
-        match (quoted, c) {
-            (true, '"') if chars.peek() == Some(&'"') => {
-                chars.next();
-                cell.push('"');
-            }
-            (true, '"') => quoted = false,
-            (true, other) => cell.push(other),
-            (false, '"') if cell.is_empty() => quoted = true,
-            (false, '\r') => {}
-            (false, '\n') => {
-                row.push(std::mem::take(&mut cell));
-                rows.push(std::mem::take(&mut row));
-            }
-            (false, other) if other == delim => row.push(std::mem::take(&mut cell)),
-            (false, other) => cell.push(other),
+const RAGGED_ROW: &str = "err.import_ragged_row";
+/// Gecerli bir satirda bundan fazla hucre olamaz (her sutun en cok bir kez);
+/// sinir, tek satirlik ayrac yiginini hucre hucre bellege almayi keser.
+const MAX_CELLS: usize = Column::ALL.len();
+
+struct Records<'a> {
+    chars: std::iter::Peekable<std::str::Chars<'a>>,
+    delim: char,
+}
+
+impl<'a> Records<'a> {
+    fn new(text: &'a str, delim: char) -> Self {
+        Records {
+            chars: text.chars().peekable(),
+            delim,
         }
     }
-    if quoted {
-        return Err("err.import_unclosed_quote");
-    }
-    if !cell.is_empty() || !row.is_empty() {
+}
+
+impl Iterator for Records<'_> {
+    type Item = Result<Vec<String>, &'static str>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.chars.peek()?;
+        let (mut row, mut cell) = (Vec::new(), String::new());
+        let mut quoted = false;
+        while let Some(c) = self.chars.next() {
+            match (quoted, c) {
+                (true, '"') if self.chars.peek() == Some(&'"') => {
+                    self.chars.next();
+                    cell.push('"');
+                }
+                (true, '"') => quoted = false,
+                (true, other) => cell.push(other),
+                (false, '"') if cell.is_empty() => quoted = true,
+                (false, '\r') => {}
+                (false, '\n') => break,
+                (false, other) if other == self.delim => {
+                    row.push(std::mem::take(&mut cell));
+                    if row.len() >= MAX_CELLS {
+                        return Some(Err(RAGGED_ROW));
+                    }
+                }
+                (false, other) => cell.push(other),
+            }
+        }
+        if quoted {
+            return Some(Err("err.import_unclosed_quote"));
+        }
         row.push(cell);
-        rows.push(row);
+        Some(Ok(row))
     }
-    Ok(rows)
 }
 
 fn columns_of(header: &[String]) -> Result<Vec<Column>, Problem> {
@@ -1928,6 +1965,33 @@ mod tests {
             parse("a,\"b\n").unwrap_err().key,
             "err.import_unclosed_quote"
         );
+    }
+
+    // OS-12: bos satir ve ayrac yigini kayit kayit bellege alinmaz; sinirlar
+    // dosyanin geri kalanini okumadan dosyayi reddeder.
+    #[test]
+    fn row_and_cell_limits_stop_parsing_early() {
+        let full_row = vec!["x"; MAX_CELLS].join(",");
+        let wide = format!("employee_number,given_name\n1,a\n{full_row},x\n");
+        let err = parse(&wide).unwrap_err();
+        assert_eq!(
+            (err.key, err.detail.as_str()),
+            ("err.import_ragged_row", "3")
+        );
+        assert_eq!(
+            Records::new(&full_row, ',').next(),
+            Some(Ok(vec!["x".to_string(); MAX_CELLS]))
+        );
+
+        let blanks = format!("employee_number,given_name\n{}1,a\n", "\n".repeat(1 << 20));
+        assert_eq!(parse(&blanks).unwrap().rows.len(), 1);
+
+        let mut many = String::from("employee_number,given_name\n");
+        for i in 0..=MAX_ROWS {
+            many.push_str(&format!("{i},a\n"));
+        }
+        many.push_str("\"acik tirnak");
+        assert_eq!(parse(&many).unwrap_err().key, "err.import_too_many_rows");
     }
 
     #[test]

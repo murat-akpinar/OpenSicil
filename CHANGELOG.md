@@ -81,6 +81,7 @@
 - Değişiklik seti onayı admin'in gördüğü taslağa bağlı
 - Geri alınan ya da değişen ayrılış hesap silme onayını sıfırlar
 - Admin adlı kimlik break-glass girişini kilitleyemez
+- CSV ayrıştırıcı satır sınırını belleği şişirmeden uygular
 
 ### Geri alınanlar
 

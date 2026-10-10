@@ -797,7 +797,10 @@ Kurallar:
   - Kabul: yerel (break-glass) oturum, adıyla eşleşen kimliğin yaşam döngüsüne bakılmadan açılır ve sürer; `operator_guard::check_operator` `auth_source = Local` ise `Allowed` döner. AD/OIDC operatörleri için ret aynen sürer
   - Not: rapordaki "`admin` kullanıcı adını ayır" önerisi yapılmadı — muafiyet kilitlenmeyi kapatıyor; özette "önerilen"
   - Doğrulama (2026-10-10, vaultscan): `scripts/test-all.sh` → TEMİZ: backend **285/285**, worker **133/133**, fmt + clippy + audit iki crate'te temiz. `full_bootstrap_login_and_config_flow` askıdaki `admin` kimliği varken baştan sona yürür; `matches_username_case_insensitively_and_by_upn_local_part` askıdaki kişi için yerel oturumun geçtiğini sınar
-- [ ] OS-12: CSV ayrıştırıcı satır sınırını belleği şişirmeden uygular
+- [x] OS-12: CSV ayrıştırıcı satır sınırını belleği şişirmeden uygular
+  - Kabul: `csv_import::parse` dosyayı `Records` ile kayıt kayıt okur; boş satır tutulmaz, `MAX_ROWS` aşılınca dosyanın gerisi ayrıştırılmaz; satırda `MAX_CELLS` (14 kolon) üstü hücre `err.import_ragged_row` + satır numarasıyla reddedilir
+  - Not: rapordaki "container bellek sınırı" önerisi yapılmadı; ayrıştırıcı artık girdiyle orantılı küçük bellek kullanıyor. Bellek ölçümü yapılmadı (laptopta `/usr/bin/time` yok)
+  - Doğrulama (2026-10-10, vaultscan): `scripts/test-all.sh` → TEMİZ: backend **286/286** (yeni `row_and_cell_limits_stop_parsing_early`: geniş satır reddi, 1 MiB boş satır, sınır aşımında sondaki kapanmamış tırnağa ulaşılmadan `too_many_rows`), worker **133/133**, fmt + clippy + audit iki crate'te temiz
 - [ ] OS-13: Tek çakışan AD mail'i ya da sAMAccountName gece doldurmasını ve AD değişiklik senkronunu durdurmaz
 - [ ] OS-14: Kaçışlı virgüllü RDN yönetilen OU kapsamını atlatamaz
 - [ ] OS-15: İstek günlüğündeki istemci adresi sahtelenemez
