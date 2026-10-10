@@ -301,11 +301,18 @@ fn is_forbidden_seed(group: &DirectoryGroup) -> bool {
             .any(|m| m.eq_ignore_ascii_case(&group.name))
 }
 
-// DN kapsam OU'larindan birinin altinda mi (buyuk/kucuk harf duyarsiz).
+// DN kapsam OU'larindan birinin altinda mi (buyuk/kucuk harf duyarsiz). Ust
+// zincir RDN RDN yurunur: duz sonek karsilastirmasi `CN=x\,OU=Personel,...`
+// gibi kacisli virgulu sinir sanip kapsam disini iceride sayiyordu (OS-14).
 pub fn under_any(dn: &str, ous: &[String]) -> bool {
-    let lower = dn.to_ascii_lowercase();
-    ous.iter()
-        .any(|ou| lower.ends_with(&format!(",{}", ou.to_ascii_lowercase())))
+    let mut rest = dn;
+    while let Some((_, parent)) = crate::ad_account::split_dn(rest) {
+        if ous.iter().any(|ou| ou.eq_ignore_ascii_case(parent)) {
+            return true;
+        }
+        rest = parent;
+    }
+    false
 }
 
 fn to_group(entry: &SearchEntry) -> Option<DirectoryGroup> {
@@ -819,6 +826,14 @@ mod tests {
         assert!(
             !under_any("OU=Gruplar,DC=opensicil,DC=lab", &ous),
             "OU'nun kendisi altında değil"
+        );
+        assert!(under_any(
+            "CN=a,OU=Alt,OU=Gruplar,DC=opensicil,DC=lab",
+            &ous
+        ));
+        assert!(
+            !under_any("CN=Evil\\,OU=Gruplar,DC=opensicil,DC=lab", &ous),
+            "kaçışlı virgül RDN sınırı değil (OS-14)"
         );
     }
 

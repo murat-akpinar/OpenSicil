@@ -805,7 +805,9 @@ Kurallar:
   - Kabul: `adoption::fill_person_fields` kullanıcı adı, e-posta, UPN ve sicili yalnızca değer başka kimlikte yoksa yazar (`fill_unique!`), gerçekten yazılan alanları döndürür; gece dolumunun denetim satırı yalnızca yazılanı sayar. Sahiplenme (`link_observed`) de aynı çakışmayla geri alınmaz
   - Not: `reconcile`'deki `taken` kümesi ve `employee_number_free` kolonu kalktı — aynı işlemde önce yazılan değeri SQL kendisi görür. Rapordaki "satır başına savepoint" yapılmadı: çakışma kökte kapandı
   - Doğrulama (2026-10-10, vaultscan): `scripts/test-all.sh` → TEMİZ: backend **286/286**, worker **133/133**, fmt + clippy + audit iki crate'te temiz. `the_scan_fills_empty_identity_fields_from_the_directory` Ali'nin AD adı ve maili başka kimlikteyken dolumun `Ok(0)` döndüğünü, alanların boş kaldığını sınar
-- [ ] OS-14: Kaçışlı virgüllü RDN yönetilen OU kapsamını atlatamaz
+- [x] OS-14: Kaçışlı virgüllü RDN yönetilen OU kapsamını atlatamaz
+  - Kabul: `ad::under_any` düz sonek karşılaştırması yerine üst zinciri `ad_account::split_dn` ile RDN RDN yürür; `CN=x\\,OU=<yönetilen>,…` kapsam dışı sayılır. Yazma kapsamı (`engine::out_of_scope`), sahiplenme ve grup kataloğu aynı fonksiyondan geçer
+  - Doğrulama (2026-10-10, vaultscan): `scripts/test-all.sh` → TEMİZ: backend **286/286**, worker **133/133**, fmt + clippy + audit iki crate'te temiz. `under_any_is_case_insensitive_suffix_match` iç içe OU'yu kabul, kaçışlı virgüllü adı ret ile genişledi
 - [ ] OS-15: İstek günlüğündeki istemci adresi sahtelenemez
 - [ ] Doğrulama gerekenler: altı ipucu tek tek denenir; gerçek çıkan bulgu kendi kutucuğuna dönüşür
 ---
