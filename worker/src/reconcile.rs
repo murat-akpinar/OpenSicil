@@ -5,7 +5,7 @@
 // Okuma seridinde calisir (ADR-051): hedefe hicbir sey yazmaz, denetim kaydina
 // dokunmaz, fren sayaclarini (ADR-050) harcamaz. Tek yazdigi tablo
 // `reconcile_findings` ve oraya yalnizca worker yazabilir (ADR-015).
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::ad::DirectoryAccount;
 use crate::adoption::{self, PersonValues};
@@ -239,8 +239,6 @@ pub const FILLED_EVENT: &str = "identity.fields_filled";
 const FILL_SQL: &str = "SELECT f.identity_id, f.account_name, f.mail AS ad_mail, \
     f.mobile AS ad_mobile, f.telephone_number AS ad_telephone, \
     f.employee_number AS ad_employee_number, \
-    NOT EXISTS (SELECT 1 FROM identities o WHERE o.employee_number = f.employee_number) \
-      AS employee_number_free, \
     i.username, i.email, i.mobile_phone, i.employee_number, i.manager_id, \
     mi.id AS ad_manager_id \
     FROM reconcile_findings f JOIN identities i ON i.id = f.identity_id \
@@ -292,9 +290,6 @@ pub async fn fill_linked_identities(pool: &PgPool, target: i64) -> Result<usize,
         .await
         .map_err(|e| format!("dolum adayları okunamadı: {e}"))?;
     let mut tx: Transaction<'_, Postgres> = pool.begin().await.map_err(|e| e.to_string())?;
-    // Ayni sicil iki bulguda duruyorsa ikincisini SQL'in tekillik kontrolu
-    // zaten atlar; denetim satiri "doldu" demesin diye burada da atlanir.
-    let mut taken: HashSet<String> = HashSet::new();
     let mut filled_ids: Vec<i64> = Vec::new();
     for row in &rows {
         let identity: i64 = row.get("identity_id");
@@ -303,7 +298,6 @@ pub async fn fill_linked_identities(pool: &PgPool, target: i64) -> Result<usize,
         let ad_mobile: Option<String> = row.get("ad_mobile");
         let ad_telephone: Option<String> = row.get("ad_telephone");
         let ad_employee: Option<String> = row.get("ad_employee_number");
-        let employee_free: bool = row.get("employee_number_free");
         let have_username: Option<String> = row.get("username");
         let have_email: Option<String> = row.get("email");
         let have_phone: Option<String> = row.get("mobile_phone");
@@ -312,28 +306,26 @@ pub async fn fill_linked_identities(pool: &PgPool, target: i64) -> Result<usize,
         let ad_manager: Option<i64> = row.get("ad_manager_id");
 
         let phone = adoption::writable_phone(ad_mobile.as_deref().or(ad_telephone.as_deref()));
-        let free_employee = ad_employee
-            .as_deref()
-            .filter(|v| employee_free && !taken.contains(*v));
         let values = PersonValues {
             username: fillable(have_username.as_deref(), Some(account_name.as_str())),
             email: fillable(have_email.as_deref(), ad_mail.as_deref()),
             upn: None,
             phone: fillable(have_phone.as_deref(), phone),
-            employee_number: fillable(have_employee.as_deref(), free_employee),
+            employee_number: fillable(have_employee.as_deref(), ad_employee.as_deref()),
             // ADR-129: yonetici de bos alan; dolu olan degismez. Yoneticinin
             // hesabi henuz sahiplenilmemisse `ad_manager` bostur, sonraki gece
             // taramasi yeniden dener.
             manager_id: have_manager.is_none().then_some(ad_manager).flatten(),
         };
-        let names = filled_field_names(&values);
+        if filled_field_names(&values).is_empty() {
+            continue;
+        }
+        // Deger baska kimlikte duruyorsa yazilmaz; denetim yalnizca yazilani der.
+        let names =
+            filled_field_names(&adoption::fill_person_fields(&mut tx, identity, &values).await?);
         if names.is_empty() {
             continue;
         }
-        if let Some(value) = values.employee_number {
-            taken.insert(value.to_string());
-        }
-        adoption::fill_person_fields(&mut tx, identity, &values).await?;
         sqlx::query(
             "INSERT INTO audit_log (event_type, identity_id, target_system_id, detail) \
              VALUES ($1, $2, $3, $4::jsonb)",
@@ -1106,6 +1098,29 @@ mod tests {
             0,
             "ikinci tarama dolacak alan bulmaz"
         );
+
+        // OS-13: Ali'nin AD adi ve maili baska kimlikte duruyor; dolum o
+        // alanlari atlar, tarama dusmez, denetim "doldu" demez.
+        sqlx::query("UPDATE identities SET username = NULL, email = NULL WHERE id = $1")
+            .bind(seed.other_identity)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "UPDATE identities SET username = 'ali.kaya', email = 'ali.kaya@hogwarts.local' \
+             WHERE id = $1",
+        )
+        .bind(seed.identity)
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            fill_linked_identities(&pool, seed.ad).await,
+            Ok(0),
+            "çakışan değer yazılmaz, tarama sürer"
+        );
+        assert_eq!(fields(seed.other_identity).await.0, None);
+        assert_eq!(fields(seed.other_identity).await.1, None);
 
         // ADR-024 kisisel veri temizligi geri doldurulmaz. (Sicil serbest kaldigi
         // icin ayni taramada Ali'nin sicili dolar; bakilan sey silinmis kimlik.)

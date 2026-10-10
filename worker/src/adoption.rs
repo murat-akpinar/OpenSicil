@@ -276,24 +276,58 @@ impl<'a> PersonValues<'a> {
 
 // Ad, e-posta, UPN, sicil, cep ve yonetici: hepsi yalnizca kimlikte bosken
 // yazilir (ADR-129 yoneticiyi listeye ekledi), dolu
-// alana dokunulmaz (ADR-034/086/106). Sicil tekil kolondur: ayni deger baska bir
-// kimlikte duruyorsa yazilmaz — yoksa tek mukerrer numara butun sahiplenmeyi
+// alana dokunulmaz (ADR-034/086/106). Tekil kolonlar: ayni deger baska bir
+// kimlikte duruyorsa yazilmaz — yoksa tek mukerrer deger butun sahiplenmeyi
 // (baglanti + denetim satiri) geri alirdi. Sahiplenme ani ve gece mutabakati
 // (ADR-112 madde 1) ayni fonksiyondan geçer.
-pub async fn fill_person_fields(
+// Tekil kolon (username, email, upn, sicil) baska kimlikte duruyorsa yazilmaz;
+// ayni islemde onceki satirin yazdigi deger de "dolu" sayilir.
+macro_rules! fill_unique {
+    ($col:literal, $param:literal) => {
+        concat!(
+            $col,
+            " = COALESCE(",
+            $col,
+            ", (SELECT ",
+            $param,
+            "::text WHERE NOT EXISTS ",
+            "(SELECT 1 FROM identities o WHERE o.",
+            $col,
+            " = ",
+            $param,
+            ")))"
+        )
+    };
+}
+
+/// Doner: gercekten yazilan alanlar (deger kimlikte artik bizim verdigimiz).
+/// Yazilmayan = alan zaten doluydu ya da deger baska kimlikte (guvenlik denetimi
+/// OS-13: tek cakisan mail butun gece dolumunu ve AD senkronunu durduruyordu).
+pub async fn fill_person_fields<'a>(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     identity_id: i64,
-    v: &PersonValues<'_>,
-) -> Result<(), String> {
-    sqlx::query(
-        "UPDATE identities SET username = COALESCE(username, $2), email = COALESCE(email, $3), \
-         upn = COALESCE(upn, $4), mobile_phone = COALESCE(mobile_phone, $5), \
-         employee_number = COALESCE(employee_number, \
-           (SELECT $6::text WHERE NOT EXISTS \
-              (SELECT 1 FROM identities o WHERE o.employee_number = $6))), \
-         manager_id = COALESCE(manager_id, $7) \
-         WHERE id = $1",
-    )
+    v: &PersonValues<'a>,
+) -> Result<PersonValues<'a>, String> {
+    type Now = (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<i64>,
+    );
+    let now: Now = sqlx::query_as(concat!(
+        "UPDATE identities SET ",
+        fill_unique!("username", "$2"),
+        ", ",
+        fill_unique!("email", "$3"),
+        ", ",
+        fill_unique!("upn", "$4"),
+        ", mobile_phone = COALESCE(mobile_phone, $5), ",
+        fill_unique!("employee_number", "$6"),
+        ", manager_id = COALESCE(manager_id, $7) WHERE id = $1 \
+         RETURNING username, email, upn, mobile_phone, employee_number, manager_id"
+    ))
     .bind(identity_id)
     .bind(v.username)
     .bind(v.email)
@@ -301,10 +335,19 @@ pub async fn fill_person_fields(
     .bind(v.phone)
     .bind(v.employee_number)
     .bind(v.manager_id)
-    .execute(&mut **tx)
+    .fetch_one(&mut **tx)
     .await
-    .map(|_| ())
-    .map_err(|e| format!("kimlik alanları yazılamadı: {e}"))
+    .map_err(|e| format!("kimlik alanları yazılamadı: {e}"))?;
+    let kept =
+        |given: Option<&'a str>, now: Option<String>| given.filter(|g| now.as_deref() == Some(*g));
+    Ok(PersonValues {
+        username: kept(v.username, now.0),
+        email: kept(v.email, now.1),
+        upn: kept(v.upn, now.2),
+        phone: kept(v.phone, now.3),
+        employee_number: kept(v.employee_number, now.4),
+        manager_id: v.manager_id.filter(|m| now.5 == Some(*m)),
+    })
 }
 
 // ADR-018/087 yonetime alma: operator farki gorup onaylayinca backend yalnizca

@@ -82,6 +82,7 @@
 - Geri alınan ya da değişen ayrılış hesap silme onayını sıfırlar
 - Admin adlı kimlik break-glass girişini kilitleyemez
 - CSV ayrıştırıcı satır sınırını belleği şişirmeden uygular
+- Çakışan AD mail'i ya da hesap adı gece dolumunu durdurmaz
 
 ### Geri alınanlar
 

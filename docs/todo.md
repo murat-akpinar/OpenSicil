@@ -801,7 +801,10 @@ Kurallar:
   - Kabul: `csv_import::parse` dosyayı `Records` ile kayıt kayıt okur; boş satır tutulmaz, `MAX_ROWS` aşılınca dosyanın gerisi ayrıştırılmaz; satırda `MAX_CELLS` (14 kolon) üstü hücre `err.import_ragged_row` + satır numarasıyla reddedilir
   - Not: rapordaki "container bellek sınırı" önerisi yapılmadı; ayrıştırıcı artık girdiyle orantılı küçük bellek kullanıyor. Bellek ölçümü yapılmadı (laptopta `/usr/bin/time` yok)
   - Doğrulama (2026-10-10, vaultscan): `scripts/test-all.sh` → TEMİZ: backend **286/286** (yeni `row_and_cell_limits_stop_parsing_early`: geniş satır reddi, 1 MiB boş satır, sınır aşımında sondaki kapanmamış tırnağa ulaşılmadan `too_many_rows`), worker **133/133**, fmt + clippy + audit iki crate'te temiz
-- [ ] OS-13: Tek çakışan AD mail'i ya da sAMAccountName gece doldurmasını ve AD değişiklik senkronunu durdurmaz
+- [x] OS-13: Tek çakışan AD mail'i ya da sAMAccountName gece doldurmasını ve AD değişiklik senkronunu durdurmaz
+  - Kabul: `adoption::fill_person_fields` kullanıcı adı, e-posta, UPN ve sicili yalnızca değer başka kimlikte yoksa yazar (`fill_unique!`), gerçekten yazılan alanları döndürür; gece dolumunun denetim satırı yalnızca yazılanı sayar. Sahiplenme (`link_observed`) de aynı çakışmayla geri alınmaz
+  - Not: `reconcile`'deki `taken` kümesi ve `employee_number_free` kolonu kalktı — aynı işlemde önce yazılan değeri SQL kendisi görür. Rapordaki "satır başına savepoint" yapılmadı: çakışma kökte kapandı
+  - Doğrulama (2026-10-10, vaultscan): `scripts/test-all.sh` → TEMİZ: backend **286/286**, worker **133/133**, fmt + clippy + audit iki crate'te temiz. `the_scan_fills_empty_identity_fields_from_the_directory` Ali'nin AD adı ve maili başka kimlikteyken dolumun `Ok(0)` döndüğünü, alanların boş kaldığını sınar
 - [ ] OS-14: Kaçışlı virgüllü RDN yönetilen OU kapsamını atlatamaz
 - [ ] OS-15: İstek günlüğündeki istemci adresi sahtelenemez
 - [ ] Doğrulama gerekenler: altı ipucu tek tek denenir; gerçek çıkan bulgu kendi kutucuğuna dönüşür
