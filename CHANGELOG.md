@@ -71,6 +71,7 @@
 - Worker AD CA sertifikasını okuyabiliyor (ad_ca_pem kolon yetkisi eksikti)
 - Raporlardaki bekleyen iş kutusu dolu olan ilk listeye gider
 - Yetkisi olmayan oturum hiçbir operatör ekranını okuyamaz
+- CSV içe aktarma operatörün kendi kaydında rol, departman ve ayrılış değiştiremez
 
 ### Geri alınanlar
 

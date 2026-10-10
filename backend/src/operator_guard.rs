@@ -49,9 +49,35 @@ pub type TimelineRow = (
 // $2 her zaman kurulum saat dilimi; WHERE kismi cagirana gore degisir
 // (operator eslesmesi burada, kisi sayfasi id ile: identity.rs). Satir sayisini
 // cagiran belirler: id ile tek satir, ad eslesmesiyle birden fazla olabilir.
+// ADR-005/034: operatorun kendi kaydi. Oturum reddi ve kendi kaydi kurallari
+// (CSV, ayrilis, rol) ayni eslesmeyi kullanir; ayri yazilinca biri dar kaliyordu
+// (guvenlik denetimi OS-04). $1 her zaman operatorun adi.
+macro_rules! own_record_match {
+    () => {
+        "(lower(username) = lower(split_part($1, '@', 1)) OR lower(upn) = lower($1))"
+    };
+}
+
+/// Kimlik `id` bu operatorun kendi kaydi mi (ADR-005).
+pub async fn is_own_record(
+    pool: &PgPool,
+    id: i64,
+    preferred_username: &str,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(concat!(
+        "SELECT EXISTS (SELECT 1 FROM identities WHERE id = $2 AND ",
+        own_record_match!(),
+        ")"
+    ))
+    .bind(preferred_username)
+    .bind(id)
+    .fetch_one(pool)
+    .await
+}
+
 #[macro_export]
 macro_rules! timeline_sql {
-    ($where:literal) => {
+    ($where:expr) => {
         concat!(
             "SELECT to_char(start_date, 'YYYY-MM-DD'), \
              EXTRACT(EPOCH FROM end_at)::bigint, \
@@ -93,13 +119,11 @@ pub async fn check_operator(
     time_zone: &str,
     preferred_username: &str,
 ) -> Result<Verdict, sqlx::Error> {
-    let rows: Vec<TimelineRow> = sqlx::query_as(timeline_sql!(
-        "lower(username) = lower(split_part($1, '@', 1)) OR lower(upn) = lower($1)"
-    ))
-    .bind(preferred_username)
-    .bind(time_zone)
-    .fetch_all(pool)
-    .await?;
+    let rows: Vec<TimelineRow> = sqlx::query_as(timeline_sql!(own_record_match!()))
+        .bind(preferred_username)
+        .bind(time_zone)
+        .fetch_all(pool)
+        .await?;
     for row in &rows {
         let (timeline, clock) = timeline_from_row(row)?;
         if let Verdict::Rejected(state) = verdict_for(lifecycle_state(&timeline, &clock)) {

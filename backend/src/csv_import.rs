@@ -607,6 +607,8 @@ struct Ctx<'a> {
     pool: &'a PgPool,
     keys: &'a Keys<'a>,
     ownership: bool,
+    /// Yukleyen ya da onaylayan operator (ADR-005 kendi kaydi kurali)
+    operator: &'a str,
     file_numbers: HashSet<String>,
     numbers_seen: HashSet<String>,
     bidx_seen: HashSet<Vec<u8>>,
@@ -617,6 +619,7 @@ pub async fn plan(
     pool: &PgPool,
     keys: &Keys<'_>,
     ownership: bool,
+    operator: &str,
     table: &Table,
 ) -> Result<Plan, sqlx::Error> {
     let numbers: Vec<String> = table
@@ -630,6 +633,7 @@ pub async fn plan(
         pool,
         keys,
         ownership,
+        operator,
         file_numbers: numbers.into_iter().collect(),
         numbers_seen: HashSet::new(),
         bidx_seen: HashSet::new(),
@@ -733,7 +737,28 @@ async fn plan_row(ctx: &mut Ctx<'_>, refs: &Refs, table: &Table, row: &Row) -> R
         manager_ref,
         renumber,
     };
-    Ok(Ok(finish_row(table, row, number, existing, parts)))
+    let planned = finish_row(table, row, number, existing, parts);
+    if let Some(id) = planned.identity_id.filter(|_| touches_own_access(&planned)) {
+        if crate::operator_guard::is_own_record(ctx.pool, id, ctx.operator).await? {
+            return Ok(Err(row_error(row.line, None, "err.import_own_record")));
+        }
+    }
+    Ok(Ok(planned))
+}
+
+/// ADR-005: operator kendi kaydinda rolunu, departmanini ve ayrilisini
+/// degistiremez; formlar 403 verir, dosya da ayni kurala uyar.
+const OWN_ACCESS_COLUMNS: [Column; 4] = [
+    Column::DepartmentCode,
+    Column::PrimaryRole,
+    Column::AdditionalRoles,
+    Column::EndDate,
+];
+
+fn touches_own_access(planned: &RowPlan) -> bool {
+    OWN_ACCESS_COLUMNS
+        .iter()
+        .any(|column| planned.changes.contains(&column.name()))
 }
 
 /// Sicil nosu kayitli olmayan satirin kimlik numarasi baska bir kimlikte kayitliysa
@@ -1541,7 +1566,15 @@ async fn parse_and_plan(
         .await
         .map_err(|e| Box::new(internal("değişiklik seti eşiği okunamadı", e)))?;
     let ownership = ownership_enabled(state).await;
-    match plan(&state.pool, &keys_of(state), ownership, &table).await {
+    match plan(
+        &state.pool,
+        &keys_of(state),
+        ownership,
+        &op.username,
+        &table,
+    )
+    .await
+    {
         Ok(plan) => Ok((table, plan, threshold)),
         Err(e) => Err(Box::new(internal("içe aktarma planlanamadı", e))),
     }
@@ -1720,6 +1753,7 @@ async fn load_batch(
         &state.pool,
         &keys_of(state),
         ownership_enabled(state).await,
+        &op.username,
         &batch.table,
     )
     .await
@@ -1949,11 +1983,58 @@ mod tests {
         let text = "employee_number,given_name,surname,department_code,primary_role,\
                     employment_type,start_date\n\
                     3000,Veli,Can,BT,Tanımsız,permanent,2026-01-01\n";
-        let plan = plan(&pool, &TEST_KEYS, false, &table_of(text))
+        let plan = plan(&pool, &TEST_KEYS, false, "", &table_of(text))
             .await
             .unwrap();
         assert!(!plan.valid(), "yer tutucu rol dosyada seçilemez");
         assert_eq!(plan.new, 0);
+        drop(pool);
+        crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
+    }
+
+    // Guvenlik denetimi OS-02: formun 403'u CSV ile atlanamaz (ADR-005)
+    #[tokio::test]
+    #[ignore = "gerçek Postgres gerektirir: DATABASE_URL ile çalıştır (--include-ignored)"]
+    async fn an_operator_cannot_change_access_on_their_own_record_by_file() {
+        let (admin_pool, pool, db_name) = crate::test_support::fresh_migrated_db().await;
+        let (department, primary, _) = seed(&pool).await;
+        sqlx::query(
+            "INSERT INTO identities (given_name, surname, employee_number, username, department_id, \
+             primary_role_id, employment_type, start_date) \
+             VALUES ('İK', 'Operatörü', 'E1', 'ik.operatoru', $1, $2, 'permanent', current_date)",
+        )
+        .bind(department)
+        .bind(primary)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let header = "employee_number,given_name,surname,department_code,primary_role,\
+                      additional_roles,employment_type,start_date\n";
+        let plan_as = |operator: &'static str, row: &'static str| {
+            let pool = pool.clone();
+            async move {
+                let text = format!("{header}{row}\n");
+                plan(&pool, &TEST_KEYS, false, operator, &table_of(&text))
+                    .await
+                    .unwrap()
+            }
+        };
+        let own_role = "E1,İK,Operatörü,BT,Sistem Uzmanı,VPN,permanent,2026-01-01";
+        for operator in ["IK.Operatoru", "ik.operatoru@corp.example"] {
+            let refused = plan_as(operator, own_role).await;
+            assert_eq!(refused.updated, 0, "{operator}");
+            assert_eq!(refused.errors[0].key, "err.import_own_record", "{operator}");
+        }
+        let other = plan_as("baska.operator", own_role).await;
+        assert_eq!((other.updated, other.errors.len()), (1, 0));
+        let own_name = "E1,Yeni,Operatörü,BT,Sistem Uzmanı,,permanent,2026-01-01";
+        let renamed = plan_as("ik.operatoru", own_name).await;
+        assert_eq!(
+            (renamed.updated, renamed.errors.len()),
+            (1, 0),
+            "ad serbest"
+        );
+
         drop(pool);
         crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
     }
@@ -2005,7 +2086,7 @@ mod tests {
                     2000,Ali,Kaya,,BT,Sistem Uzmanı,,1000,permanent,2026-01-01\n\
                     1000,Ayşe,Yılmaz,+905321234567,bt,sistem uzmani,VPN,,Kadrolu,15.01.2026\n";
         let table = table_of(text);
-        let plan = plan(&pool, &TEST_KEYS, false, &table).await.unwrap();
+        let plan = plan(&pool, &TEST_KEYS, false, "", &table).await.unwrap();
         assert!(plan.valid(), "{:?}", plan.errors);
         assert_eq!((plan.new, plan.updated, plan.unchanged), (1, 1, 0));
         assert_eq!(plan.cleared, 2, "telefon + ek roller");
@@ -2059,7 +2140,9 @@ mod tests {
         assert_eq!(jobs, 4, "iki kimlik × iki hedef, toplu oncelik");
 
         // Ikinci kez ayni dosya: hicbir sey degismez
-        let again = super::plan(&pool, &TEST_KEYS, false, &table).await.unwrap();
+        let again = super::plan(&pool, &TEST_KEYS, false, "", &table)
+            .await
+            .unwrap();
         assert_eq!((again.new, again.updated, again.unchanged), (0, 0, 2));
 
         drop(pool);
@@ -2105,7 +2188,9 @@ mod tests {
             let pool = pool.clone();
             async move {
                 let table = table_of(&text);
-                let plan = super::plan(&pool, &TEST_KEYS, false, &table).await.unwrap();
+                let plan = super::plan(&pool, &TEST_KEYS, false, "", &table)
+                    .await
+                    .unwrap();
                 plan.errors
                     .into_iter()
                     .map(|e| (e.line, e.column, e.key))
@@ -2144,7 +2229,9 @@ mod tests {
             "{header},ad_account_hint\n5000,Ipucu,Yok,BT,Sistem Uzmanı,permanent,2026-01-01,\n\
              5001,Ipucu,Var,BT,Sistem Uzmanı,permanent,2026-01-01,ipucu.var\n"
         ));
-        let plan = super::plan(&pool, &TEST_KEYS, true, &table).await.unwrap();
+        let plan = super::plan(&pool, &TEST_KEYS, true, "", &table)
+            .await
+            .unwrap();
         assert_eq!(
             plan.errors
                 .iter()
@@ -2156,7 +2243,9 @@ mod tests {
         let table = table_of(&format!(
             "{header}\n6000,Eski,Personel,BT,Sistem Uzmanı,permanent,2026-01-01\n"
         ));
-        let plan = super::plan(&pool, &TEST_KEYS, false, &table).await.unwrap();
+        let plan = super::plan(&pool, &TEST_KEYS, false, "", &table)
+            .await
+            .unwrap();
         assert!(plan.valid());
         assert_eq!(plan.duplicates.len(), 1);
         assert_eq!(
@@ -2227,7 +2316,9 @@ mod tests {
                     employment_type,start_date,end_date\n\
                     K-100,Stajyer,Kadro,10000000146,BT,Sistem Uzmanı,permanent,2026-01-01,\n";
         let table = table_of(text);
-        let plan = super::plan(&pool, &TEST_KEYS, false, &table).await.unwrap();
+        let plan = super::plan(&pool, &TEST_KEYS, false, "", &table)
+            .await
+            .unwrap();
         assert!(plan.valid(), "{:?}", plan.errors);
         assert_eq!((plan.new, plan.updated), (0, 1), "yeni kimlik acilmaz");
         assert_eq!(plan.renumbers.len(), 1);
@@ -2278,7 +2369,9 @@ mod tests {
              K-100,Stajyer,Kadro,10000000146,BT,Sistem Uzmanı,permanent,2026-01-01\n\
              K-101,Baska,Biri,10000000146,BT,Sistem Uzmanı,permanent,2026-01-01\n",
         );
-        let plan = super::plan(&pool, &TEST_KEYS, false, &twice).await.unwrap();
+        let plan = super::plan(&pool, &TEST_KEYS, false, "", &twice)
+            .await
+            .unwrap();
         assert_eq!(
             plan.errors
                 .iter()

@@ -747,7 +747,11 @@ Kurallar:
   - Kabul: `/` bu oturuma panel yerine "yetkiniz yok" sayfasını verir (çıkış düğmesi kabukta); `/lang` çalışır
   - Not: `access_report` ve `activity`'deki handler başı "herhangi bir yetki" kontrolleri çıkarıcıya taşındığı için silindi. Rapordaki "kullanılmış adlar yalnızca Sistem yöneticisine" önerisi uygulanmadı: kod ve sekme düzeni (ADR-134) listeyi her operatöre açıyor, docs/07 tablosu yalnızca yöneticiyi yazıyor — çelişki özette "önerilen" olarak duruyor
   - Doğrulama (2026-10-10, vaultscan): `scripts/test-all.sh` → backend **283/283** (lab Samba + lab Keycloak dahil; yeni test `session_without_authority_sees_no_operator_screen` tam router ve `operator_guard` katmanıyla, lab AD testi `/identities` 403'ünü de bakıyor), fmt + clippy + audit iki crate'te temiz. Worker 130/132: iki kırmızı Windows AD testi (`No route to host`, Hogwarts DC kapalı), worker'a dokunulmadı
-- [ ] OS-02: CSV içe aktarma operatörün kendi kaydında rol, departman ve ayrılış tarihini değiştiremez (ADR-005)
+- [x] OS-02: CSV içe aktarma operatörün kendi kaydında rol, departman ve ayrılış tarihini değiştiremez (ADR-005)
+  - Kabul: dosya satırı yükleyenin kendi kaydına denk gelip departman, birincil rol, ek roller ya da bitiş tarihini değiştiriyorsa satır hatası olur (`err.import_own_record`); önizleme, hemen uygulama ve sahnelenen partinin onayı aynı `plan`'dan geçer, onayda onaylayana bakılır
+  - Kabul: aynı satırda yalnızca ad değişiyorsa geçer; başka operatör aynı satırı uygular
+  - Not: eşleşme `operator_guard::is_own_record` — oturum reddiyle aynı SQL (`own_record_match!`, `@` öncesi kullanıcı adı ya da UPN); OS-04 formları da buna bağlayacak
+  - Doğrulama (2026-10-10, vaultscan): `scripts/test-all.sh` → backend **284/284** (yeni test `an_operator_cannot_change_access_on_their_own_record_by_file`: kullanıcı adı ve UPN biçimli operatör reddedilir, başka operatör ve yalnızca ad değişikliği geçer), fmt + clippy + audit temiz; worker 130/132, iki kırmızı yine kapalı Windows AD
 - [ ] OS-03: Operatör kendi ayrılışını ve askısını işleyemez, uzatamaz, geri alamaz (ADR-005)
 - [ ] OS-04: Kendi kaydı kuralı operator_guard'la aynı eşleşmeyi kullanır ve departmanı da kapsar
 - [ ] OS-05: Okuma şeridi OpenSicil'in kendi eşlemeyle yazdığı değeri AD değişikliği saymaz (ADR-138)
