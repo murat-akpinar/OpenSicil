@@ -262,6 +262,8 @@ config.scan_at_hint = "Comma-separated HH:MM list in the organisation time zone 
 err.ldap_attribute_shape = "The attribute name must start with a letter and contain only letters, digits and hyphens (e.g. extensionAttribute5)."
 err.ad_ca_invalid = "The CA certificate could not be read: it must be PEM with at least one valid CERTIFICATE block."
 err.ad_ca_required = "A CA certificate is required when an AD host is set; LDAPS certificate validation cannot be turned off."
+err.ad_ldaps_only = "The AD host must use LDAPS (ldaps:// or no scheme); plain LDAP would send the service password in cleartext."
+err.secret_reenter_on_endpoint_change = "Re-enter that system's password when its address or certificate changes; the stored password is not sent to a new address."
 
 # --- operator home ---
 home.new_identity = "New identity"

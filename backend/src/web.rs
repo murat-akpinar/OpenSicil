@@ -664,6 +664,48 @@ fn check_ad_ca(ad_host: &str, ca_pem: &str) -> Result<(), &'static str> {
     }
 }
 
+/// Acik `ldap://` (ya da baska sema) servis parolasini duz metin tasirdi.
+fn check_ldaps_only(ad_host: &str) -> Result<(), &'static str> {
+    crate::ad_auth::parse_urls(ad_host)
+        .iter()
+        .all(|url| url.starts_with("ldaps://"))
+        .then_some(())
+        .ok_or("err.ad_ldaps_only")
+}
+
+/// Uc nokta degisirken bos birakilan sir, saklanan sirri yeni adrese
+/// gondertirdi (admin sirri geri okuyamaz kurali); yeniden girilmesi istenir.
+fn check_secret_follows_endpoint(
+    before: &crate::settings::AppSettings,
+    form: &ConfigForm,
+) -> Result<(), &'static str> {
+    let ad_moved = form.ad_host != before.ad_host || form.ad_ca_pem.trim() != before.ad_ca_pem;
+    let stale = [
+        (
+            before.ad_service_password_set,
+            &form.ad_service_password,
+            ad_moved,
+        ),
+        (
+            before.zimbra_admin_password_set,
+            &form.zimbra_admin_password,
+            form.zimbra_url != before.zimbra_url,
+        ),
+        (
+            before.oidc_client_secret_set,
+            &form.oidc_client_secret,
+            form.oidc_issuer != before.oidc_issuer,
+        ),
+    ]
+    .into_iter()
+    .any(|(stored, typed, moved)| stored && moved && typed.is_empty());
+    if stale {
+        Err("err.secret_reenter_on_endpoint_change")
+    } else {
+        Ok(())
+    }
+}
+
 /// Denetim satirina yalnizca hangi sirrin guncellendigi girer, degeri degil.
 fn updated_secret_names(form: &ConfigForm) -> Vec<&'static str> {
     [
@@ -689,10 +731,6 @@ async fn config_submit(
         let text = operator.lang.t("err.ldap_attribute_shape").to_string();
         return (StatusCode::BAD_REQUEST, text).into_response();
     }
-    if let Err(key) = check_ad_ca(&form.ad_host, &form.ad_ca_pem) {
-        return (StatusCode::BAD_REQUEST, operator.lang.t(key).to_string()).into_response();
-    }
-    let secrets_updated = updated_secret_names(&form);
     let before = match crate::settings::load(&state.pool).await {
         Ok(s) => s,
         Err(e) => {
@@ -700,6 +738,13 @@ async fn config_submit(
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
+    if let Err(key) = check_ad_ca(&form.ad_host, &form.ad_ca_pem)
+        .and_then(|()| check_ldaps_only(&form.ad_host))
+        .and_then(|()| check_secret_follows_endpoint(&before, &form))
+    {
+        return (StatusCode::BAD_REQUEST, operator.lang.t(key).to_string()).into_response();
+    }
+    let secrets_updated = updated_secret_names(&form);
     let input = crate::settings::AppSettingsInput::from(form);
     if let Err(e) = crate::settings::save(&state.pool, &state.aead_key, &input).await {
         log_error!("web: ayarlar kaydedilemedi: {e}");
@@ -1483,6 +1528,57 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        // OS-08: adres degisip parola bos kalirsa saklanan sir yeni adrese
+        // gitmez; acik ldap:// da kabul edilmez. Hicbiri yazilmaz.
+        let blank = |f: &str, name: &str, value: &str| {
+            f.replace(&format!("{name}={value}"), &format!("{name}="))
+        };
+        let moved_ad = form.replace("dc1.example.org", "evil.example.net");
+        let moved_zimbra = form.replace("zimbra.example.org", "evil.example.net");
+        let moved_oidc = form.replace("idp.example.org", "evil.example.net");
+        for bad in [
+            blank(&moved_ad, "ad_service_password", "cok-gizli-ad"),
+            blank(&form, "ad_service_password", "cok-gizli-ad").replace(
+                &format!("ad_ca_pem={ca}"),
+                &format!("ad_ca_pem={ca}%0A{ca}"),
+            ),
+            blank(&moved_zimbra, "zimbra_admin_password", "cok-gizli-zimbra"),
+            blank(&moved_oidc, "oidc_client_secret", "cok-gizli-oidc"),
+            form.replace(
+                "ad_host=dc1.example.org",
+                "ad_host=ldap%3A%2F%2Fdc1.example.org",
+            ),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(form_request("POST", "/config", &bad, Some(&cookie)))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{bad}");
+        }
+        let kept = crate::settings::load(&pool).await.unwrap();
+        assert_eq!(
+            (kept.ad_host.as_str(), kept.zimbra_url.as_str()),
+            ("dc1.example.org", "https://zimbra.example.org")
+        );
+        // Adres ayni kaldikca bos parola "degistirme" demektir; yeni adres parolayla gecer.
+        let unchanged = [
+            "ad_service_password",
+            "zimbra_admin_password",
+            "oidc_client_secret",
+        ]
+        .into_iter()
+        .zip(["cok-gizli-ad", "cok-gizli-zimbra", "cok-gizli-oidc"])
+        .fold(form.clone(), |f, (name, value)| blank(&f, name, value));
+        for ok in [unchanged, moved_ad, form.clone()] {
+            let response = app
+                .clone()
+                .oneshot(form_request("POST", "/config", &ok, Some(&cookie)))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::SEE_OTHER, "{ok}");
+        }
 
         // Yeniden yuklenince degerler gorunur ama sirlar duz metin geri gelmez.
         let response = app

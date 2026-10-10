@@ -774,6 +774,24 @@ Kurallar:
   - Kabul: `bootstrap_account::set_password` parolayla aynı transaction'da `auth_source = 'local'` oturumlarını siler; AD/OIDC oturumları kalır. Değiştiren yerel oturumsa yeni çerezle `/config`'e döner, eski çerez `/login`'e gider
   - Doğrulama (2026-10-10, vaultscan): `scripts/test-all.sh` → backend **285/285** (`bootstrap_account` testi eski yerel oturumun düştüğünü, AD admin oturumunun kaldığını; `full_bootstrap_login_and_config_flow` yeni çerezle devam edip eskisinin `/login`'e gittiğini doğrular), fmt + clippy + audit temiz; worker 131/133, iki kırmızı kapalı Windows AD
 
+
+## Güvenlik denetimi: düşük bulgular (2026-10-10)
+
+> Aynı denetimin (`~/security-audit-skill/opensicil/run-1/`) sekiz düşük bulgusu, rapordaki sırayla. Ortalarda olduğu gibi her kutucuk sandbox'taki yeniden üretimi bir regresyon testine çevirir. "Doğrulama gerekenler" altındaki altı ipucu bu bölümün sonunda ayrı kutucukta ele alınır.
+
+- [x] OS-08: Uç nokta değişince saklı sır yeni adrese gönderilmez; AD adresi yalnızca LDAPS
+  - Kabul: AD adresi ya da CA, Zimbra adresi ya da OIDC issuer değişip o sistemin parolası boş bırakılırsa `/config` kaydı 400 (`err.secret_reenter_on_endpoint_change`) ve hiçbir alan yazılmaz; adres aynı kaldıkça boş parola yine "değiştirme" demektir
+  - Kabul: `ldap://` ya da başka şemalı AD adresi 400 (`err.ad_ldaps_only`); şemasız adres ve `ldaps://` geçer
+  - Not: saklı sırrı silmek yerine yeniden girişi istemek seçildi — silmek, yanlışlıkla değişen adresle girişi sessizce bozardı
+  - Doğrulama (2026-10-10, vaultscan): `scripts/test-all.sh` → backend **285/285**, worker **133/133** (Windows AD testleri dahil), fmt + clippy + audit iki crate'te temiz. `full_bootstrap_login_and_config_flow` beş ret yolunu (AD adresi, AD CA, Zimbra adresi, OIDC issuer, `ldap://`) ve üç geçen yolu sınar; düzeltme çıkarılınca test 303 ile kırmızı
+- [ ] OS-09: Değişiklik seti onayı admin'in gördüğü taslağa bağlanır
+- [ ] OS-10: Geri alınan ayrılış hesap silme onayını sıfırlar
+- [ ] OS-11: `admin` adlı kimlik break-glass girişini kilitleyemez
+- [ ] OS-12: CSV ayrıştırıcı satır sınırını belleği şişirmeden uygular
+- [ ] OS-13: Tek çakışan AD mail'i ya da sAMAccountName gece doldurmasını ve AD değişiklik senkronunu durdurmaz
+- [ ] OS-14: Kaçışlı virgüllü RDN yönetilen OU kapsamını atlatamaz
+- [ ] OS-15: İstek günlüğündeki istemci adresi sahtelenemez
+- [ ] Doğrulama gerekenler: altı ipucu tek tek denenir; gerçek çıkan bulgu kendi kutucuğuna dönüşür
 ---
 
 ## Okuma şeridinde yarıda kalan iş geri alınır (ADR-062'nin okuma şeridi karşılığı)

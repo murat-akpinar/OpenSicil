@@ -262,6 +262,8 @@ config.scan_at_hint = "Kurumun saat diliminde virgülle ayrılmış HH:MM listes
 err.ldap_attribute_shape = "Öznitelik adı harfle başlamalı ve yalnızca harf, rakam ve tire içermeli (örn. extensionAttribute5)."
 err.ad_ca_invalid = "CA sertifikası okunamadı: PEM biçiminde, en az bir geçerli CERTIFICATE bloğu olmalı."
 err.ad_ca_required = "AD adresi girildiğinde CA sertifikası zorunludur; LDAPS sertifika doğrulaması kapatılamaz."
+err.ad_ldaps_only = "AD adresi yalnızca LDAPS olabilir (ldaps:// ya da şemasız adres); şifresiz LDAP servis parolasını açık taşır."
+err.secret_reenter_on_endpoint_change = "Adres ya da sertifika değişince o sistemin parolasını yeniden girin; kayıtlı parola yeni adrese gönderilmez."
 
 # --- operator ana sayfasi ---
 home.new_identity = "Yeni kimlik"
