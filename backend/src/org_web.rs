@@ -630,6 +630,8 @@ struct PendingView {
     summary: String,
     note: String,
     approvable: bool,
+    /// Onay/red formu bu taslagi adlandirir (`change_set::Pending::token`).
+    token: i64,
 }
 
 async fn pending_view(state: &AppState, owner: Owner, id: i64, op: &Operator) -> PendingView {
@@ -648,6 +650,7 @@ async fn pending_view(state: &AppState, owner: Owner, id: i64, op: &Operator) ->
         summary: summary_text(lang, &pending, &now),
         note: pending_note(lang, &pending, approvable),
         approvable,
+        token: pending.token,
     }
 }
 
@@ -1016,7 +1019,7 @@ async fn stage_or_publish(state: &AppState, sub: Submission<'_>) -> Response {
     if impact.exceeds(threshold) {
         return stage(state, sub, impact, info).await;
     }
-    publish(state, sub, impact, Notice::info(info)).await
+    publish(state, sub, impact, Notice::info(info), None).await
 }
 
 async fn stage(state: &AppState, sub: Submission<'_>, impact: Impact, info: String) -> Response {
@@ -1044,11 +1047,13 @@ async fn stage(state: &AppState, sub: Submission<'_>, impact: Impact, info: Stri
 }
 
 // Taslak yayimlanir: model yazilir, bekleyen taslak silinir, isler acilir.
+// `draft` onaydan gelir: yalnizca onaylanan taslak silinir, arada kaydedilen kalir.
 async fn publish(
     state: &AppState,
     sub: Submission<'_>,
     impact: Impact,
     notice: Notice,
+    draft: Option<i64>,
 ) -> Response {
     let (op, owner, id) = (sub.op, sub.owner, sub.id);
     let saved = match owner {
@@ -1065,7 +1070,7 @@ async fn publish(
             Err(response) => *response,
         };
     }
-    if let Err(e) = change_set::clear(&state.pool, owner, id).await {
+    if let Err(e) = change_set::clear(&state.pool, owner, id, draft).await {
         log_error!("web: bekleyen taslak temizlenemedi: {e}");
     }
     let detail = serde_json::json!({
@@ -1309,7 +1314,16 @@ async fn save_department(
 // ADR-026/031: onay taslagi yayimlar, red atar; model onaya kadar degismemistir.
 // Onaylayan baslatandan farkli bir Sistem yoneticisidir, ya da zaman kilidi aciksa
 // N saat sonra baslatanin kendisi de olabilir.
-async fn decide(state: &AppState, op: &Operator, owner: Owner, id: i64, approve: bool) -> Response {
+// OS-09: karar, formdaki belirtecin adlandirdigi taslaga verilir; admin sayfaya
+// bakarken taslak yeniden kaydedildiyse karar reddedilir, yeni taslak gosterilir.
+async fn decide(
+    state: &AppState,
+    op: &Operator,
+    owner: Owner,
+    id: i64,
+    approve: bool,
+    draft: Option<i64>,
+) -> Response {
     if !allowed(op, APPROVE_AUTHORITIES) {
         return forbidden(op.lang);
     }
@@ -1321,8 +1335,11 @@ async fn decide(state: &AppState, op: &Operator, owner: Owner, id: i64, approve:
         }
         Err(e) => return internal("bekleyen taslak okunamadı", e),
     };
+    if draft != Some(pending.token) {
+        return draft_changed(state, op, owner, id).await;
+    }
     if !approve {
-        return reject(state, op, owner, id).await;
+        return reject(state, op, owner, id, pending.token).await;
     }
     // ADR-055: yayimlanan, onay anindaki farktir; denetim satirina da o girer.
     let d = pending.definition;
@@ -1346,13 +1363,21 @@ async fn decide(state: &AppState, op: &Operator, owner: Owner, id: i64, approve:
         sub,
         impact,
         Notice::info(op.lang.t("changeset.approved").into()),
+        Some(pending.token),
     )
     .await
 }
 
-async fn reject(state: &AppState, op: &Operator, owner: Owner, id: i64) -> Response {
-    if let Err(e) = change_set::clear(&state.pool, owner, id).await {
-        return internal("taslak atılamadı", e);
+async fn draft_changed(state: &AppState, op: &Operator, owner: Owner, id: i64) -> Response {
+    let notice = Notice::err(op.lang.t("err.change_set_changed").to_string());
+    render_definition(state, op, owner, id, notice).await
+}
+
+async fn reject(state: &AppState, op: &Operator, owner: Owner, id: i64, token: i64) -> Response {
+    match change_set::clear(&state.pool, owner, id, Some(token)).await {
+        Ok(true) => {}
+        Ok(false) => return draft_changed(state, op, owner, id).await,
+        Err(e) => return internal("taslak atılamadı", e),
     }
     let detail = serde_json::json!({ "action": "rejected", "id": id });
     audit_operator(state, op, event_of(owner), None, detail).await;
@@ -1368,9 +1393,10 @@ async fn decide_key(
     owner: Owner,
     key: &str,
     approve: bool,
+    draft: Option<i64>,
 ) -> Response {
     match resolve_key(state, op, owner, key, false).await {
-        Ok(id) => decide(state, op, owner, id, approve).await,
+        Ok(id) => decide(state, op, owner, id, approve, draft).await,
         Err(response) => *response,
     }
 }
@@ -1379,32 +1405,68 @@ async fn approve_role(
     OperatorSession(op): OperatorSession,
     State(state): State<AppState>,
     Path(key): Path<String>,
+    Form(form): Form<Vec<(String, String)>>,
 ) -> Response {
-    decide_key(&state, &op, Owner::Role, &key, true).await
+    decide_key(
+        &state,
+        &op,
+        Owner::Role,
+        &key,
+        true,
+        Fields(form).opt_i64("draft"),
+    )
+    .await
 }
 
 async fn reject_role(
     OperatorSession(op): OperatorSession,
     State(state): State<AppState>,
     Path(key): Path<String>,
+    Form(form): Form<Vec<(String, String)>>,
 ) -> Response {
-    decide_key(&state, &op, Owner::Role, &key, false).await
+    decide_key(
+        &state,
+        &op,
+        Owner::Role,
+        &key,
+        false,
+        Fields(form).opt_i64("draft"),
+    )
+    .await
 }
 
 async fn approve_department(
     OperatorSession(op): OperatorSession,
     State(state): State<AppState>,
     Path(key): Path<String>,
+    Form(form): Form<Vec<(String, String)>>,
 ) -> Response {
-    decide_key(&state, &op, Owner::Department, &key, true).await
+    decide_key(
+        &state,
+        &op,
+        Owner::Department,
+        &key,
+        true,
+        Fields(form).opt_i64("draft"),
+    )
+    .await
 }
 
 async fn reject_department(
     OperatorSession(op): OperatorSession,
     State(state): State<AppState>,
     Path(key): Path<String>,
+    Form(form): Form<Vec<(String, String)>>,
 ) -> Response {
-    decide_key(&state, &op, Owner::Department, &key, false).await
+    decide_key(
+        &state,
+        &op,
+        Owner::Department,
+        &key,
+        false,
+        Fields(form).opt_i64("draft"),
+    )
+    .await
 }
 
 async fn render_targets(
@@ -2170,6 +2232,15 @@ mod tests {
         crate::test_support::drop_temp_db(&admin_pool, &db_name).await;
     }
 
+    /// Sayfadaki onay formunun taslak belirteci.
+    fn draft_token(page: &str) -> String {
+        let at = page
+            .find(r#"name="draft" value=""#)
+            .expect("taslak belirteci yok")
+            + 20;
+        page[at..].split('"').next().unwrap().to_string()
+    }
+
     // ADR-031: esigi asan duzenleme MODELE YAZILMAZ, taslak bekler; ADR-026: baslatan
     // onaylayamaz, kilit kapaliyken baska Sistem yoneticisi onaylar; red modeli degistirmez.
     #[tokio::test]
@@ -2241,7 +2312,7 @@ mod tests {
         assert!(page.contains("OpenSicil-Admins"), "{page}");
 
         // ADR-132: onay kapisi yalnizca yetki sorar; `role_admin` reddedilir
-        let r = send(format!("{url}/approve"), String::new(), role_admin).await;
+        let r = send(format!("{url}/approve"), String::new(), role_admin.clone()).await;
         assert_eq!(r.status(), StatusCode::FORBIDDEN);
         let published: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM role_entitlements WHERE role_id = $1")
@@ -2267,19 +2338,60 @@ mod tests {
         .await;
         assert!(page.contains("2 kimliği etkileyecek"), "{page}");
         assert!(page.contains("1 kimlikti, onay anında 2"), "{page}");
+        let seen = draft_token(&page);
+
+        // OS-09: admin A taslagina bakarken role_admin B'yi kaydeder; A'nin
+        // belirteciyle gelen onay B'yi yayimlamaz, ekran yeni taslagi gosterir.
+        let body_b = format!(
+            "name=Test+Rol%C3%BC&title=Uzman&entitlement={}&pa.{}=true",
+            catalog.gg_sistem_uzmanlari, catalog.ad
+        );
+        body_string(send(url.clone(), body_b, role_admin.clone()).await).await;
+        for stale in [format!("draft={seen}"), String::new()] {
+            let r = send(format!("{url}/approve"), stale, author.clone()).await;
+            let page = body_string(r).await;
+            assert!(page.contains("yeniden kaydedildi"), "{page}");
+        }
+        let published: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM role_entitlements WHERE role_id = $1")
+                .bind(role)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(published, 0, "OS-09: görülmeyen taslak yayımlanmaz");
 
         // ADR-132: taslagi baslatan Sistem yoneticisi kendi onayini verir; model
-        // yazilir, taslak duser, isler acilir.
+        // yazilir, taslak duser, isler acilir. Onaylanan, gordugu B taslagidir.
+        let page = body_string(
+            app.clone()
+                .oneshot(request("GET", &url, "", &author))
+                .await
+                .unwrap(),
+        )
+        .await;
+        let seen = draft_token(&page);
         let page = body_string(
             follow(
                 &app,
-                send(format!("{url}/approve"), String::new(), author.clone()).await,
+                send(
+                    format!("{url}/approve"),
+                    format!("draft={seen}"),
+                    author.clone(),
+                )
+                .await,
                 &author,
             )
             .await,
         )
         .await;
         assert!(page.contains("onaylandı ve yayımlandı"), "{page}");
+        let item: i64 =
+            sqlx::query_scalar("SELECT catalog_item_id FROM role_entitlements WHERE role_id = $1")
+                .bind(role)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(item, catalog.gg_sistem_uzmanlari);
         let (items, draft): (i64, i64) = sqlx::query_as(
             "SELECT (SELECT COUNT(*) FROM role_entitlements WHERE role_id = $1), \
              (SELECT COUNT(*) FROM roles WHERE id = $1 AND pending_definition IS NOT NULL)",
@@ -2297,8 +2409,18 @@ mod tests {
 
         // Red: taslak atilir, model degismez.
         let body = format!("name=Test+Rol%C3%BC&title=Uzman&pa.{}=true", catalog.ad);
-        body_string(send(url.clone(), body, second.clone()).await).await;
+        let page =
+            body_string(follow(&app, send(url.clone(), body, second.clone()).await, &second).await)
+                .await;
+        // OS-09: belirtecsiz red taslagi atmaz
         let r = send(format!("{url}/reject"), String::new(), second.clone()).await;
+        assert!(body_string(r).await.contains("yeniden kaydedildi"));
+        let r = send(
+            format!("{url}/reject"),
+            format!("draft={}", draft_token(&page)),
+            second.clone(),
+        )
+        .await;
         let page = body_string(follow(&app, r, &second).await).await;
         assert!(page.contains("reddedildi"), "{page}");
         let (items, draft): (i64, i64) = sqlx::query_as(

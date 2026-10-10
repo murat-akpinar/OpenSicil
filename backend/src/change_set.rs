@@ -635,6 +635,16 @@ pub struct Pending {
     pub definition: StagedDefinition,
     pub by_username: String,
     pub age_seconds: i64,
+    /// Taslagin belirteci: onay/red formu bunu geri yollar; arada taslak yeniden
+    /// kaydedildiyse karar admin'in gormedigi taslaga gitmez.
+    pub token: i64,
+}
+
+// Mikrosaniye cozunurluklu `pending_at`: her yeniden kayit yeni deger verir.
+macro_rules! draft_token {
+    () => {
+        "(EXTRACT(EPOCH FROM pending_at) * 1000000)::bigint"
+    };
 }
 
 fn stage_sql(owner: Owner) -> &'static str {
@@ -652,29 +662,38 @@ fn stage_sql(owner: Owner) -> &'static str {
 
 fn pending_sql(owner: Owner) -> &'static str {
     match owner {
-        Owner::Role => {
-            "SELECT pending_definition::text, \
-             COALESCE(pending_by_username, ''), EXTRACT(EPOCH FROM now() - pending_at)::bigint \
-             FROM roles WHERE id = $1 AND pending_definition IS NOT NULL"
-        }
-        Owner::Department => {
-            "SELECT pending_definition::text, \
-             COALESCE(pending_by_username, ''), EXTRACT(EPOCH FROM now() - pending_at)::bigint \
-             FROM departments WHERE id = $1 AND pending_definition IS NOT NULL"
-        }
+        Owner::Role => concat!(
+            "SELECT pending_definition::text, COALESCE(pending_by_username, ''), ",
+            "EXTRACT(EPOCH FROM now() - pending_at)::bigint, ",
+            draft_token!(),
+            " FROM roles WHERE id = $1 AND pending_definition IS NOT NULL"
+        ),
+        Owner::Department => concat!(
+            "SELECT pending_definition::text, COALESCE(pending_by_username, ''), ",
+            "EXTRACT(EPOCH FROM now() - pending_at)::bigint, ",
+            draft_token!(),
+            " FROM departments WHERE id = $1 AND pending_definition IS NOT NULL"
+        ),
     }
 }
 
+// `$2` NULL: hangi taslak olursa silinir (dogrudan yayim); dolu: yalnizca o taslak.
 fn clear_sql(owner: Owner) -> &'static str {
     match owner {
-        Owner::Role => {
-            "UPDATE roles SET pending_definition = NULL, pending_by = NULL, \
-             pending_by_username = NULL, pending_at = NULL WHERE id = $1"
-        }
-        Owner::Department => {
-            "UPDATE departments SET pending_definition = NULL, pending_by = NULL, \
-             pending_by_username = NULL, pending_at = NULL WHERE id = $1"
-        }
+        Owner::Role => concat!(
+            "UPDATE roles SET pending_definition = NULL, pending_by = NULL, ",
+            "pending_by_username = NULL, pending_at = NULL ",
+            "WHERE id = $1 AND pending_definition IS NOT NULL AND ($2::bigint IS NULL OR ",
+            draft_token!(),
+            " = $2)"
+        ),
+        Owner::Department => concat!(
+            "UPDATE departments SET pending_definition = NULL, pending_by = NULL, ",
+            "pending_by_username = NULL, pending_at = NULL ",
+            "WHERE id = $1 AND pending_definition IS NOT NULL AND ($2::bigint IS NULL OR ",
+            draft_token!(),
+            " = $2)"
+        ),
     }
 }
 
@@ -700,11 +719,11 @@ pub async fn stage(
 }
 
 pub async fn pending(pool: &PgPool, owner: Owner, id: i64) -> Result<Option<Pending>, sqlx::Error> {
-    let row: Option<(String, String, i64)> = sqlx::query_as(pending_sql(owner))
+    let row: Option<(String, String, i64, i64)> = sqlx::query_as(pending_sql(owner))
         .bind(id)
         .fetch_optional(pool)
         .await?;
-    let Some((json, by_username, age_seconds)) = row else {
+    let Some((json, by_username, age_seconds, token)) = row else {
         return Ok(None);
     };
     let definition = serde_json::from_str(&json).map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
@@ -712,15 +731,23 @@ pub async fn pending(pool: &PgPool, owner: Owner, id: i64) -> Result<Option<Pend
         definition,
         by_username,
         age_seconds,
+        token,
     }))
 }
 
-pub async fn clear(pool: &PgPool, owner: Owner, id: i64) -> Result<(), sqlx::Error> {
+/// Taslagi siler; `token` verilirse yalnizca o taslagi. Silindiyse `true`.
+pub async fn clear(
+    pool: &PgPool,
+    owner: Owner,
+    id: i64,
+    token: Option<i64>,
+) -> Result<bool, sqlx::Error> {
     sqlx::query(clear_sql(owner))
         .bind(id)
+        .bind(token)
         .execute(pool)
         .await
-        .map(|_| ())
+        .map(|r| r.rows_affected() > 0)
 }
 
 // ---- yetki dokumu (ADR-134 madde 6) ----
@@ -937,7 +964,21 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(by, "sub-a");
-        clear(&pool, Owner::Role, role).await.unwrap();
+        // OS-09: baska belirtecle silinmez; yeniden kayit yeni belirtec verir.
+        assert!(!clear(&pool, Owner::Role, role, Some(p.token + 1))
+            .await
+            .unwrap());
+        stage(&pool, Owner::Role, role, &staged, ("sub-a", "ayse"))
+            .await
+            .unwrap();
+        let again = pending(&pool, Owner::Role, role).await.unwrap().unwrap();
+        assert_ne!(again.token, p.token);
+        assert!(!clear(&pool, Owner::Role, role, Some(p.token))
+            .await
+            .unwrap());
+        assert!(clear(&pool, Owner::Role, role, Some(again.token))
+            .await
+            .unwrap());
         assert!(pending(&pool, Owner::Role, role).await.unwrap().is_none());
 
         drop(pool);

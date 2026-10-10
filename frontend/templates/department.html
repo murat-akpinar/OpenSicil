@@ -14,9 +14,11 @@
   {% if can_edit %}
   <div class="mt-2 flex gap-2">
     <form method="post" action="/departments/{{ dept.def.key() }}/approve">
+      <input type="hidden" name="draft" value="{{ pending.token }}">
       <button class="btn" type="submit"{% if !pending.approvable %} disabled{% endif %}>{{ lang.t("changeset.approve") }}</button>
     </form>
     <form method="post" action="/departments/{{ dept.def.key() }}/reject">
+      <input type="hidden" name="draft" value="{{ pending.token }}">
       <button class="btn" type="submit">{{ lang.t("changeset.reject") }}</button>
     </form>
   </div>

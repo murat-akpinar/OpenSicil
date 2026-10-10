@@ -78,6 +78,7 @@
 - Hedef sistemin gün ayarları 0–36500 ile sınırlı, worker zamanlayıcısı taşmaz
 - Break-glass parolası değişince eski yerel oturumlar düşer
 - Uç nokta değişince saklı sır yeni adrese gitmez, AD adresi yalnızca LDAPS
+- Değişiklik seti onayı admin'in gördüğü taslağa bağlı
 
 ### Geri alınanlar
 
